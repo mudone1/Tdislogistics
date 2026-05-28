@@ -113,6 +113,178 @@
     font-size: 12px; font-weight: 700; color: var(--navy-dark);
   }
   .agent-name { color: white; font-size: 13px; font-weight: 500; }
+  .logout-btn {
+    padding: 6px 12px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: white;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .logout-btn:hover { background: rgba(255,255,255,0.2); }
+
+  /* ─── LOGIN PAGE ─── */
+  .login-overlay {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(135deg, var(--navy-dark) 0%, var(--navy-light) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .login-overlay.hidden { display: none; }
+  .login-container {
+    background: white;
+    border-radius: var(--radius);
+    padding: 40px;
+    width: 380px;
+    max-width: 95vw;
+    box-shadow: var(--shadow-lg);
+  }
+  .login-header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .login-logo {
+    font-family: 'Syne', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--navy-dark);
+    margin-bottom: 8px;
+  }
+  .login-subtitle {
+    font-size: 13px;
+    color: var(--gray-400);
+  }
+  .login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .login-form input {
+    padding: 12px 14px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+  }
+  .login-form input:focus {
+    outline: none;
+    border-color: var(--navy);
+    background: white;
+  }
+  .login-btn {
+    padding: 13px;
+    background: var(--navy);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.2s;
+    margin-top: 8px;
+  }
+  .login-btn:hover { background: var(--navy-light); }
+  .login-error {
+    background: var(--red-light);
+    color: var(--red);
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 600;
+    display: none;
+  }
+  .login-error.show { display: block; }
+  .demo-link {
+    text-align: center;
+    margin-top: 20px;
+    font-size: 12px;
+    color: var(--gray-400);
+  }
+  .demo-link button {
+    background: none;
+    border: none;
+    color: var(--navy);
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  /* ─── ADMIN DASHBOARD ─── */
+  .admin-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: white;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: 20px;
+    text-align: center;
+  }
+  .stat-value {
+    font-family: 'Syne', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--navy-dark);
+    margin-bottom: 6px;
+  }
+  .stat-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--gray-400);
+  }
+  .permission-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .permission-checkbox:hover { background: var(--gray-100); }
+  .permission-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+  }
+  .permission-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--gray-600);
+  }
+  .user-status-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .user-status-badge.active { background: var(--green-light); color: var(--green); }
+  .user-status-badge.inactive { background: var(--gray-100); color: var(--gray-400); }
+  .delete-user-btn {
+    padding: 6px 12px;
+    background: var(--red-light);
+    color: var(--red);
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .delete-user-btn:hover { background: var(--red); color: white; }
   .live-dot {
     width: 8px; height: 8px;
     background: #2ecc71;
@@ -121,6 +293,10 @@
   }
   @keyframes pulse {
     0%,100% { opacity: 1; } 50% { opacity: 0.4; }
+  }
+  @keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
   }
   .clock {
     color: rgba(255,255,255,0.6);
@@ -197,6 +373,10 @@
     box-shadow: var(--shadow-sm);
     border: 1px solid var(--gray-200);
     overflow: hidden;
+  }
+  #clientSummaryBox {
+    max-height: 520px;
+    overflow-y: auto;
   }
   .card-header {
     padding: 16px 20px;
@@ -808,6 +988,70 @@
     text-decoration: underline;
   }
 
+  /* ─── UPDATE BOOKINGS SECTION ─── */
+  .booking-update-grid {
+    display: grid;
+    grid-template-columns: 1fr 400px;
+    gap: 24px;
+    align-items: start;
+  }
+
+  .client-summary-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--gray-100);
+    align-items: center;
+  }
+  .client-summary-item:last-child { border-bottom: none; }
+  .client-summary-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--gray-400);
+  }
+  .client-summary-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--navy-dark);
+  }
+  .total-spent-highlight {
+    font-size: 18px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    color: var(--gold-light);
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 2px solid var(--gold-light);
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .status-badge.pending {
+    background: var(--amber-light);
+    color: var(--amber);
+  }
+  .status-badge.paid {
+    background: var(--green-light);
+    color: var(--green);
+  }
+  .status-badge.partial {
+    background: #e0e7ff;
+    color: #4f46e5;
+  }
+  .status-badge.cancelled {
+    background: var(--red-light);
+    color: var(--red);
+  }
+
   /* ─── MODAL ─── */
   .modal-overlay {
     position: fixed; inset: 0;
@@ -902,8 +1146,56 @@
     .nav-tabs { padding: 0 16px; overflow-x: auto; }
   }
 </style>
+<!-- Firebase SDK -->
+
 </head>
 <body>
+
+<!-- LOGIN OVERLAY -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-container">
+    <div class="login-header">
+      <div class="login-logo">🛫 TDIS</div>
+      <div class="login-subtitle">Logistics Agent Dashboard</div>
+    </div>
+    <div class="login-error" id="loginError"></div>
+    
+    <!-- Login Form -->
+    <form class="login-form" id="loginForm" style="display:block">
+      <input type="email" id="loginEmail" placeholder="Email" required autocomplete="off" />
+      <input type="password" id="loginPassword" placeholder="Password" required autocomplete="off" />
+      <button type="submit" class="login-btn">Login →</button>
+      <p style="text-align:center;margin-top:15px;font-size:14px">
+        Don't have an account? <a href="#" onclick="toggleSignup(event)" style="color:var(--gold);cursor:pointer">Sign up</a>
+      </p>
+    </form>
+    
+    <!-- Signup Form -->
+    <form class="login-form" id="signupForm" style="display:none">
+      <input type="text" id="signupName" placeholder="Full Name" required autocomplete="off" />
+      <input type="email" id="signupEmail" placeholder="Email" required autocomplete="off" />
+      <input type="password" id="signupPassword" placeholder="Password (min 6 chars)" required autocomplete="off" />
+      <select id="signupRole" style="padding:12px;border:1px solid var(--gray-200);border-radius:8px;font-size:14px">
+        <option value="staff">Staff Agent</option>
+        <option value="admin">Administrator</option>
+      </select>
+      <button type="submit" class="login-btn">Create Account →</button>
+      <p style="text-align:center;margin-top:15px;font-size:14px">
+        Already have an account? <a href="#" onclick="toggleSignup(event)" style="color:var(--gold);cursor:pointer">Login</a>
+      </p>
+    </form>
+    
+    <div id="loadingSpinner" style="display:none;text-align:center;margin-top:20px">
+      <div style="border:3px solid var(--gold-pale);border-top:3px solid var(--gold);border-radius:50%;width:30px;height:30px;animation:spin 1s linear infinite;margin:0 auto"></div>
+    </div>
+    
+    <div class="demo-link" style="margin-top:20px;border-top:1px solid var(--gray-200);padding-top:15px">
+      <p style="margin-bottom:10px;font-size:12px">Test Accounts (will be deprecated):</p>
+      <button type="button" onclick="demoLogin('admin')" style="font-size:12px">Admin Demo</button> · 
+      <button type="button" onclick="demoLogin('agent1')" style="font-size:12px">Agent Demo</button>
+    </div>
+  </div>
+</div>
 
 <!-- HEADER -->
 <header>
@@ -917,9 +1209,13 @@
     <div class="live-dot"></div>
     <span class="clock" id="clock">--:--:--</span>
     <div class="agent-pill">
-      <div class="agent-avatar">AG</div>
-      <span class="agent-name">Agent On Duty</span>
+      <div class="agent-avatar" id="userAvatar">AG</div>
+      <div>
+        <div class="agent-name" id="userName">Agent On Duty</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:0.5px" id="userRole">Staff</div>
+      </div>
     </div>
+    <button class="logout-btn" onclick="handleLogout()">Logout</button>
   </div>
 </header>
 
@@ -931,8 +1227,14 @@
   <button class="tab-btn" onclick="showTab('balances', this)">
     <span class="tab-icon">💳</span> Account Balances
   </button>
+  <button class="tab-btn" onclick="showTab('updateBookings', this)">
+    <span class="tab-icon">📝</span> Update Bookings
+  </button>
   <button class="tab-btn" onclick="showTab('clients', this)">
     <span class="tab-icon">👤</span> Client Database
+  </button>
+  <button class="tab-btn" id="adminTabBtn" style="display:none" onclick="showTab('admin', this)">
+    <span class="tab-icon">⚙️</span> Admin Dashboard
   </button>
 </div>
 
@@ -960,6 +1262,110 @@
     <div class="balances-grid" id="balancesGrid"></div>
   </div>
 
+  <!-- ══ UPDATE BOOKINGS SECTION ══ -->
+  <div id="updateBookings" class="section">
+    <div class="section-title">Update Client Bookings & Payment Status</div>
+    <div class="booking-update-grid">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Record Booking Update</span>
+        </div>
+        <div class="card-body">
+          <div class="form-group full" style="margin-bottom:14px;position:relative">
+            <label>Select Client *</label>
+            <input type="text" id="updateClientName" placeholder="Search and select client..." oninput="searchUpdateClient(this.value)" autocomplete="off" />
+            <div class="suggestion-box" id="updateClientSuggestions"></div>
+          </div>
+          
+          <div class="form-row">
+            <div class="form-group">
+              <label>Airline *</label>
+              <select id="updateAirline" required>
+                <option value="">— Select Airline —</option>
+                <option>Air Peace</option>
+                <option>Aero Contractors</option>
+                <option>NG Eagle</option>
+                <option>Ibom Air</option>
+                <option>Arik Air</option>
+                <option>XE Jet</option>
+                <option>Rano Air</option>
+                <option>United Nigeria</option>
+                <option>Enugu Air</option>
+                <option>ValueJet</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Booking Amount (₦) *</label>
+              <input type="number" id="updateAmount" placeholder="e.g. 45000" min="0" />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Payment Status *</label>
+              <select id="updatePaymentStatus" required onchange="onPaymentStatusChange(this.value)">
+                <option value="">— Select Status —</option>
+                <option value="Pending">⏳ Pending Payment</option>
+                <option value="Paid">✓ Paid</option>
+                <option value="Partial">◐ Partially Paid</option>
+                <option value="Cancelled">✕ Cancelled</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Reference/PNR (Optional)</label>
+              <input type="text" id="updatePnr" placeholder="e.g. ABC1234 or Invoice #" />
+            </div>
+          </div>
+
+          <div class="form-row" id="amountPaidRow" style="display:none">
+            <div class="form-group full">
+              <label>Amount Paid by Client (₦)</label>
+              <input type="number" id="updateAmountPaid" placeholder="How much has the client paid so far?" min="0" />
+              <div style="font-size:11px;color:var(--gray-400);margin-top:4px">Leave 0 if client hasn't paid anything yet</div>
+            </div>
+          </div>
+
+          <button class="search-btn" onclick="saveBookingUpdate()">💾 Save Booking Update</button>
+        </div>
+      </div>
+
+      <!-- Booking Summary Card -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Client Summary</span>
+        </div>
+        <div class="card-body" id="clientSummaryBox">
+          <div style="text-align:center;color:var(--gray-400);padding:20px">
+            <div style="font-size:13px">Select a client to view summary</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Updates Table -->
+    <div class="card" style="margin-top:24px">
+      <div class="card-header">
+        <span class="card-title">Recent Booking Updates</span>
+      </div>
+      <div class="clients-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Client Name</th>
+              <th>Airline</th>
+              <th>Amount (₦)</th>
+              <th>Payment Status</th>
+              <th>Reference</th>
+              <th>Updated</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="bookingUpdatesTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- ══ CLIENTS SECTION ══ -->
   <div id="clients" class="section">
     <div class="clients-toolbar">
@@ -977,12 +1383,104 @@
             <th>Phone</th>
             <th>Email</th>
             <th>Preference</th>
+            <th>Total Billed (₦)</th>
+            <th>Client Owes Us (₦)</th>
             <th>Bookings</th>
             <th>Action</th>
           </tr>
         </thead>
         <tbody id="clientsTableBody"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- ══ ADMIN DASHBOARD ══ -->
+  <div id="admin" class="section" style="display:none">
+    <div class="section-title">Admin Dashboard — User & Permission Management</div>
+    
+    <!-- Stats -->
+    <div class="admin-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="statTotalUsers">0</div>
+        <div class="stat-label">Total Users</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statActiveUsers">0</div>
+        <div class="stat-label">Active Users</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statTotalClients">0</div>
+        <div class="stat-label">Total Clients</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statTotalBalance">₦0</div>
+        <div class="stat-label">Total Balance</div>
+      </div>
+    </div>
+
+    <!-- Create New User -->
+    <div class="card" style="margin-bottom:24px">
+      <div class="card-header">
+        <span class="card-title">Create New User</span>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Username</label>
+            <input type="text" id="newUserUsername" placeholder="e.g. agent_mark" />
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="newUserPassword" placeholder="Min 6 characters" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Full Name</label>
+            <input type="text" id="newUserName" placeholder="e.g. Mark Johnson" />
+          </div>
+          <div class="form-group">
+            <label>Role</label>
+            <select id="newUserRole">
+              <option value="staff">Staff Agent</option>
+              <option value="admin">Administrator</option>
+            </select>
+          </div>
+        </div>
+        <button class="search-btn" onclick="createNewUser()">➕ Create User</button>
+      </div>
+    </div>
+
+    <!-- Manage Users -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Manage Users & Permissions</span>
+      </div>
+      <div class="card-body">
+        <div id="usersManagementList"></div>
+      </div>
+    </div>
+
+    <!-- System Logs -->
+    <div class="card" style="margin-top:24px">
+      <div class="card-header">
+        <span class="card-title">System Logs & Activity</span>
+      </div>
+      <div class="clients-table" style="margin-top:16px">
+        <table>
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>User</th>
+              <th>Action</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody id="systemLogsTableBody">
+            <tr><td colspan="4" style="text-align:center;padding:20px;color:var(--gray-400)">No logs yet</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 
@@ -1069,7 +1567,447 @@
 <!-- Toast Area -->
 <div class="toast-area" id="toastArea"></div>
 
-<script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+// ─── FIREBASE CONFIGURATION ───
+// ⚠️ IMPORTANT: Replace with your own Firebase project credentials from Firebase Console
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyCpFZoeuWlI4GGqfZ3a7mPasP8SmpnFqMY",
+  authDomain: "tdis-logistics.firebaseapp.com",
+  projectId: "tdis-logistics",
+  storageBucket: "tdis-logistics.firebasestorage.app",
+  messagingSenderId: "717145698841",
+  appId: "1:717145698841:web:ae061e2bf1e2a43b593088",
+  measurementId: "G-4GEFJS92T8"
+};
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// Helper wrappers to keep existing code working with modular SDK
+const authHelper = {
+  signInWithEmailAndPassword: (email, password) => signInWithEmailAndPassword(auth, email, password),
+  createUserWithEmailAndPassword: (email, password) => createUserWithEmailAndPassword(auth, email, password),
+  signOut: () => signOut(auth),
+  onAuthStateChanged: (cb) => onAuthStateChanged(auth, cb)
+};
+const dbHelper = {
+  collection: (col) => ({
+    doc: (id) => ({
+      get: () => getDoc(doc(db, col, id)),
+      set: (data) => setDoc(doc(db, col, id), data)
+    })
+  })
+};
+
+console.log("Firebase connected");
+
+// ─── FIRESTORE SYNC HELPERS ───
+// Save a collection (array) to a single Firestore document
+async function fsSave(colName, data) {
+  try {
+    await setDoc(doc(db, 'tdis_data', colName), { data: JSON.stringify(data) });
+  } catch(e) { console.warn('Firestore save failed:', e); }
+}
+
+// Load a collection from Firestore, fallback to localStorage
+async function fsLoad(colName, localKey, fallback) {
+  try {
+    const snap = await getDoc(doc(db, 'tdis_data', colName));
+    if (snap.exists()) {
+      const data = JSON.parse(snap.data().data);
+      localStorage.setItem(localKey, JSON.stringify(data));
+      return data;
+    }
+  } catch(e) { console.warn('Firestore load failed, using localStorage:', e); }
+  return JSON.parse(localStorage.getItem(localKey) || 'null') || fallback;
+}
+
+// Listen for real-time changes from other tabs/users
+function fsListen(colName, callback) {
+  return onSnapshot(doc(db, 'tdis_data', colName), (snap) => {
+    if (snap.exists()) {
+      try {
+        const data = JSON.parse(snap.data().data);
+        callback(data);
+      } catch(e) {}
+    }
+  }, (e) => console.warn('Firestore listener error:', e));
+}
+
+// ─── USER AUTHENTICATION & SESSION ───
+let currentUser = null;
+let allUsers = JSON.parse(localStorage.getItem('tdis_users') || 'null') || [
+  { id: 1, username: 'admin', password: 'admin123', name: 'Admin User', role: 'admin', permissions: ['view_all', 'manage_users', 'manage_balances', 'view_analytics', 'edit_clients', 'delete_bookings'], status: 'active', createdAt: new Date().toISOString() },
+  { id: 2, username: 'agent1', password: 'agent123', name: 'Agent One', role: 'staff', permissions: ['view_balances', 'update_bookings', 'manage_clients'], status: 'active', createdAt: new Date().toISOString() },
+  { id: 3, username: 'agent2', password: 'agent123', name: 'Agent Two', role: 'staff', permissions: ['view_balances', 'update_bookings', 'manage_clients'], status: 'active', createdAt: new Date().toISOString() },
+];
+
+let systemLogs = JSON.parse(localStorage.getItem('tdis_systemLogs') || '[]') || [];
+
+// ─── INITIALIZE SESSION ───
+function initializeSession() {
+  // LOGIN DISABLED FOR UI DEVELOPMENT — auto-login as admin
+  currentUser = {
+    uid: 'dev',
+    email: 'admin@tdis.com',
+    name: 'Admin User',
+    role: 'admin',
+    permissions: ['view_all','manage_users','manage_balances','view_analytics',
+                  'edit_clients','delete_bookings','view_balances','update_bookings',
+                  'manage_clients','view_clients']
+  };
+  document.getElementById('loginOverlay').classList.add('hidden');
+  updateUIForUser();
+  setupRealtimeSync();
+}
+
+// ─── LOGIN SYSTEM ───
+const LOCAL_CREDENTIALS = [
+  { email: 'admin@tdis.com', password: 'admin123', name: 'Admin User', role: 'admin',
+    permissions: ['view_all','manage_users','manage_balances','view_analytics','edit_clients',
+                  'delete_bookings','view_balances','update_bookings','manage_clients','view_clients'] },
+  { email: 'agent@tdis.com', password: 'agent123', name: 'Agent One', role: 'staff',
+    permissions: ['view_balances','update_bookings','manage_clients','view_clients'] },
+];
+
+document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('loginEmail').value.trim().toLowerCase();
+  const password = document.getElementById('loginPassword').value.trim();
+
+  showLoadingSpinner(true);
+
+  // Check local credentials first
+  const localUser = LOCAL_CREDENTIALS.find(u => u.email === email && u.password === password);
+  if (localUser) {
+    currentUser = { uid: email, email: localUser.email, name: localUser.name, role: localUser.role, permissions: localUser.permissions };
+    sessionStorage.setItem('tdis_currentUser', JSON.stringify(currentUser));
+    showLoadingSpinner(false);
+    document.getElementById('loginOverlay').classList.add('hidden');
+    updateUIForUser();
+    setupRealtimeSync();
+    showToast('\u2713 Welcome, ' + currentUser.name + '!', 'success');
+    return;
+  }
+
+  // Fallback: try Firebase Auth
+  try {
+    await authHelper.signInWithEmailAndPassword(email, password);
+    showLoadingSpinner(false);
+  } catch (error) {
+    showLoadingSpinner(false);
+    showLoginError('Invalid email or password. Use admin@tdis.com / admin123');
+  }
+});
+
+document.getElementById('signupForm')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = document.getElementById('signupName').value.trim();
+  const email = document.getElementById('signupEmail').value.trim();
+  const password = document.getElementById('signupPassword').value.trim();
+  const role = document.getElementById('signupRole').value;
+  
+  if (password.length < 6) {
+    showLoginError('Password must be at least 6 characters');
+    return;
+  }
+  
+  showLoadingSpinner(true);
+  try {
+    const result = await authHelper.createUserWithEmailAndPassword(email, password);
+    await dbHelper.collection('users').doc(result.user.uid).set({
+      name: name,
+      email: email,
+      role: role,
+      permissions: role === 'admin' ? 
+        ['view_all', 'manage_users', 'manage_balances', 'view_analytics', 'edit_clients', 'delete_bookings'] :
+        ['view_balances', 'update_bookings', 'manage_clients'],
+      status: 'active',
+      createdAt: new Date().toISOString()
+    });
+    showLoadingSpinner(false);
+    showToast('✓ Account created! Logging in...', 'success');
+    document.getElementById('signupForm').reset();
+    toggleSignup({ preventDefault: () => {} });
+  } catch (error) {
+    showLoadingSpinner(false);
+    showLoginError(error.message);
+  }
+});
+
+function onPaymentStatusChange(val) {
+  const row = document.getElementById('amountPaidRow');
+  const input = document.getElementById('updateAmountPaid');
+  if (val === 'Paid' || val === 'Cancelled' || val === '') {
+    row.style.display = 'none';
+    input.value = '';
+  } else {
+    // Pending or Partial — show amount paid field
+    row.style.display = 'block';
+  }
+}
+
+function toggleSignup(e) {
+  e.preventDefault();
+  const loginForm = document.getElementById('loginForm');
+  const signupForm = document.getElementById('signupForm');
+  loginForm.style.display = loginForm.style.display === 'none' ? 'block' : 'none';
+  signupForm.style.display = signupForm.style.display === 'none' ? 'block' : 'none';
+  document.getElementById('loginError').textContent = '';
+}
+
+function showLoadingSpinner(show) {
+  document.getElementById('loadingSpinner').style.display = show ? 'block' : 'none';
+}
+
+function showLoginError(msg) {
+  const errorEl = document.getElementById('loginError');
+  errorEl.textContent = msg;
+  errorEl.classList.add('show');
+  setTimeout(() => errorEl.classList.remove('show'), 3500);
+}
+
+function showLoginOverlay() {
+  document.getElementById('loginOverlay').classList.remove('hidden');
+  document.getElementById('loginForm').reset();
+  document.getElementById('signupForm').reset();
+  document.getElementById('loginForm').style.display = 'block';
+  document.getElementById('signupForm').style.display = 'none';
+}
+
+function demoLogin(userType) {
+  const demoEmail = userType === 'admin' ? 'admin@tdis.com' : 'agent@tdis.com';
+  const demoPassword = 'demo123456';
+  document.getElementById('loginEmail').value = demoEmail;
+  document.getElementById('loginPassword').value = demoPassword;
+  document.getElementById('loginForm').dispatchEvent(new Event('submit'));
+}
+
+function handleLogout() {
+  if (confirm('Are you sure you want to logout?')) {
+    logActivity('LOGOUT', currentUser.name + ' logged out');
+    currentUser = null;
+    sessionStorage.removeItem('tdis_currentUser');
+    showLoginOverlay();
+    showToast('✓ Logged out successfully', 'success');
+  }
+}
+
+// ─── UPDATE UI FOR CURRENT USER ─── 
+function updateUIForUser() {
+  if (!currentUser) return;
+  
+  const initials = currentUser.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+  document.getElementById('userAvatar').textContent = initials;
+  document.getElementById('userName').textContent = currentUser.name;
+  document.getElementById('userRole').textContent = currentUser.role === 'admin' ? 'Administrator' : 'Staff Agent';
+  
+  // Show admin tab if user is admin
+  document.getElementById('adminTabBtn').style.display = currentUser.role === 'admin' ? 'block' : 'none';
+}
+
+function hasPermission(permission) {
+  if (!currentUser) return false;
+  if (currentUser.role === 'admin') return true; // Admins have all permissions
+  return currentUser.permissions && currentUser.permissions.includes(permission);
+}
+
+// ─── REAL-TIME SYNC ───
+function setupRealtimeSync() {
+  // Listen for storage changes from other tabs/windows
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'tdis_balances') {
+      balances = JSON.parse(e.newValue || '[]');
+      if (document.querySelector('.section.active').id === 'balances') renderBalances();
+    }
+    if (e.key === 'tdis_clients') {
+      clients = JSON.parse(e.newValue || '[]');
+      if (document.querySelector('.section.active').id === 'clients') renderClients();
+    }
+    if (e.key === 'tdis_bookingUpdates') {
+      bookingUpdates = JSON.parse(e.newValue || '[]');
+      if (document.querySelector('.section.active').id === 'updateBookings') renderBookingUpdates();
+    }
+    if (e.key === 'tdis_users') {
+      allUsers = JSON.parse(e.newValue || '[]');
+      if (currentUser.role === 'admin' && document.querySelector('.section.active').id === 'admin') renderAdminDashboard();
+    }
+  });
+  
+  // Real-time sync handled by Firestore listeners in loadAllData()
+}
+
+// ─── ADMIN FUNCTIONS ───
+function renderAdminDashboard() {
+  if (currentUser.role !== 'admin') return;
+  
+  // Update stats
+  const totalBalance = balances.reduce((s, b) => s + b.balance, 0);
+  document.getElementById('statTotalUsers').textContent = allUsers.length;
+  document.getElementById('statActiveUsers').textContent = allUsers.filter(u => u.status === 'active').length;
+  document.getElementById('statTotalClients').textContent = clients.length;
+  document.getElementById('statTotalBalance').textContent = '₦' + totalBalance.toLocaleString('en-NG');
+  
+  // Render users management
+  const listEl = document.getElementById('usersManagementList');
+  listEl.innerHTML = allUsers.filter(u => u.id !== currentUser.id).map(u => `
+    <div style="background:var(--off-white);border:1px solid var(--gray-200);border-radius:var(--radius-sm);padding:16px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div>
+          <div style="font-weight:700;color:var(--navy-dark);margin-bottom:2px">${u.name}</div>
+          <div style="font-size:12px;color:var(--gray-400)">@${u.username}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="user-status-badge ${u.status === 'active' ? 'active' : 'inactive'}">${u.status === 'active' ? '● Active' : '● Inactive'}</span>
+          <button class="delete-user-btn" onclick="deleteUser(${u.id})">Delete</button>
+        </div>
+      </div>
+      
+      <div style="display:flex;justify-content:space-between;margin-bottom:12px;font-size:12px">
+        <div><strong>Role:</strong> ${u.role === 'admin' ? '👑 Administrator' : '👤 Staff Agent'}</div>
+        <div><strong>Created:</strong> ${new Date(u.createdAt).toLocaleDateString('en-NG')}</div>
+      </div>
+      
+      <div style="border-top:1px solid var(--gray-100);padding-top:12px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-400);margin-bottom:8px">Permissions</div>
+        ${renderPermissions(u)}
+      </div>
+    </div>
+  `).join('');
+  
+  // Render system logs
+  const logsEl = document.getElementById('systemLogsTableBody');
+  if (systemLogs.length === 0) {
+    logsEl.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--gray-400)">No logs yet</td></tr>`;
+  } else {
+    logsEl.innerHTML = systemLogs.slice(-20).reverse().map(log => `
+      <tr>
+        <td style="font-size:12px">${new Date(log.timestamp).toLocaleString('en-NG')}</td>
+        <td><strong>${log.user}</strong></td>
+        <td>${log.action}</td>
+        <td style="font-size:12px;color:var(--gray-400)">${log.details}</td>
+      </tr>
+    `).join('');
+  }
+}
+
+function renderPermissions(user) {
+  const allPerms = [
+    { id: 'view_balances', label: 'View Balances' },
+    { id: 'manage_balances', label: 'Update Balances' },
+    { id: 'view_clients', label: 'View Clients' },
+    { id: 'manage_clients', label: 'Manage Clients' },
+    { id: 'update_bookings', label: 'Update Bookings' },
+    { id: 'delete_bookings', label: 'Delete Bookings' },
+    { id: 'view_analytics', label: 'View Analytics' },
+    { id: 'manage_users', label: 'Manage Users' }
+  ];
+  
+  return allPerms.map(perm => {
+    const checked = user.permissions && user.permissions.includes(perm.id);
+    return `
+    <label class="permission-checkbox">
+      <input type="checkbox" ${checked ? 'checked' : ''} onchange="updateUserPermission(${user.id}, '${perm.id}', this.checked)" />
+      <span class="permission-label">${perm.label}</span>
+    </label>
+    `;
+  }).join('');
+}
+
+function updateUserPermission(userId, permission, isChecked) {
+  const user = allUsers.find(u => u.id === userId);
+  if (!user) return;
+  
+  if (isChecked) {
+    if (!user.permissions.includes(permission)) {
+      user.permissions.push(permission);
+    }
+  } else {
+    user.permissions = user.permissions.filter(p => p !== permission);
+  }
+  
+  localStorage.setItem('tdis_users', JSON.stringify(allUsers));
+  logActivity('UPDATE_PERMISSION', `Updated permissions for ${user.name}`);
+  showToast('✓ Permissions updated', 'success');
+}
+
+function createNewUser() {
+  const username = document.getElementById('newUserUsername').value.trim();
+  const password = document.getElementById('newUserPassword').value.trim();
+  const name = document.getElementById('newUserName').value.trim();
+  const role = document.getElementById('newUserRole').value;
+  
+  if (!username || !password || !name) {
+    showToast('Please fill all fields', 'warn');
+    return;
+  }
+  if (password.length < 6) {
+    showToast('Password must be at least 6 characters', 'warn');
+    return;
+  }
+  if (allUsers.find(u => u.username === username)) {
+    showToast('Username already exists', 'warn');
+    return;
+  }
+  
+  const newUser = {
+    id: Math.max(...allUsers.map(u => u.id), 0) + 1,
+    username, password, name, role,
+    permissions: role === 'admin' 
+      ? ['view_all', 'manage_users', 'manage_balances', 'view_analytics', 'edit_clients', 'delete_bookings']
+      : ['view_balances', 'update_bookings', 'manage_clients'],
+    status: 'active',
+    createdAt: new Date().toISOString()
+  };
+  
+  allUsers.push(newUser);
+  localStorage.setItem('tdis_users', JSON.stringify(allUsers));
+  logActivity('CREATE_USER', `Created new user: ${name}`);
+  
+  document.getElementById('newUserUsername').value = '';
+  document.getElementById('newUserPassword').value = '';
+  document.getElementById('newUserName').value = '';
+  
+  renderAdminDashboard();
+  showToast(`✓ User created: ${name}`, 'success');
+}
+
+function deleteUser(userId) {
+  if (userId === currentUser.id) {
+    showToast('Cannot delete your own account', 'warn');
+    return;
+  }
+  
+  const user = allUsers.find(u => u.id === userId);
+  if (!user) return;
+  
+  if (confirm(`Delete user "${user.name}"? This cannot be undone.`)) {
+    allUsers = allUsers.filter(u => u.id !== userId);
+    localStorage.setItem('tdis_users', JSON.stringify(allUsers));
+    logActivity('DELETE_USER', `Deleted user: ${user.name}`);
+    renderAdminDashboard();
+    showToast(`✓ User deleted: ${user.name}`, 'success');
+  }
+}
+
+// ─── LOGGING ───
+function logActivity(action, details) {
+  systemLogs.push({
+    timestamp: new Date().toISOString(),
+    user: currentUser ? currentUser.name : 'System',
+    action: action,
+    details: details
+  });
+  localStorage.setItem('tdis_systemLogs', JSON.stringify(systemLogs));
+}
+
+
 // ─── DATA ───
 const AIRLINES = [
   { name: "Air Peace", code: "P4", url: "https://book-airpeace.crane.aero/", color: "#003087", abbr:"AP" },
@@ -1084,14 +2022,70 @@ const AIRLINES = [
   { name: "ValueJet", code: "VJ", url: "https://www.valuejet.aero/agent", color: "#ff6600", abbr:"VJ" },
 ];
 
-let balances = JSON.parse(localStorage.getItem('tdis_balances') || 'null') || AIRLINES.map(a => ({
-  airline: a.name, balance: Math.floor(Math.random() * 4000000 + 500000), updated: 'Not yet updated'
+// Load balances from localStorage, then ensure every airline has an entry (never lose any)
+let balances = JSON.parse(localStorage.getItem('tdis_balances') || 'null') || [];
+// Initialise from localStorage first (fast load), then sync from Firestore
+let clients = JSON.parse(localStorage.getItem('tdis_clients') || 'null') || [];
+let bookingUpdates = (JSON.parse(localStorage.getItem('tdis_bookingUpdates') || 'null') || []).map(b => ({
+  ...b,
+  amountPaid: b.amountPaid != null ? b.amountPaid : (b.status === 'Paid' ? b.amount : 0)
 }));
 
-let clients = JSON.parse(localStorage.getItem('tdis_clients') || 'null') || [];
+// Ensure all airlines have a balance entry
+function ensureAllAirlines(bal) {
+  AIRLINES.forEach(a => {
+    if (!bal.find(b => b.airline === a.name)) {
+      bal.push({ airline: a.name, balance: 0, updated: 'Not yet updated' });
+    }
+  });
+  return bal;
+}
+
+// Load all data from Firestore on startup
+async function loadAllData() {
+  const [fsBalances, fsClients, fsBookings] = await Promise.all([
+    fsLoad('balances', 'tdis_balances', []),
+    fsLoad('clients', 'tdis_clients', []),
+    fsLoad('bookingUpdates', 'tdis_bookingUpdates', [])
+  ]);
+
+  balances = ensureAllAirlines(fsBalances);
+  clients = fsClients;
+  bookingUpdates = fsBookings.map(b => ({
+    ...b,
+    amountPaid: b.amountPaid != null ? b.amountPaid : (b.status === 'Paid' ? b.amount : 0)
+  }));
+
+  renderAirlines();
+  renderBalances();
+  renderBookingUpdates();
+  renderClients();
+
+  // Listen for real-time updates from other staff
+  fsListen('balances', (data) => {
+    balances = ensureAllAirlines(data);
+    localStorage.setItem('tdis_balances', JSON.stringify(balances)); fsSave('balances', balances);
+    renderAirlines(); renderBalances();
+  });
+  fsListen('clients', (data) => {
+    clients = data;
+    localStorage.setItem('tdis_clients', JSON.stringify(clients)); fsSave('clients', clients);
+    renderClients();
+  });
+  fsListen('bookingUpdates', (data) => {
+    bookingUpdates = data.map(b => ({
+      ...b,
+      amountPaid: b.amountPaid != null ? b.amountPaid : (b.status === 'Paid' ? b.amount : 0)
+    }));
+    localStorage.setItem('tdis_bookingUpdates', JSON.stringify(bookingUpdates)); fsSave('bookingUpdates', bookingUpdates);
+    renderBookingUpdates(); renderClients();
+    if (selectedUpdateClient) updateClientSummaryBox();
+  });
+}
 
 let selectedTitle = 'Mrs';
 let currentBalanceIndex = null;
+let selectedUpdateClient = null;
 
 // ─── CLOCK ───
 function updateClock() {
@@ -1103,13 +2097,24 @@ updateClock();
 
 // ─── TABS ───
 function showTab(id, btn) {
+  // Check permissions
+  if (id === 'admin' && !hasPermission('manage_users')) {
+    showToast('You do not have permission to access this tab', 'warn');
+    return;
+  }
+  
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   btn.classList.add('active');
+  
+  logActivity('VIEW_TAB', `Accessed ${id} tab`);
+  
   if (id === 'airlines') renderAirlines();
   if (id === 'balances') renderBalances();
+  if (id === 'updateBookings') renderBookingUpdates();
   if (id === 'clients') renderClients();
+  if (id === 'admin') renderAdminDashboard();
 }
 
 // ─── AIRLINES ───
@@ -1129,7 +2134,7 @@ function renderAirlines() {
   };
   
   grid.innerHTML = AIRLINES.map((a,i) => {
-    const bal = balances[i];
+    const bal = balances.find(b => b.airline === a.name);
     const isLow = bal && bal.balance < 200000;
     const logoUrl = logoMap[a.code];
     return `
@@ -1210,15 +2215,22 @@ function openUpdateAllModal() {
 }
 
 function saveBalance() {
+  if (!hasPermission('manage_balances')) {
+    showToast('You do not have permission to update balances', 'warn');
+    return;
+  }
+  
   const val = parseFloat(document.getElementById('balanceInput').value);
   if (isNaN(val) || val < 0) { showToast('Please enter a valid amount', 'warn'); return; }
   const now = new Date();
+  const airline = balances[currentBalanceIndex].airline;
   balances[currentBalanceIndex].balance = val;
   balances[currentBalanceIndex].updated = now.toLocaleString('en-NG', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
-  localStorage.setItem('tdis_balances', JSON.stringify(balances));
+  localStorage.setItem('tdis_balances', JSON.stringify(balances)); fsSave('balances', balances);
+  logActivity('UPDATE_BALANCE', `Updated balance for ${airline}: ₦${val.toLocaleString('en-NG')}`);
   closeModal('balanceModal');
   renderBalances();
-  showToast('✓ Balance updated for ' + balances[currentBalanceIndex].airline, 'success');
+  showToast('✓ Balance updated for ' + airline, 'success');
 }
 
 // ─── CLIENTS ───
@@ -1230,19 +2242,27 @@ function renderClients(filter='') {
     c.email.toLowerCase().includes(filter.toLowerCase())
   );
   if (!list.length) {
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">👤</div><div class="empty-title">No clients found</div><div class="empty-sub">Try a different search or add a new client</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">👤</div><div class="empty-title">No clients found</div><div class="empty-sub">Try a different search or add a new client</div></div></td></tr>`;
     return;
   }
-  tbody.innerHTML = list.map((c, i) => `
+  tbody.innerHTML = list.map((c, i) => {
+    const totalBilled = getClientTotalSpent(c.name);
+    const totalOwed = getClientAmountOwed(c.name);
+    const owesBadge = totalOwed > 0
+      ? `<strong style="color:var(--red);font-size:14px">₦${totalOwed.toLocaleString('en-NG')}</strong>`
+      : `<span style="color:var(--green);font-weight:600">✓ Settled</span>`;
+    return `
     <tr>
       <td><div class="client-name-cell"><div class="client-avatar">${c.name.split(' ').map(w=>w[0]).join('').substring(0,2)}</div>${c.name}</div></td>
       <td>${c.phone} <span class="copy-icon" onclick="copyText('${c.phone}','Phone')">📋</span></td>
       <td>${c.email} <span class="copy-icon" onclick="copyText('${c.email}','Email')">📋</span></td>
       <td>${c.airline ? `<span class="pref-tag">${c.airline}</span>` : '—'} ${c.pdf==='yes' ? '<span class="pref-tag" style="background:var(--navy);color:white">PDF</span>' : ''}</td>
+      <td><strong style="color:var(--gold-light);font-size:14px">₦${totalBilled.toLocaleString('en-NG')}</strong></td>
+      <td>${owesBadge}</td>
       <td><strong>${c.bookings}</strong></td>
       <td><span class="action-link" onclick="fillPaxFromClient(${clients.indexOf(c)})">Use for Booking →</span></td>
     </tr>
-  `).join('');
+  `; }).join('');
 }
 
 function filterClients(val) { renderClients(val); }
@@ -1263,6 +2283,11 @@ function openAddClientModal() {
 }
 
 function saveNewClient() {
+  if (!hasPermission('manage_clients')) {
+    showToast('You do not have permission to manage clients', 'warn');
+    return;
+  }
+  
   const name = document.getElementById('newClientName').value.trim();
   const phone = document.getElementById('newClientPhone').value.trim();
   const email = document.getElementById('newClientEmail').value.trim();
@@ -1273,7 +2298,8 @@ function saveNewClient() {
     pdf: document.getElementById('newClientPdf').value,
     bookings: 0
   });
-  localStorage.setItem('tdis_clients', JSON.stringify(clients));
+  localStorage.setItem('tdis_clients', JSON.stringify(clients)); fsSave('clients', clients);
+  logActivity('ADD_CLIENT', `Added new client: ${name}`);
   closeModal('addClientModal');
   renderClients();
   showToast('✓ Client added: ' + name, 'success');
@@ -1359,7 +2385,11 @@ function selectClient(name) {
 }
 
 document.addEventListener('click', e => {
-  if (!e.target.closest('#paxName')) document.getElementById('clientSuggestions').classList.remove('show');
+  const paxNameEl = document.getElementById('paxName');
+  if (paxNameEl && !e.target.closest('#paxName')) {
+    const clientSuggestionsEl = document.getElementById('clientSuggestions');
+    if (clientSuggestionsEl) clientSuggestionsEl.classList.remove('show');
+  }
 });
 
 // ─── TITLE SELECTOR ───
@@ -1394,7 +2424,301 @@ function copyText(text, label) {
   navigator.clipboard.writeText(text).then(() => showToast(`✓ ${label} copied`, 'success'));
 }
 
-// ─── MODAL ───
+// ─── UPDATE BOOKINGS ───
+function searchUpdateClient(val) {
+  const box = document.getElementById('updateClientSuggestions');
+  if (!val || val.length < 2) { box.classList.remove('show'); return; }
+  const matches = clients.filter(c => c.name.toLowerCase().includes(val.toLowerCase()));
+  if (!matches.length) { box.classList.remove('show'); return; }
+  box.innerHTML = matches.slice(0,5).map(c => `
+    <div class="suggestion-item" onclick="selectUpdateClient('${c.name}')">
+      <div class="suggestion-name">${c.name}</div>
+      <div class="suggestion-detail">${c.phone} · ${c.email}</div>
+    </div>
+  `).join('');
+  box.classList.add('show');
+}
+
+function selectUpdateClient(name) {
+  selectedUpdateClient = clients.find(c => c.name === name);
+  document.getElementById('updateClientName').value = name;
+  document.getElementById('updateClientSuggestions').classList.remove('show');
+  updateClientSummaryBox();
+  showToast('✓ Client selected: ' + name, 'success');
+}
+
+function updateClientSummaryBox() {
+  const box = document.getElementById('clientSummaryBox');
+  if (!selectedUpdateClient) {
+    box.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:20px"><div style="font-size:13px">Select a client to view summary</div></div>';
+    return;
+  }
+  const name = selectedUpdateClient.name;
+  const totalBilled = getClientTotalSpent(name);
+  const amountOwed = getClientAmountOwed(name);
+  const totalPaid = totalBilled - amountOwed;
+
+  // Get all bookings for this client
+  const clientBookings = bookingUpdates
+    .map((b, i) => ({ ...b, _index: i }))
+    .filter(b => b.client === name);
+
+  const bookingRows = clientBookings.length === 0
+    ? '<div style="color:var(--gray-400);font-size:12px;text-align:center;padding:8px">No bookings yet</div>'
+    : clientBookings.map(b => {
+        const owed = b.status === 'Pending' ? b.amount
+          : b.status === 'Partial' ? b.amount - (b.amountPaid || 0)
+          : 0;
+        const paid = b.amountPaid || (b.status === 'Paid' ? b.amount : 0);
+        const statusColor = b.status === 'Paid' ? 'var(--green)' : b.status === 'Pending' ? 'var(--red)' : b.status === 'Partial' ? 'var(--amber)' : 'var(--gray-400)';
+        const canUpdate = b.status === 'Pending' || b.status === 'Partial';
+        return `
+        <div style="border:1px solid var(--gray-200);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--off-white)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <div style="font-size:12px;font-weight:700;color:var(--navy-dark)">${b.airline}</div>
+            <span style="font-size:11px;font-weight:700;color:${statusColor};background:${statusColor}18;padding:2px 8px;border-radius:10px">${b.status}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+            <span style="color:var(--gray-400)">Booking Amount</span>
+            <strong>₦${b.amount.toLocaleString('en-NG')}</strong>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+            <span style="color:var(--gray-400)">Client Paid</span>
+            <strong style="color:var(--green)">₦${paid.toLocaleString('en-NG')}</strong>
+          </div>
+          ${owed > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px">
+            <span style="color:var(--gray-400)">Still Owes</span>
+            <strong style="color:var(--red)">₦${owed.toLocaleString('en-NG')}</strong>
+          </div>` : ''}
+          <div style="font-size:10px;color:var(--gray-400);margin-bottom:6px">PNR: ${b.pnr} · ${b.updated}</div>
+          ${canUpdate ? `
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <input type="number" id="payInput_${b._index}" placeholder="Amount received" min="0"
+              style="flex:1;padding:6px 8px;border:1.5px solid var(--gray-200);border-radius:6px;font-size:12px;font-family:inherit" />
+            <button onclick="updateClientPayment(${b._index})"
+              style="padding:6px 10px;background:var(--green);color:white;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">
+              ✓ Record Payment
+            </button>
+          </div>` : ''}
+        </div>`;
+      }).join('');
+
+  box.innerHTML = `
+    <div style="margin-bottom:12px">
+      <div style="font-weight:700;font-size:15px;color:var(--navy-dark)">${name}</div>
+      <div style="font-size:12px;color:var(--gray-400)">${selectedUpdateClient.phone} · ${selectedUpdateClient.email}</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <div style="flex:1;background:var(--green-light);border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:10px;color:var(--green);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Total Paid</div>
+        <div style="font-size:16px;font-weight:800;color:var(--green)">₦${totalPaid.toLocaleString('en-NG')}</div>
+      </div>
+      <div style="flex:1;background:${amountOwed > 0 ? 'var(--red-light)' : 'var(--green-light)'};border-radius:8px;padding:10px;text-align:center">
+        <div style="font-size:10px;color:${amountOwed > 0 ? 'var(--red)' : 'var(--green)'};font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Still Owes</div>
+        <div style="font-size:16px;font-weight:800;color:${amountOwed > 0 ? 'var(--red)' : 'var(--green)'}">
+          ${amountOwed > 0 ? '₦' + amountOwed.toLocaleString('en-NG') : '✓ Clear'}
+        </div>
+      </div>
+    </div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-400);margin-bottom:8px">Booking Payments</div>
+    ${bookingRows}
+  `;
+}
+
+function updateClientPayment(bookingIndex) {
+  const input = document.getElementById('payInput_' + bookingIndex);
+  const newPayment = parseFloat(input.value);
+  if (isNaN(newPayment) || newPayment <= 0) {
+    showToast('Enter a valid payment amount', 'warn');
+    return;
+  }
+  const booking = bookingUpdates[bookingIndex];
+  const prevPaid = booking.amountPaid || 0;
+  const totalPaid = prevPaid + newPayment;
+
+  if (totalPaid >= booking.amount) {
+    booking.amountPaid = booking.amount;
+    booking.status = 'Paid';
+  } else {
+    booking.amountPaid = totalPaid;
+    booking.status = 'Partial';
+  }
+  booking.updated = new Date().toLocaleString('en-NG', {day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+
+  localStorage.setItem('tdis_bookingUpdates', JSON.stringify(bookingUpdates)); fsSave('bookingUpdates', bookingUpdates);
+  logActivity('PAYMENT_UPDATE', `Recorded ₦${newPayment.toLocaleString('en-NG')} payment from ${booking.client} for ${booking.airline} booking`);
+  updateClientSummaryBox();
+  renderBookingUpdates();
+  renderClients();
+  showToast('✓ Payment recorded for ' + booking.client, 'success');
+}
+
+function getClientTotalSpent(clientName) {
+  return bookingUpdates
+    .filter(b => b.client === clientName)
+    .reduce((sum, b) => sum + b.amount, 0);
+}
+
+function getClientPaidAmount(clientName) {
+  return bookingUpdates
+    .filter(b => b.client === clientName && (b.status === 'Paid' || b.status === 'Partial'))
+    .reduce((sum, b) => sum + b.amount, 0);
+}
+
+// Amount the client still owes us
+function getClientAmountOwed(clientName) {
+  return bookingUpdates
+    .filter(b => b.client === clientName)
+    .reduce((sum, b) => {
+      const paid = b.amountPaid != null ? b.amountPaid : (b.status === 'Paid' ? b.amount : 0);
+      const owed = Math.max(0, b.amount - paid);
+      if (b.status === 'Cancelled') return sum;
+      return sum + owed;
+    }, 0);
+}
+
+function saveBookingUpdate() {
+  if (!hasPermission('update_bookings')) {
+    showToast('You do not have permission to update bookings', 'warn');
+    return;
+  }
+  
+  const clientName = document.getElementById('updateClientName').value.trim();
+  const airline = document.getElementById('updateAirline').value.trim();
+  const amount = parseFloat(document.getElementById('updateAmount').value);
+  const status = document.getElementById('updatePaymentStatus').value.trim();
+  const pnr = document.getElementById('updatePnr').value.trim();
+  const amountPaidRaw = parseFloat(document.getElementById('updateAmountPaid').value) || 0;
+  const amountPaid = status === 'Paid' ? amount : (status === 'Cancelled' ? 0 : Math.min(amountPaidRaw, amount));
+
+  if (!clientName || !airline || !status) {
+    showToast('Please fill in all required fields', 'warn');
+    return;
+  }
+  if (isNaN(amount) || amount <= 0) {
+    showToast('Please enter a valid booking amount', 'warn');
+    return;
+  }
+
+  // Find the client and update booking count
+  const client = clients.find(c => c.name === clientName);
+  if (!client) {
+    showToast('Client not found', 'warn');
+    return;
+  }
+
+  // Add booking update record
+  const now = new Date();
+  const update = {
+    client: clientName,
+    airline: airline,
+    amount: amount,
+    amountPaid: amountPaid,
+    status: status,
+    pnr: pnr || '—',
+    updated: now.toLocaleString('en-NG', {day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'})
+  };
+
+  bookingUpdates.unshift(update); // Add to beginning (most recent first)
+  client.bookings = (client.bookings || 0) + 1;
+
+  // ─── AUTO-DEDUCT FROM AIRLINE BALANCE ───
+  const balanceEntry = balances.find(b => b.airline === airline);
+  if (balanceEntry) {
+    const prevBalance = balanceEntry.balance;
+    balanceEntry.balance = Math.max(0, balanceEntry.balance - amount);
+    balanceEntry.updated = new Date().toLocaleString('en-NG', {day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+    localStorage.setItem('tdis_balances', JSON.stringify(balances)); fsSave('balances', balances);
+    renderBalances();
+    showToast(`✓ ${airline} balance: ₦${prevBalance.toLocaleString('en-NG')} → ₦${balanceEntry.balance.toLocaleString('en-NG')}`, 'success');
+  } else {
+    showToast('⚠ Airline balance not found — balance not deducted', 'warn');
+  }
+
+  // Save to localStorage
+  localStorage.setItem('tdis_bookingUpdates', JSON.stringify(bookingUpdates)); fsSave('bookingUpdates', bookingUpdates);
+  localStorage.setItem('tdis_clients', JSON.stringify(clients)); fsSave('clients', clients);
+  
+  // Log activity
+  logActivity('BOOKING_UPDATE', `Recorded booking for ${clientName} - ${airline}: ₦${amount.toLocaleString('en-NG')} (${status}) | Balance deducted`);
+
+  // Clear form
+  document.getElementById('updateClientName').value = '';
+  document.getElementById('updateAirline').value = '';
+  document.getElementById('updateAmount').value = '';
+  document.getElementById('updatePaymentStatus').value = '';
+  document.getElementById('updatePnr').value = '';
+  document.getElementById('updateAmountPaid').value = '';
+  document.getElementById('amountPaidRow').style.display = 'none';
+  selectedUpdateClient = null;
+  updateClientSummaryBox();
+
+  renderBookingUpdates();
+  renderClients();
+  showToast(`✓ Booking updated for ${clientName}! Amount: ₦${amount.toLocaleString('en-NG')}`, 'success');
+}
+
+function renderBookingUpdates() {
+  const tbody = document.getElementById('bookingUpdatesTableBody');
+  if (!bookingUpdates.length) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">📝</div><div class="empty-title">No booking updates yet</div><div class="empty-sub">Start recording bookings to see them here</div></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = bookingUpdates.slice(0, 50).map((b, i) => {
+    const statusClass = b.status.toLowerCase();
+    const statusIcon = {
+      'Pending': '⏳',
+      'Paid': '✓',
+      'Partial': '◐',
+      'Cancelled': '✕'
+    }[b.status] || '—';
+    return `
+    <tr>
+      <td><strong>${b.client}</strong></td>
+      <td>${b.airline}</td>
+      <td style="font-weight:600;color:var(--navy-dark)">₦${b.amount.toLocaleString('en-NG')}</td>
+      <td><span class="status-badge ${statusClass}">${statusIcon} ${b.status}</span></td>
+      <td><code style="font-size:11px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${b.pnr}</code></td>
+      <td style="font-size:12px;color:var(--gray-400)">${b.updated}</td>
+      <td><span class="action-link" onclick="deleteBookingUpdate(${i})">Delete</span></td>
+    </tr>
+  `; }).join('');
+}
+
+function deleteBookingUpdate(index) {
+  if (!hasPermission('delete_bookings')) {
+    showToast('You do not have permission to delete bookings', 'warn');
+    return;
+  }
+  
+  if (confirm('Are you sure you want to delete this booking update? The amount will be refunded back to the airline balance.')) {
+    const deleted = bookingUpdates[index];
+    const bookingInfo = `${deleted.client} - ${deleted.airline}: ₦${deleted.amount}`;
+    const client = clients.find(c => c.name === deleted.client);
+    if (client && client.bookings > 0) client.bookings--;
+
+    // ─── REFUND BALANCE ON DELETE ───
+    const balanceEntry = balances.find(b => b.airline === deleted.airline);
+    if (balanceEntry) {
+      balanceEntry.balance += deleted.amount;
+      balanceEntry.updated = new Date().toLocaleString('en-NG', {day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+      localStorage.setItem('tdis_balances', JSON.stringify(balances)); fsSave('balances', balances);
+      renderBalances();
+    }
+
+    bookingUpdates.splice(index, 1);
+    localStorage.setItem('tdis_bookingUpdates', JSON.stringify(bookingUpdates)); fsSave('bookingUpdates', bookingUpdates);
+    localStorage.setItem('tdis_clients', JSON.stringify(clients)); fsSave('clients', clients);
+    logActivity('DELETE_BOOKING', `Deleted booking: ${bookingInfo} | Balance refunded`);
+    renderBookingUpdates();
+    renderClients();
+    showToast('✓ Booking deleted & balance refunded', 'success');
+  }
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('#updateClientName')) document.getElementById('updateClientSuggestions').classList.remove('show');
+});
 function closeModal(id) {
   document.getElementById(id).classList.remove('show');
 }
@@ -1412,13 +2736,49 @@ function showToast(msg, type='success') {
   setTimeout(() => t.remove(), 3500);
 }
 
-// ─── INIT ───
-renderAirlines();
-renderBalances();
-renderClients();
+// ─── EXPOSE FUNCTIONS TO GLOBAL SCOPE (required for onclick handlers in module scripts) ───
+window.toggleSignup = toggleSignup;
+window.demoLogin = demoLogin;
+window.handleLogout = handleLogout;
+window.showTab = showTab;
+window.renderAirlines = renderAirlines;
+window.renderBalances = renderBalances;
+window.openBalanceModal = openBalanceModal;
+window.openUpdateAllModal = openUpdateAllModal;
+window.saveBalance = saveBalance;
+window.renderClients = renderClients;
+window.filterClients = filterClients;
+window.fillPaxFromClient = fillPaxFromClient;
+window.openAddClientModal = openAddClientModal;
+window.saveNewClient = saveNewClient;
+window.searchFlights = searchFlights;
+window.searchClient = searchClient;
+window.selectClient = selectClient;
+window.selectTitle = selectTitle;
+window.copyBookingInfo = copyBookingInfo;
+window.clearPax = clearPax;
+window.copyText = copyText;
+window.searchUpdateClient = searchUpdateClient;
+window.selectUpdateClient = selectUpdateClient;
+window.saveBookingUpdate = saveBookingUpdate;
+window.renderBookingUpdates = renderBookingUpdates;
+window.deleteBookingUpdate = deleteBookingUpdate;
+window.closeModal = closeModal;
+window.showToast = showToast;
+window.updateUserPermission = updateUserPermission;
+window.updateClientPayment = updateClientPayment;
+window.onPaymentStatusChange = onPaymentStatusChange;
+window.createNewUser = createNewUser;
+window.deleteUser = deleteUser;
+window.renderAdminDashboard = renderAdminDashboard;
 
+// ─── INIT ───
 // Show airlines tab on load
 showTab('airlines', document.querySelector('.tab-btn'));
+
+// Initialize session then load all data from Firestore
+initializeSession();
+loadAllData();
 </script>
 </body>
 </html>
