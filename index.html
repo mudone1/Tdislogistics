@@ -1273,7 +1273,7 @@
         <div class="card-body">
           <div class="form-group full" style="margin-bottom:14px;position:relative">
             <label>Select Client *</label>
-            <input type="text" id="updateClientName" placeholder="Search and select client..." oninput="searchUpdateClient(this.value)" autocomplete="off" />
+            <input type="text" id="updateClientName" placeholder="Search and select client..." autocomplete="off" />
             <div class="suggestion-box" id="updateClientSuggestions"></div>
           </div>
           
@@ -2490,22 +2490,57 @@ function copyText(text, label) {
 // ─── UPDATE BOOKINGS ───
 function searchUpdateClient(val) {
   const box = document.getElementById('updateClientSuggestions');
-  if (!val || val.length < 2) { box.classList.remove('show'); return; }
-  const matches = clients.filter(c => c.name.toLowerCase().includes(val.toLowerCase()));
+  if (!val || val.trim().length < 1) { box.classList.remove('show'); return; }
+  const matches = clients.filter(c => c.name.toLowerCase().includes(val.trim().toLowerCase()));
   if (!matches.length) { box.classList.remove('show'); return; }
-  box.innerHTML = matches.slice(0,5).map(c => `
-    <div class="suggestion-item" onmousedown="event.preventDefault(); selectUpdateClient('${c.name}')">
-      <div class="suggestion-name">${c.name}</div>
-      <div class="suggestion-detail">${c.phone} · ${c.email}</div>
-    </div>
-  `).join('');
+
+  // Clear and rebuild suggestion items
+  while (box.firstChild) box.removeChild(box.firstChild);
+
+  matches.slice(0, 6).forEach(c => {
+    const item = document.createElement('div');
+    item.className = 'suggestion-item';
+    item.style.cssText = 'padding:10px 14px;cursor:pointer;border-bottom:1px solid #eef0f7;';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'suggestion-name';
+    nameEl.textContent = c.name;
+
+    const detailEl = document.createElement('div');
+    detailEl.className = 'suggestion-detail';
+    detailEl.textContent = (c.phone || '') + ' · ' + (c.email || '');
+
+    item.appendChild(nameEl);
+    item.appendChild(detailEl);
+
+    // mousedown fires before blur — this is the reliable click handler
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      selectUpdateClient(c.name);
+    });
+
+    // Touchscreen support
+    item.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      selectUpdateClient(c.name);
+    });
+
+    box.appendChild(item);
+  });
+
   box.classList.add('show');
 }
 
 function selectUpdateClient(name) {
-  selectedUpdateClient = clients.find(c => c.name === name);
-  document.getElementById('updateClientName').value = name;
-  document.getElementById('updateClientSuggestions').classList.remove('show');
+  const found = clients.find(c => c.name === name);
+  if (!found) { showToast('Client not found', 'warn'); return; }
+  selectedUpdateClient = found;
+  const inp = document.getElementById('updateClientName');
+  const box = document.getElementById('updateClientSuggestions');
+  if (inp) inp.value = name;
+  if (box) box.classList.remove('show');
   updateClientSummaryBox();
   showToast('✓ Client selected: ' + name, 'success');
 }
@@ -2805,11 +2840,29 @@ function deleteBookingUpdate(index) {
   }
 }
 
-document.addEventListener('click', e => {
-  if (!e.target.closest('#updateClientName') && !e.target.closest('#updateClientSuggestions')) {
-    document.getElementById('updateClientSuggestions').classList.remove('show');
-  }
-});
+// ─── WIRE UP CLIENT SEARCH (done here in module scope, no inline handlers needed) ───
+(function setupClientSearch() {
+  const inp = document.getElementById('updateClientName');
+  const box = document.getElementById('updateClientSuggestions');
+  if (!inp || !box) return;
+
+  inp.addEventListener('input', () => searchUpdateClient(inp.value));
+
+  inp.addEventListener('blur', () => {
+    // Delay so mousedown/touchstart on suggestion fires first
+    setTimeout(() => box.classList.remove('show'), 220);
+  });
+
+  inp.addEventListener('focus', () => {
+    if (inp.value.length >= 1) searchUpdateClient(inp.value);
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#updateClientName') && !e.target.closest('#updateClientSuggestions')) {
+      box.classList.remove('show');
+    }
+  });
+})();
 function closeModal(id) {
   document.getElementById(id).classList.remove('show');
 }
