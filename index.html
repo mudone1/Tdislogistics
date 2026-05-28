@@ -1277,6 +1277,24 @@
             <div class="suggestion-box" id="updateClientSuggestions"></div>
           </div>
           
+          <!-- Booking Type Toggle -->
+          <div class="form-group full" style="margin-bottom:14px">
+            <label>Booking Type *</label>
+            <div style="display:flex;gap:10px;margin-top:4px">
+              <label id="typeIssuedLabel" style="flex:1;display:flex;align-items:center;gap:8px;padding:10px 14px;border:1.5px solid var(--gray-200);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;font-weight:600;color:var(--gray-600);background:var(--off-white);transition:all 0.2s;text-transform:none;letter-spacing:0">
+                <input type="radio" name="bookingType" id="typeIssued" value="Issued" onchange="onBookingTypeChange(this.value)" style="width:16px;height:16px;padding:0;border:none;background:none;flex-shrink:0" />
+                ✅ Issued — Ticket confirmed & issued
+              </label>
+              <label id="typeHoldLabel" style="flex:1;display:flex;align-items:center;gap:8px;padding:10px 14px;border:1.5px solid var(--gray-200);border-radius:var(--radius-sm);cursor:pointer;font-size:13px;font-weight:600;color:var(--gray-600);background:var(--off-white);transition:all 0.2s;text-transform:none;letter-spacing:0">
+                <input type="radio" name="bookingType" id="typeOnHold" value="On Hold" onchange="onBookingTypeChange(this.value)" style="width:16px;height:16px;padding:0;border:none;background:none;flex-shrink:0" />
+                🕒 On Hold — Awaiting client payment/readiness
+              </label>
+            </div>
+            <div id="holdNotice" style="display:none;margin-top:8px;padding:10px 12px;background:var(--amber-light);border:1px solid var(--amber);border-radius:var(--radius-sm);font-size:12px;color:var(--amber);font-weight:600">
+              ⚠ PNR is <strong>required</strong> for On Hold bookings — other staff need it to issue the ticket when the client is ready.
+            </div>
+          </div>
+
           <div class="form-row">
             <div class="form-group">
               <label>Airline *</label>
@@ -1312,8 +1330,9 @@
               </select>
             </div>
             <div class="form-group">
-              <label>Reference/PNR (Optional)</label>
-              <input type="text" id="updatePnr" placeholder="e.g. ABC1234 or Invoice #" />
+              <label id="pnrLabel">Reference/PNR <span id="pnrRequired" style="display:none;color:var(--red)">*</span> <span id="pnrOptional" style="color:var(--gray-400);font-weight:400">(Optional)</span></label>
+              <input type="text" id="updatePnr" placeholder="e.g. ABC1234 or Invoice #" style="transition:border-color 0.2s" />
+              <div id="pnrHoldHint" style="display:none;font-size:11px;color:var(--amber);margin-top:4px;font-weight:600">Required for On Hold — so any agent can issue when client is ready</div>
             </div>
           </div>
 
@@ -1740,6 +1759,50 @@ document.getElementById('signupForm')?.addEventListener('submit', async (e) => {
     showLoginError(error.message);
   }
 });
+
+function onBookingTypeChange(val) {
+  const holdNotice = document.getElementById('holdNotice');
+  const pnrInput = document.getElementById('updatePnr');
+  const pnrRequired = document.getElementById('pnrRequired');
+  const pnrOptional = document.getElementById('pnrOptional');
+  const pnrHoldHint = document.getElementById('pnrHoldHint');
+  const issuedLabel = document.getElementById('typeIssuedLabel');
+  const holdLabel = document.getElementById('typeHoldLabel');
+
+  if (val === 'On Hold') {
+    holdNotice.style.display = 'block';
+    pnrRequired.style.display = 'inline';
+    pnrOptional.style.display = 'none';
+    pnrHoldHint.style.display = 'block';
+    pnrInput.placeholder = 'PNR required — e.g. ABC1234';
+    pnrInput.style.borderColor = 'var(--amber)';
+    issuedLabel.style.borderColor = 'var(--gray-200)';
+    issuedLabel.style.background = 'var(--off-white)';
+    issuedLabel.style.color = 'var(--gray-600)';
+    holdLabel.style.borderColor = 'var(--amber)';
+    holdLabel.style.background = 'var(--amber-light)';
+    holdLabel.style.color = 'var(--amber)';
+  } else {
+    holdNotice.style.display = 'none';
+    pnrRequired.style.display = 'none';
+    pnrOptional.style.display = 'inline';
+    pnrHoldHint.style.display = 'none';
+    pnrInput.placeholder = 'e.g. ABC1234 or Invoice #';
+    pnrInput.style.borderColor = '';
+    holdLabel.style.borderColor = 'var(--gray-200)';
+    holdLabel.style.background = 'var(--off-white)';
+    holdLabel.style.color = 'var(--gray-600)';
+    if (val === 'Issued') {
+      issuedLabel.style.borderColor = 'var(--green)';
+      issuedLabel.style.background = 'var(--green-light)';
+      issuedLabel.style.color = 'var(--green)';
+    } else {
+      issuedLabel.style.borderColor = 'var(--gray-200)';
+      issuedLabel.style.background = 'var(--off-white)';
+      issuedLabel.style.color = 'var(--gray-600)';
+    }
+  }
+}
 
 function onPaymentStatusChange(val) {
   const row = document.getElementById('amountPaidRow');
@@ -2431,7 +2494,7 @@ function searchUpdateClient(val) {
   const matches = clients.filter(c => c.name.toLowerCase().includes(val.toLowerCase()));
   if (!matches.length) { box.classList.remove('show'); return; }
   box.innerHTML = matches.slice(0,5).map(c => `
-    <div class="suggestion-item" onclick="selectUpdateClient('${c.name}')">
+    <div class="suggestion-item" onmousedown="event.preventDefault(); selectUpdateClient('${c.name}')">
       <div class="suggestion-name">${c.name}</div>
       <div class="suggestion-detail">${c.phone} · ${c.email}</div>
     </div>
@@ -2588,11 +2651,23 @@ function saveBookingUpdate() {
   const amount = parseFloat(document.getElementById('updateAmount').value);
   const status = document.getElementById('updatePaymentStatus').value.trim();
   const pnr = document.getElementById('updatePnr').value.trim();
+  const bookingTypeEl = document.querySelector('input[name="bookingType"]:checked');
+  const bookingType = bookingTypeEl ? bookingTypeEl.value : '';
   const amountPaidRaw = parseFloat(document.getElementById('updateAmountPaid').value) || 0;
   const amountPaid = status === 'Paid' ? amount : (status === 'Cancelled' ? 0 : Math.min(amountPaidRaw, amount));
 
   if (!clientName || !airline || !status) {
     showToast('Please fill in all required fields', 'warn');
+    return;
+  }
+  if (!bookingType) {
+    showToast('Please select a Booking Type (Issued or On Hold)', 'warn');
+    return;
+  }
+  if (bookingType === 'On Hold' && !pnr) {
+    showToast('⚠ PNR is required for On Hold bookings so other staff can issue when the client is ready', 'warn');
+    document.getElementById('updatePnr').focus();
+    document.getElementById('updatePnr').style.borderColor = 'var(--red)';
     return;
   }
   if (isNaN(amount) || amount <= 0) {
@@ -2615,6 +2690,7 @@ function saveBookingUpdate() {
     amount: amount,
     amountPaid: amountPaid,
     status: status,
+    bookingType: bookingType,
     pnr: pnr || '—',
     updated: now.toLocaleString('en-NG', {day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'})
   };
@@ -2640,7 +2716,7 @@ function saveBookingUpdate() {
   localStorage.setItem('tdis_clients', JSON.stringify(clients)); fsSave('clients', clients);
   
   // Log activity
-  logActivity('BOOKING_UPDATE', `Recorded booking for ${clientName} - ${airline}: ₦${amount.toLocaleString('en-NG')} (${status}) | Balance deducted`);
+  logActivity('BOOKING_UPDATE', `Recorded booking for ${clientName} - ${airline}: ₦${amount.toLocaleString('en-NG')} (${bookingType} / ${status}) PNR: ${pnr || 'N/A'} | Balance deducted`);
 
   // Clear form
   document.getElementById('updateClientName').value = '';
@@ -2650,6 +2726,14 @@ function saveBookingUpdate() {
   document.getElementById('updatePnr').value = '';
   document.getElementById('updateAmountPaid').value = '';
   document.getElementById('amountPaidRow').style.display = 'none';
+  document.querySelectorAll('input[name="bookingType"]').forEach(r => r.checked = false);
+  document.getElementById('holdNotice').style.display = 'none';
+  document.getElementById('pnrRequired').style.display = 'none';
+  document.getElementById('pnrOptional').style.display = 'inline';
+  document.getElementById('pnrHoldHint').style.display = 'none';
+  document.getElementById('updatePnr').style.borderColor = '';
+  document.getElementById('updatePnr').placeholder = 'e.g. ABC1234 or Invoice #';
+  ['typeIssuedLabel','typeHoldLabel'].forEach(id => { const el = document.getElementById(id); if(el){el.style.borderColor='var(--gray-200)';el.style.background='var(--off-white)';el.style.color='var(--gray-600)';} });
   selectedUpdateClient = null;
   updateClientSummaryBox();
 
@@ -2672,13 +2756,18 @@ function renderBookingUpdates() {
       'Partial': '◐',
       'Cancelled': '✕'
     }[b.status] || '—';
+    const btBadge = b.bookingType === 'On Hold'
+      ? `<span style="font-size:10px;background:var(--amber-light);color:var(--amber);font-weight:700;padding:2px 6px;border-radius:10px;margin-left:4px">🕒 ON HOLD</span>`
+      : b.bookingType === 'Issued'
+      ? `<span style="font-size:10px;background:var(--green-light);color:var(--green);font-weight:700;padding:2px 6px;border-radius:10px;margin-left:4px">✅ ISSUED</span>`
+      : '';
     return `
     <tr>
       <td><strong>${b.client}</strong></td>
       <td>${b.airline}</td>
       <td style="font-weight:600;color:var(--navy-dark)">₦${b.amount.toLocaleString('en-NG')}</td>
       <td><span class="status-badge ${statusClass}">${statusIcon} ${b.status}</span></td>
-      <td><code style="font-size:11px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${b.pnr}</code></td>
+      <td><code style="font-size:11px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${b.pnr}</code>${btBadge}</td>
       <td style="font-size:12px;color:var(--gray-400)">${b.updated}</td>
       <td><span class="action-link" onclick="deleteBookingUpdate(${i})">Delete</span></td>
     </tr>
@@ -2717,7 +2806,9 @@ function deleteBookingUpdate(index) {
 }
 
 document.addEventListener('click', e => {
-  if (!e.target.closest('#updateClientName')) document.getElementById('updateClientSuggestions').classList.remove('show');
+  if (!e.target.closest('#updateClientName') && !e.target.closest('#updateClientSuggestions')) {
+    document.getElementById('updateClientSuggestions').classList.remove('show');
+  }
 });
 function closeModal(id) {
   document.getElementById(id).classList.remove('show');
@@ -2767,6 +2858,7 @@ window.closeModal = closeModal;
 window.showToast = showToast;
 window.updateUserPermission = updateUserPermission;
 window.updateClientPayment = updateClientPayment;
+window.onBookingTypeChange = onBookingTypeChange;
 window.onPaymentStatusChange = onPaymentStatusChange;
 window.createNewUser = createNewUser;
 window.deleteUser = deleteUser;
