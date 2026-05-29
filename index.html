@@ -1650,6 +1650,153 @@
   ::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--navy-light); }
 
+
+  /* ─── STAFF SECTION ─── */
+  .staff-card {
+    background: white;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: all 0.3s cubic-bezier(.34,1.56,.64,1);
+    position: relative;
+  }
+  .staff-card:hover {
+    box-shadow: 0 10px 32px rgba(30,36,99,0.14);
+    transform: translateY(-4px);
+    border-color: rgba(30,36,99,0.2);
+  }
+  .staff-card-header {
+    background: linear-gradient(135deg, var(--navy-dark) 0%, var(--navy-light) 100%);
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .staff-card-header::after {
+    content: '';
+    position: absolute;
+    top: -30px; right: -30px;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: rgba(196,154,42,0.12);
+  }
+  .staff-avatar-lg {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: var(--gold-light);
+    color: var(--navy-dark);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Syne', sans-serif;
+    font-size: 18px; font-weight: 800;
+    flex-shrink: 0;
+    border: 3px solid rgba(255,255,255,0.25);
+    position: relative; z-index: 1;
+  }
+  .staff-info { flex: 1; position: relative; z-index: 1; }
+  .staff-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 15px; font-weight: 700;
+    color: white; margin-bottom: 3px;
+  }
+  .staff-role-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .staff-role-badge.admin { background: var(--gold-light); color: var(--navy-dark); }
+  .staff-role-badge.staff { background: rgba(255,255,255,0.2); color: white; }
+  .staff-contact {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--gray-100);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .staff-contact-row {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--gray-600);
+  }
+  .staff-contact-row span:first-child { font-size: 13px; }
+  .staff-contact-edit {
+    background: none; border: none; color: var(--navy);
+    font-size: 11px; font-weight: 600; cursor: pointer;
+    text-decoration: underline; margin-left: auto;
+    padding: 0;
+  }
+  .staff-kpis {
+    padding: 16px 20px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+  }
+  .staff-kpi-item {
+    text-align: center;
+    padding: 10px 6px;
+    background: var(--off-white);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--gray-100);
+    transition: all 0.2s;
+  }
+  .staff-kpi-item:hover { background: var(--gray-100); }
+  .staff-kpi-value {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px; font-weight: 800;
+    color: var(--navy-dark);
+  }
+  .staff-kpi-value.green { color: var(--green); }
+  .staff-kpi-value.amber { color: var(--amber); }
+  .staff-kpi-value.red { color: var(--red); }
+  .staff-kpi-value.blue { color: #4f46e5; }
+  .staff-kpi-label {
+    font-size: 9px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.4px;
+    color: var(--gray-400); margin-top: 2px;
+  }
+  .staff-revenue-bar {
+    padding: 0 20px 16px;
+  }
+  .staff-revenue-label {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--gray-400);
+    font-weight: 600; margin-bottom: 6px;
+  }
+  .staff-revenue-amount {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px; font-weight: 800; color: var(--gold-light);
+  }
+  .staff-edit-row {
+    display:none;
+    padding: 14px 20px;
+    background: var(--off-white);
+    border-top: 1px solid var(--gray-100);
+    gap: 8px;
+    flex-direction: column;
+  }
+  .staff-edit-row.open { display: flex; }
+  .staff-edit-row input {
+    padding: 8px 12px;
+    font-size: 13px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius-sm);
+  }
+  .staff-edit-actions { display: flex; gap: 8px; }
+  .staff-save-btn {
+    flex:1; padding: 8px;
+    background: var(--navy); color: white; border: none;
+    border-radius: var(--radius-sm); font-size: 12px;
+    font-weight: 700; cursor: pointer;
+    transition: background 0.2s;
+  }
+  .staff-save-btn:hover { background: var(--navy-light); }
+  .staff-cancel-btn {
+    flex:1; padding: 8px;
+    background: var(--gray-100); color: var(--gray-600); border: none;
+    border-radius: var(--radius-sm); font-size: 12px;
+    font-weight: 600; cursor: pointer;
+  }
+
 </style>
 <!-- Firebase SDK -->
 
@@ -1737,6 +1884,9 @@
   </button>
   <button class="tab-btn" onclick="showTab('clients', this)">
     <span class="tab-icon">👤</span> Client Database
+  </button>
+  <button class="tab-btn" onclick="showTab('staff', this)">
+    <span class="tab-icon">👥</span> Staff
   </button>
   <button class="tab-btn" id="adminTabBtn" style="display:none" onclick="showTab('admin', this)">
     <span class="tab-icon">⚙️</span> Admin Dashboard
@@ -1849,6 +1999,29 @@
             </div>
           </div>
 
+          <!-- Staff Accountability -->
+          <div style="background:linear-gradient(135deg,rgba(30,36,99,0.04),rgba(196,154,42,0.04));border:1.5px solid var(--gray-200);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:14px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--navy-dark);margin-bottom:12px;display:flex;align-items:center;gap:6px">
+              👥 Staff Accountability <span style="font-size:10px;color:var(--red);font-weight:700">— Both Required</span>
+            </div>
+            <div class="form-row" style="margin-bottom:0">
+              <div class="form-group">
+                <label>Initiated By <span style="color:var(--red)">*</span></label>
+                <select id="updateInitiatedBy" required style="border-color:var(--gray-200)">
+                  <option value="">— Who started this booking? —</option>
+                </select>
+                <div style="font-size:11px;color:var(--gray-400);margin-top:4px">Staff who first created/initiated this booking</div>
+              </div>
+              <div class="form-group">
+                <label>Updated By <span style="color:var(--red)">*</span></label>
+                <select id="updateUpdatedBy" required style="border-color:var(--gray-200)">
+                  <option value="">— Who is recording this? —</option>
+                </select>
+                <div style="font-size:11px;color:var(--gray-400);margin-top:4px">Staff currently recording this update</div>
+              </div>
+            </div>
+          </div>
+
           <button class="search-btn" onclick="saveBookingUpdate()">💾 Save Booking Update</button>
         </div>
       </div>
@@ -1880,6 +2053,8 @@
               <th>Amount (₦)</th>
               <th>Payment Status</th>
               <th>Reference</th>
+              <th>Initiated By</th>
+              <th>Updated By</th>
               <th>Updated</th>
               <th>Action</th>
             </tr>
@@ -1919,6 +2094,67 @@
   </div>
 
   <!-- ══ ADMIN DASHBOARD ══ -->
+  <!-- ══ STAFF SECTION ══ -->
+  <div id="staff" class="section">
+    <div class="section-title">Staff Directory & Performance</div>
+
+    <!-- KPI Summary Row -->
+    <div class="admin-grid" style="margin-bottom:24px" id="staffKpiRow">
+      <div class="stat-card">
+        <div class="stat-value" id="kpiTotalStaff">0</div>
+        <div class="stat-label">Total Staff</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="kpiTotalBookings">0</div>
+        <div class="stat-label">Total Bookings</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="kpiTotalRevenue">₦0</div>
+        <div class="stat-label">Total Revenue Processed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="kpiIssued">0</div>
+        <div class="stat-label">Issued Tickets</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="kpiOnHold">0</div>
+        <div class="stat-label">On Hold Bookings</div>
+      </div>
+    </div>
+
+    <!-- Staff Cards Grid -->
+    <div id="staffCardsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:20px;margin-bottom:28px"></div>
+
+    <!-- Staff Sales Detail Table -->
+    <div class="card">
+      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+        <span class="card-title">Detailed Sales Ledger</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="staffFilterInput" placeholder="Filter by staff name…" oninput="renderStaffTab()" style="padding:7px 12px;font-size:12px;width:200px" />
+        </div>
+      </div>
+      <div class="clients-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Staff Member</th>
+              <th>Role</th>
+              <th>Total Bookings</th>
+              <th>Issued</th>
+              <th>On Hold</th>
+              <th>Paid</th>
+              <th>Partial</th>
+              <th>Pending</th>
+              <th>Cancelled</th>
+              <th>Revenue (₦)</th>
+            </tr>
+          </thead>
+          <tbody id="staffSalesTableBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <div id="admin" class="section" style="display:none">
     <div class="section-title">Admin Dashboard — User & Permission Management</div>
     
@@ -2628,6 +2864,7 @@ async function loadAllData() {
   renderBalances();
   renderBookingUpdates();
   renderClients();
+  populateStaffDropdowns();
 
   // Listen for real-time updates from other staff
   fsListen('balances', (data) => {
@@ -2683,6 +2920,7 @@ function showTab(id, btn) {
   if (id === 'updateBookings') renderBookingUpdates();
   if (id === 'clients') renderClients();
   if (id === 'admin') renderAdminDashboard();
+  if (id === 'staff') renderStaffTab();
 }
 
 // ─── AIRLINES ───
@@ -3193,6 +3431,8 @@ function saveBookingUpdate() {
   const pnr = document.getElementById('updatePnr').value.trim();
   const bookingTypeEl = document.querySelector('input[name="bookingType"]:checked');
   const bookingType = bookingTypeEl ? bookingTypeEl.value : '';
+  const initiatedBy = document.getElementById('updateInitiatedBy').value.trim();
+  const updatedBy = document.getElementById('updateUpdatedBy').value.trim();
   const amountPaidRaw = parseFloat(document.getElementById('updateAmountPaid').value) || 0;
   const amountPaid = status === 'Paid' ? amount : (status === 'Cancelled' ? 0 : Math.min(amountPaidRaw, amount));
 
@@ -3214,6 +3454,18 @@ function saveBookingUpdate() {
     showToast('Please enter a valid booking amount', 'warn');
     return;
   }
+  if (!initiatedBy) {
+    showToast('⚠ Please select the staff member who initiated this booking', 'warn');
+    document.getElementById('updateInitiatedBy').focus();
+    document.getElementById('updateInitiatedBy').style.borderColor = 'var(--red)';
+    return;
+  }
+  if (!updatedBy) {
+    showToast('⚠ Please select the staff member recording this update', 'warn');
+    document.getElementById('updateUpdatedBy').focus();
+    document.getElementById('updateUpdatedBy').style.borderColor = 'var(--red)';
+    return;
+  }
 
   // Find the client and update booking count
   const client = clients.find(c => c.name === clientName);
@@ -3232,6 +3484,8 @@ function saveBookingUpdate() {
     status: status,
     bookingType: bookingType,
     pnr: pnr || '—',
+    initiatedBy: initiatedBy,
+    updatedBy: updatedBy,
     updated: now.toLocaleString('en-NG', {day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'})
   };
 
@@ -3274,6 +3528,11 @@ function saveBookingUpdate() {
   document.getElementById('updatePnr').style.borderColor = '';
   document.getElementById('updatePnr').placeholder = 'e.g. ABC1234 or Invoice #';
   ['typeIssuedLabel','typeHoldLabel'].forEach(id => { const el = document.getElementById(id); if(el){el.style.borderColor='var(--gray-200)';el.style.background='var(--off-white)';el.style.color='var(--gray-600)';} });
+  // Reset staff dropdowns but re-auto-select current user in Updated By
+  document.getElementById('updateInitiatedBy').value = '';
+  document.getElementById('updateInitiatedBy').style.borderColor = '';
+  document.getElementById('updateUpdatedBy').style.borderColor = '';
+  populateStaffDropdowns();
   selectedUpdateClient = null;
   updateClientSummaryBox();
 
@@ -3285,7 +3544,7 @@ function saveBookingUpdate() {
 function renderBookingUpdates() {
   const tbody = document.getElementById('bookingUpdatesTableBody');
   if (!bookingUpdates.length) {
-    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">📝</div><div class="empty-title">No booking updates yet</div><div class="empty-sub">Start recording bookings to see them here</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📝</div><div class="empty-title">No booking updates yet</div><div class="empty-sub">Start recording bookings to see them here</div></div></td></tr>`;
     return;
   }
   tbody.innerHTML = bookingUpdates.slice(0, 50).map((b, i) => {
@@ -3308,6 +3567,22 @@ function renderBookingUpdates() {
       <td style="font-weight:600;color:var(--navy-dark)">₦${b.amount.toLocaleString('en-NG')}</td>
       <td><span class="status-badge ${statusClass}">${statusIcon} ${b.status}</span></td>
       <td><code style="font-size:11px;background:var(--gray-100);padding:2px 6px;border-radius:4px">${b.pnr}</code>${btBadge}</td>
+      <td>
+        ${b.initiatedBy
+          ? `<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--navy-dark)">
+               <span style="width:22px;height:22px;border-radius:50%;background:var(--navy);color:white;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;flex-shrink:0">${b.initiatedBy.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase()}</span>
+               ${b.initiatedBy}
+             </span>`
+          : '<span style="color:var(--gray-400);font-size:11px">—</span>'}
+      </td>
+      <td>
+        ${b.updatedBy
+          ? `<span style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--green)">
+               <span style="width:22px;height:22px;border-radius:50%;background:var(--green);color:white;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;flex-shrink:0">${b.updatedBy.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase()}</span>
+               ${b.updatedBy}
+             </span>`
+          : '<span style="color:var(--gray-400);font-size:11px">—</span>'}
+      </td>
       <td style="font-size:12px;color:var(--gray-400)">${b.updated}</td>
       <td><span class="action-link" onclick="deleteBookingUpdate(${i})">Delete</span></td>
     </tr>
@@ -3343,6 +3618,252 @@ function deleteBookingUpdate(index) {
     renderClients();
     showToast('✓ Booking deleted & balance refunded', 'success');
   }
+}
+
+// ─── STAFF DROPDOWN POPULATION ───
+function populateStaffDropdowns() {
+  const staffList = allUsers.filter(u => u.status === 'active');
+  ['updateInitiatedBy', 'updateUpdatedBy'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const currentVal = sel.value;
+    // Keep placeholder option, rebuild the rest
+    sel.innerHTML = `<option value="">${id === 'updateInitiatedBy' ? '— Who started this booking? —' : '— Who is recording this update? —'}</option>`;
+    staffList.forEach(u => {
+      const opt = document.createElement('option');
+      opt.value = u.name;
+      opt.textContent = `${u.name} (${u.role === 'admin' ? 'Admin' : 'Staff'})`;
+      sel.appendChild(opt);
+    });
+    // Restore previous value if still valid
+    if (currentVal) sel.value = currentVal;
+  });
+
+  // Auto-select current user in "Updated By"
+  const updSel = document.getElementById('updateUpdatedBy');
+  if (updSel && currentUser && currentUser.name) {
+    const match = Array.from(updSel.options).find(o => o.value === currentUser.name);
+    if (match) updSel.value = currentUser.name;
+  }
+}
+
+
+// ═══════════════════════════════════════════════
+//  STAFF TAB
+// ═══════════════════════════════════════════════
+
+function renderStaffTab() {
+  const filterVal = (document.getElementById('staffFilterInput') || {}).value?.toLowerCase().trim() || '';
+
+  // ── Build per-staff KPI from bookingUpdates ──────────────────────────────
+  const statsMap = {};
+  allUsers.forEach(u => {
+    statsMap[u.name] = {
+      total: 0, issued: 0, onHold: 0,
+      paid: 0, partial: 0, pending: 0, cancelled: 0,
+      revenue: 0
+    };
+  });
+
+  bookingUpdates.forEach(b => {
+    // Count for whoever initiated AND whoever updated (both get credit)
+    [b.initiatedBy, b.updatedBy].forEach(name => {
+      if (!name || name === '—') return;
+      if (!statsMap[name]) statsMap[name] = { total:0,issued:0,onHold:0,paid:0,partial:0,pending:0,cancelled:0,revenue:0 };
+    });
+    // Primary count goes to the initiator; updater logged separately
+    const s = statsMap[b.initiatedBy] || statsMap[b.updatedBy];
+    if (!s) return;
+    const target = statsMap[b.initiatedBy] || statsMap[b.updatedBy];
+    if (!target) return;
+
+    // Only count once per booking using initiatedBy as primary
+    const primary = b.initiatedBy && statsMap[b.initiatedBy] ? b.initiatedBy : b.updatedBy;
+    if (!primary || !statsMap[primary]) return;
+    const ps = statsMap[primary];
+    ps.total++;
+    ps.revenue += (b.amount || 0);
+    if (b.bookingType === 'Issued') ps.issued++;
+    if (b.bookingType === 'On Hold') ps.onHold++;
+    const st = (b.status || '').toLowerCase();
+    if (st === 'paid') ps.paid++;
+    else if (st === 'partial') ps.partial++;
+    else if (st === 'pending') ps.pending++;
+    else if (st === 'cancelled') ps.cancelled++;
+  });
+
+  // ── Global KPIs ──────────────────────────────────────────────────────────
+  const totalStaff = allUsers.filter(u => u.status === 'active').length;
+  const totalBookings = bookingUpdates.length;
+  const totalRevenue = bookingUpdates.reduce((s, b) => s + (b.amount || 0), 0);
+  const totalIssued = bookingUpdates.filter(b => b.bookingType === 'Issued').length;
+  const totalOnHold = bookingUpdates.filter(b => b.bookingType === 'On Hold').length;
+
+  const kpiEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  kpiEl('kpiTotalStaff', totalStaff);
+  kpiEl('kpiTotalBookings', totalBookings);
+  kpiEl('kpiTotalRevenue', '₦' + totalRevenue.toLocaleString('en-NG'));
+  kpiEl('kpiIssued', totalIssued);
+  kpiEl('kpiOnHold', totalOnHold);
+
+  // ── Staff Cards ───────────────────────────────────────────────────────────
+  const grid = document.getElementById('staffCardsGrid');
+  if (!grid) return;
+
+  const maxRevenue = Math.max(...allUsers.map(u => (statsMap[u.name] || {}).revenue || 0), 1);
+  const filteredUsers = allUsers.filter(u => !filterVal || u.name.toLowerCase().includes(filterVal));
+
+  grid.innerHTML = '';
+  filteredUsers.forEach(u => {
+    const st = statsMap[u.name] || { total:0,issued:0,onHold:0,paid:0,partial:0,pending:0,cancelled:0,revenue:0 };
+    const initials = u.name.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+    const barPct = Math.round((st.revenue / maxRevenue) * 100);
+    const phone = u.phone || '';
+    const email = u.email || '';
+    const statusDot = u.status === 'active'
+      ? '<span style="width:8px;height:8px;border-radius:50%;background:#2ecc71;display:inline-block;margin-right:4px"></span>'
+      : '<span style="width:8px;height:8px;border-radius:50%;background:var(--gray-400);display:inline-block;margin-right:4px"></span>';
+
+    const card = document.createElement('div');
+    card.className = 'staff-card';
+    card.innerHTML = `
+      <div class="staff-card-header">
+        <div class="staff-avatar-lg">${initials}</div>
+        <div class="staff-info">
+          <div class="staff-name">${u.name}</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+            <span class="staff-role-badge ${u.role}">${u.role}</span>
+            <span style="font-size:11px;color:rgba(255,255,255,0.6);display:flex;align-items:center">${statusDot}${u.status}</span>
+          </div>
+        </div>
+        <button onclick="toggleStaffEdit('${u.id}')" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);color:white;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;position:relative;z-index:1">✏ Edit</button>
+      </div>
+
+      <div class="staff-contact">
+        <div class="staff-contact-row">
+          <span>📞</span>
+          <span id="staff-phone-display-${u.id}" style="font-weight:600;color:${phone ? 'var(--navy-dark)' : 'var(--gray-400)'}">${phone || 'No phone — click Edit'}</span>
+        </div>
+        <div class="staff-contact-row">
+          <span>📧</span>
+          <span id="staff-email-display-${u.id}" style="font-weight:600;color:${email ? 'var(--navy-dark)' : 'var(--gray-400)'}">${email || 'No email — click Edit'}</span>
+        </div>
+      </div>
+
+      <div class="staff-kpis">
+        <div class="staff-kpi-item">
+          <div class="staff-kpi-value">${st.total}</div>
+          <div class="staff-kpi-label">Bookings</div>
+        </div>
+        <div class="staff-kpi-item">
+          <div class="staff-kpi-value green">${st.issued}</div>
+          <div class="staff-kpi-label">Issued</div>
+        </div>
+        <div class="staff-kpi-item">
+          <div class="staff-kpi-value amber">${st.onHold}</div>
+          <div class="staff-kpi-label">On Hold</div>
+        </div>
+        <div class="staff-kpi-item">
+          <div class="staff-kpi-value green">${st.paid}</div>
+          <div class="staff-kpi-label">Paid</div>
+        </div>
+        <div class="staff-kpi-item">
+          <div class="staff-kpi-value blue">${st.partial}</div>
+          <div class="staff-kpi-label">Partial</div>
+        </div>
+        <div class="staff-kpi-item">
+          <div class="staff-kpi-value red">${st.cancelled + st.pending}</div>
+          <div class="staff-kpi-label">Pending/Issues</div>
+        </div>
+      </div>
+
+      <div class="staff-revenue-bar">
+        <div class="staff-revenue-label">
+          <span>Revenue Processed</span>
+          <span class="staff-revenue-amount">₦${st.revenue.toLocaleString('en-NG')}</span>
+        </div>
+        <div style="height:6px;background:var(--gray-100);border-radius:3px;overflow:hidden">
+          <div style="height:100%;width:${barPct}%;background:linear-gradient(90deg,var(--navy),var(--gold-light));border-radius:3px;transition:width 0.8s cubic-bezier(0.22,1,0.36,1)"></div>
+        </div>
+      </div>
+
+      <div class="staff-edit-row" id="staff-edit-row-${u.id}">
+        <input type="tel" id="staff-phone-input-${u.id}" placeholder="📞 Phone number" value="${phone}" />
+        <input type="email" id="staff-email-input-${u.id}" placeholder="📧 Email address" value="${email}" />
+        <div class="staff-edit-actions">
+          <button class="staff-save-btn" onclick="saveStaffContact(${u.id})">💾 Save</button>
+          <button class="staff-cancel-btn" onclick="toggleStaffEdit('${u.id}')">Cancel</button>
+        </div>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+
+  if (!filteredUsers.length) {
+    grid.innerHTML = `<div style="color:var(--gray-400);padding:32px;text-align:center;grid-column:1/-1">No staff found</div>`;
+  }
+
+  // ── Sales Table ──────────────────────────────────────────────────────────
+  const tbody = document.getElementById('staffSalesTableBody');
+  if (!tbody) return;
+
+  const tableUsers = allUsers.filter(u => !filterVal || u.name.toLowerCase().includes(filterVal));
+  if (!tableUsers.length) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--gray-400);padding:24px">No staff found</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = tableUsers.map(u => {
+    const st = statsMap[u.name] || { total:0,issued:0,onHold:0,paid:0,partial:0,pending:0,cancelled:0,revenue:0 };
+    const initials = u.name.split(' ').map(w => w[0]).join('').substring(0,2).toUpperCase();
+    const issueCount = st.pending + st.cancelled;
+    return `<tr>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:30px;height:30px;border-radius:50%;background:var(--navy);color:white;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0">${initials}</div>
+          <div>
+            <div style="font-weight:700;color:var(--navy-dark);font-size:13px">${u.name}</div>
+            <div style="font-size:10px;color:var(--gray-400)">${u.phone || u.email || u.username}</div>
+          </div>
+        </div>
+      </td>
+      <td><span class="staff-role-badge ${u.role}" style="background:${u.role==='admin'?'var(--gold-pale)':'var(--gray-100)'};color:${u.role==='admin'?'var(--brown)':'var(--navy-dark)'}">${u.role}</span></td>
+      <td><strong style="font-size:14px;color:var(--navy-dark)">${st.total}</strong></td>
+      <td><span style="color:var(--green);font-weight:700">${st.issued}</span></td>
+      <td><span style="color:var(--amber);font-weight:700">${st.onHold}</span></td>
+      <td><span style="color:var(--green);font-weight:700">${st.paid}</span></td>
+      <td><span style="color:#4f46e5;font-weight:700">${st.partial}</span></td>
+      <td><span style="color:var(--amber);font-weight:700">${st.pending}</span></td>
+      <td><span style="color:var(--red);font-weight:700">${st.cancelled}</span></td>
+      <td style="font-family:'Syne',sans-serif;font-weight:800;color:var(--navy-dark)">₦${st.revenue.toLocaleString('en-NG')}</td>
+    </tr>`;
+  }).join('');
+}
+
+function toggleStaffEdit(userId) {
+  const row = document.getElementById('staff-edit-row-' + userId);
+  if (!row) return;
+  row.classList.toggle('open');
+}
+
+function saveStaffContact(userId) {
+  const phone = (document.getElementById('staff-phone-input-' + userId) || {}).value?.trim() || '';
+  const email = (document.getElementById('staff-email-input-' + userId) || {}).value?.trim() || '';
+  const user = allUsers.find(u => u.id == userId);
+  if (!user) return;
+  user.phone = phone;
+  user.email = email;
+  localStorage.setItem('tdis_users', JSON.stringify(allUsers));
+  fsSave('users', allUsers);
+  // Update display immediately
+  const pd = document.getElementById('staff-phone-display-' + userId);
+  const ed = document.getElementById('staff-email-display-' + userId);
+  if (pd) { pd.textContent = phone || 'No phone — click Edit'; pd.style.color = phone ? 'var(--navy-dark)' : 'var(--gray-400)'; }
+  if (ed) { ed.textContent = email || 'No email — click Edit'; ed.style.color = email ? 'var(--navy-dark)' : 'var(--gray-400)'; }
+  toggleStaffEdit(userId);
+  // Also refresh staff dropdowns in booking form
+  populateStaffDropdowns();
+  showToast('✓ Contact saved for ' + user.name, 'success');
 }
 
 // ─── WIRE UP CLIENT SEARCH (done here in module scope, no inline handlers needed) ───
@@ -3421,6 +3942,10 @@ window.onPaymentStatusChange = onPaymentStatusChange;
 window.createNewUser = createNewUser;
 window.deleteUser = deleteUser;
 window.renderAdminDashboard = renderAdminDashboard;
+window.populateStaffDropdowns = populateStaffDropdowns;
+window.renderStaffTab = renderStaffTab;
+window.toggleStaffEdit = toggleStaffEdit;
+window.saveStaffContact = saveStaffContact;
 
 // ─── INIT ───
 // Show airlines tab on load
@@ -3524,7 +4049,8 @@ window.showTab = function(id, btn) {
     if (id === 'airlines') staggerCards('#airlinesGrid .airline-tile', 50);
     if (id === 'balances') staggerCards('#balancesGrid .balance-card', 60);
     if (id === 'clients') staggerCards('#clientsTableBody tr', 40);
-    if (id === 'updateBookings') staggerCards('.booking-update-grid .card', 80);
+    if (id === 'updateBookings') { staggerCards('.booking-update-grid .card', 80); populateStaffDropdowns(); }
+    if (id === 'staff') { renderStaffTab(); staggerCards('#staffCardsGrid .staff-card', 70); staggerCards('#staffKpiRow .stat-card', 60); }
     if (id === 'admin') staggerCards('.stat-card', 60);
   }, 50);
 };
