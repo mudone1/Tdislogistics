@@ -304,37 +304,131 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* ─── NAV TABS ─── */
-  .nav-tabs {
-    background: var(--navy);
-    padding: 0 32px;
+  /* ─── SIDEBAR NAV ─── */
+  .app-body {
     display: flex;
-    gap: 4px;
+    min-height: calc(100vh - 64px);
+  }
+  .sidebar {
+    width: 240px;
+    background: var(--navy-dark);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid rgba(255,255,255,0.07);
+    position: sticky;
+    top: 64px;
+    height: calc(100vh - 64px);
+    overflow-y: auto;
+  }
+  .sidebar-search {
+    padding: 14px 14px 8px;
+  }
+  .sidebar-search input {
+    width: 100%;
+    padding: 7px 10px 7px 30px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 6px;
+    color: white;
+    font-size: 12px;
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    position: relative;
+  }
+  .sidebar-search input::placeholder { color: rgba(255,255,255,0.35); }
+  .sidebar-search-wrap { position: relative; }
+  .sidebar-search-wrap .s-icon {
+    position: absolute; left: 9px; top: 50%; transform: translateY(-50%);
+    font-size: 12px; opacity: 0.45; pointer-events: none;
+  }
+  .sidebar-section {
+    padding: 14px 10px 4px;
+  }
+  .sidebar-section-label {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: rgba(255,255,255,0.3);
+    padding: 0 8px;
+    margin-bottom: 4px;
   }
   .tab-btn {
-    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 9px 12px;
     background: none;
     border: none;
-    color: rgba(255,255,255,0.55);
+    color: rgba(255,255,255,0.6);
     font-family: 'DM Sans', sans-serif;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    border-bottom: 3px solid transparent;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 7px;
+    border-radius: 8px;
+    text-align: left;
+    transition: all 0.18s;
+    position: relative;
+    overflow: hidden;
   }
-  .tab-btn:hover { color: rgba(255,255,255,0.85); }
+  .tab-btn:hover { background: rgba(255,255,255,0.08); color: white; }
   .tab-btn.active {
+    background: rgba(196,154,42,0.18);
     color: var(--gold-light);
-    border-bottom-color: var(--gold-light);
+    font-weight: 600;
   }
-  .tab-icon { font-size: 15px; }
+  .tab-btn.active::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 20%; bottom: 20%;
+    width: 3px;
+    background: var(--gold-light);
+    border-radius: 2px;
+  }
+  .tab-icon { font-size: 15px; flex-shrink: 0; }
+  .tab-badge {
+    margin-left: auto;
+    background: var(--red);
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 10px;
+    min-width: 18px;
+    text-align: center;
+  }
+  /* Submenu */
+  .submenu {
+    padding-left: 16px;
+    overflow: hidden;
+    max-height: 0;
+    transition: max-height 0.3s ease;
+  }
+  .submenu.open { max-height: 300px; }
+  .submenu .tab-btn {
+    font-size: 12px;
+    padding: 7px 10px;
+    color: rgba(255,255,255,0.5);
+  }
+  .submenu .tab-btn:hover { color: rgba(255,255,255,0.85); }
+  .submenu .tab-btn.active { color: var(--gold-light); background: rgba(196,154,42,0.12); }
+  .menu-arrow {
+    margin-left: auto;
+    font-size: 10px;
+    opacity: 0.5;
+    transition: transform 0.2s;
+  }
+  .menu-arrow.open { transform: rotate(90deg); }
+  .sidebar-divider {
+    height: 1px;
+    background: rgba(255,255,255,0.06);
+    margin: 8px 14px;
+  }
 
   /* ─── MAIN LAYOUT ─── */
-  .main { padding: 28px 32px; max-width: 1400px; margin: 0 auto; }
+  .main { padding: 28px 32px; flex: 1; min-width: 0; }
 
   .section { display: none; }
   .section.active { display: block; }
@@ -1141,9 +1235,16 @@
   /* Responsive */
   @media (max-width: 900px) {
     .booking-grid { grid-template-columns: 1fr; }
-    .main { padding: 20px 16px; }
+    .main { padding: 16px; }
     header { padding: 0 16px; }
-    .nav-tabs { padding: 0 16px; overflow-x: auto; }
+    .app-body { flex-direction: column; }
+    .sidebar { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; padding: 8px; gap: 4px; overflow-x: auto; }
+    .sidebar-section { padding: 4px; }
+    .sidebar-section-label { display: none; }
+    .tab-btn { white-space: nowrap; padding: 7px 10px; font-size: 12px; }
+    .submenu { display: none; }
+    .dash-two-col, .dash-three-col { grid-template-columns: 1fr; }
+    .goals-period-grid { grid-template-columns: 1fr; }
   }
 
   /* ═══════════════════════════════════════════════════
@@ -1651,6 +1752,92 @@
   ::-webkit-scrollbar-thumb:hover { background: var(--navy-light); }
 
 
+  /* ─── DASHBOARD SECTION ─── */
+  .dash-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .dash-kpi-card {
+    background: white;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: 16px;
+    transition: all 0.25s;
+  }
+  .dash-kpi-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+  .dash-kpi-icon { font-size: 20px; margin-bottom: 6px; }
+  .dash-kpi-value { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; color: var(--navy-dark); margin-bottom: 2px; }
+  .dash-kpi-label { font-size: 10px; font-weight: 600; color: var(--gray-400); text-transform: uppercase; letter-spacing: 0.5px; }
+  .dash-kpi-card.alert { border-color: var(--red); background: var(--red-light); }
+  .dash-kpi-card.alert .dash-kpi-value { color: var(--red); }
+  .dash-kpi-card.warn { border-color: var(--amber); background: var(--amber-light); }
+  .dash-kpi-card.warn .dash-kpi-value { color: var(--amber); }
+  .dash-kpi-card.success { border-color: var(--green); background: var(--green-light); }
+  .dash-kpi-card.success .dash-kpi-value { color: var(--green); }
+  .dash-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .dash-three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .bar-chart-wrap { display: flex; align-items: flex-end; gap: 6px; height: 80px; padding: 4px 0 8px; }
+  .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .bar-col .bar { width: 100%; border-radius: 4px 4px 0 0; background: var(--navy); min-height: 4px; transition: height 0.6s ease; }
+  .bar-col .bar.gold { background: var(--gold-light); }
+  .bar-col .bar.green { background: var(--green); }
+  .bar-col .bar.red { background: var(--red); }
+  .bar-col .bl { font-size: 9px; color: var(--gray-400); font-weight: 600; }
+  .unpaid-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--gray-100); }
+  .unpaid-row:last-child { border-bottom: none; }
+  .unpaid-owe { background: var(--red-light); color: var(--red); font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px; }
+  .critical-airline-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--gray-100); }
+  .critical-airline-row:last-child { border-bottom: none; }
+
+  /* ─── GOALS SECTION ─── */
+  .goals-period-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 24px; }
+  @media (max-width: 1000px) { .goals-period-grid { grid-template-columns: 1fr; } }
+  .goal-card { background: white; border: 1.5px solid var(--gray-200); border-radius: var(--radius); overflow: hidden; transition: all 0.25s; }
+  .goal-card:hover { box-shadow: var(--shadow); }
+  .goal-card-head {
+    background: linear-gradient(135deg, var(--navy-dark), var(--navy-light));
+    padding: 16px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .goal-card-title { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; color: white; }
+  .goal-card-icon { font-size: 22px; }
+  .goal-card-body { padding: 18px; }
+  .goal-input-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .goal-input-row input { flex: 1; padding: 9px 12px; border: 1.5px solid var(--gray-200); border-radius: var(--radius-sm); font-size: 13px; font-family: 'DM Sans', sans-serif; }
+  .goal-set-btn { padding: 9px 14px; background: var(--navy); color: white; border: none; border-radius: var(--radius-sm); font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap; transition: background 0.2s; }
+  .goal-set-btn:hover { background: var(--navy-light); }
+  .goal-pct-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .goal-pct { font-family: 'Syne', sans-serif; font-size: 20px; font-weight: 800; color: var(--navy-dark); }
+  .goal-pct.achieved { color: var(--green); }
+  .goal-bar-bg { height: 12px; background: var(--gray-100); border-radius: 6px; overflow: hidden; margin-bottom: 8px; }
+  .goal-bar { height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--navy), var(--gold-light)); transition: width 0.8s cubic-bezier(0.22,1,0.36,1); }
+  .goal-bar.achieved { background: linear-gradient(90deg, var(--green), #4ade80); }
+  .goal-trophy { text-align: center; font-size: 36px; padding: 8px 0 4px; animation: trophyBounce 0.6s cubic-bezier(0.34,1.56,0.64,1); }
+  .goal-achieved-text { text-align: center; font-size: 12px; font-weight: 700; color: var(--green); }
+  .goal-sub { font-size: 11px; color: var(--gray-400); text-align: center; margin-top: 2px; }
+  @keyframes trophyBounce {
+    from { transform: scale(0.3) rotate(-15deg); opacity: 0; }
+    to { transform: scale(1) rotate(0deg); opacity: 1; }
+  }
+  .goals-history-card { background: white; border: 1.5px solid var(--gray-200); border-radius: var(--radius); overflow: hidden; }
+
+  /* ─── STAFF ADD BUTTON ─── */
+  .add-staff-btn {
+    padding: 9px 16px;
+    background: var(--navy);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+    transition: background 0.2s;
+  }
+  .add-staff-btn:hover { background: var(--navy-light); }
+
   /* ─── STAFF SECTION ─── */
   .staff-card {
     background: white;
@@ -1871,32 +2058,247 @@
   </div>
 </header>
 
-<!-- NAV TABS -->
-<div class="nav-tabs">
-  <button class="tab-btn active" onclick="showTab('airlines', this)">
-    <span class="tab-icon">🏢</span> Airlines
-  </button>
-  <button class="tab-btn" onclick="showTab('balances', this)">
-    <span class="tab-icon">💳</span> Account Balances
-  </button>
-  <button class="tab-btn" onclick="showTab('updateBookings', this)">
-    <span class="tab-icon">📝</span> Update Bookings
-  </button>
-  <button class="tab-btn" onclick="showTab('clients', this)">
-    <span class="tab-icon">👤</span> Client Database
-  </button>
-  <button class="tab-btn" onclick="showTab('staff', this)">
-    <span class="tab-icon">👥</span> Staff
-  </button>
-  <button class="tab-btn" id="adminTabBtn" style="display:none" onclick="showTab('admin', this)">
-    <span class="tab-icon">⚙️</span> Admin Dashboard
-  </button>
-</div>
+<!-- SIDEBAR + MAIN WRAPPER -->
+<div class="app-body">
+
+<!-- SIDEBAR NAV -->
+<nav class="sidebar" id="sidebarNav">
+  <div class="sidebar-search">
+    <div class="sidebar-search-wrap">
+      <span class="s-icon">🔍</span>
+      <input type="text" placeholder="Search menu…" oninput="filterSidebarMenu(this.value)" />
+    </div>
+  </div>
+
+  <!-- Overview -->
+  <div class="sidebar-section">
+    <div class="sidebar-section-label">Overview</div>
+    <button class="tab-btn" id="nav-dashboard" onclick="showTab('dashboard', this)">
+      <span class="tab-icon">📊</span> Dashboard
+    </button>
+  </div>
+
+  <!-- Operations -->
+  <div class="sidebar-section">
+    <div class="sidebar-section-label">Operations</div>
+    <button class="tab-btn" id="nav-airlines" onclick="showTab('airlines', this)">
+      <span class="tab-icon">🏢</span> Airlines
+    </button>
+    <button class="tab-btn" id="nav-balances" onclick="showTab('balances', this)">
+      <span class="tab-icon">💳</span> Account Balances
+    </button>
+  </div>
+
+  <!-- Bookings -->
+  <div class="sidebar-section">
+    <div class="sidebar-section-label">Bookings</div>
+    <button class="tab-btn" id="nav-updateBookings" onclick="showTab('updateBookings', this)">
+      <span class="tab-icon">📝</span> Update Bookings
+    </button>
+  </div>
+
+  <!-- Clients -->
+  <div class="sidebar-section">
+    <div class="sidebar-section-label">Clients</div>
+    <button class="tab-btn" id="nav-clients" onclick="showTab('clients', this)">
+      <span class="tab-icon">👤</span> Client Database
+    </button>
+  </div>
+
+  <!-- People -->
+  <div class="sidebar-section">
+    <div class="sidebar-section-label">People</div>
+    <!-- Staff parent with submenu -->
+    <button class="tab-btn" id="nav-staff-parent" onclick="toggleSubmenu('staffSubmenu', this)">
+      <span class="tab-icon">👥</span> Staff
+      <span class="menu-arrow" id="staffSubmenuArrow">▶</span>
+    </button>
+    <div class="submenu" id="staffSubmenu">
+      <button class="tab-btn" id="nav-staff" onclick="showTab('staff', this)">
+        <span class="tab-icon">🪪</span> Staff Directory
+      </button>
+    </div>
+  </div>
+
+  <!-- Goals -->
+  <div class="sidebar-section">
+    <div class="sidebar-section-label">Performance</div>
+    <button class="tab-btn" id="nav-goals" onclick="showTab('goals', this)">
+      <span class="tab-icon">🎯</span> Goals & Targets
+    </button>
+  </div>
+
+  <!-- Admin -->
+  <div class="sidebar-section">
+    <div class="sidebar-section-label">System</div>
+    <button class="tab-btn" id="nav-admin-parent" onclick="toggleSubmenu('adminSubmenu', this)">
+      <span class="tab-icon">⚙️</span> Admin
+      <span class="menu-arrow" id="adminSubmenuArrow">▶</span>
+    </button>
+    <div class="submenu" id="adminSubmenu">
+      <button class="tab-btn" id="adminTabBtn" style="display:none" onclick="showTab('admin', this)">
+        <span class="tab-icon">🔒</span> Admin Dashboard
+      </button>
+    </div>
+  </div>
+</nav>
 
 <!-- MAIN -->
 <div class="main">
 
+  <!-- ══ DASHBOARD SECTION ══ -->
+  <div id="dashboard" class="section active">
+    <div class="section-title">Operations Dashboard</div>
 
+    <!-- KPI Cards -->
+    <div class="dash-kpi-grid" id="dashKpiGrid">
+      <div class="dash-kpi-card">
+        <div class="dash-kpi-icon">💰</div>
+        <div class="dash-kpi-value" id="dashTotalRevenue">₦0</div>
+        <div class="dash-kpi-label">Total Revenue</div>
+      </div>
+      <div class="dash-kpi-card success">
+        <div class="dash-kpi-icon">✅</div>
+        <div class="dash-kpi-value" id="dashPaidCount">0</div>
+        <div class="dash-kpi-label">Paid Bookings</div>
+      </div>
+      <div class="dash-kpi-card warn">
+        <div class="dash-kpi-icon">⏳</div>
+        <div class="dash-kpi-value" id="dashPendingCount">0</div>
+        <div class="dash-kpi-label">Pending Payment</div>
+      </div>
+      <div class="dash-kpi-card alert">
+        <div class="dash-kpi-icon">🔴</div>
+        <div class="dash-kpi-value" id="dashOwedAmount">₦0</div>
+        <div class="dash-kpi-label">Clients Owe Us</div>
+      </div>
+      <div class="dash-kpi-card">
+        <div class="dash-kpi-icon">🕒</div>
+        <div class="dash-kpi-value" id="dashOnHold">0</div>
+        <div class="dash-kpi-label">On Hold</div>
+      </div>
+      <div class="dash-kpi-card">
+        <div class="dash-kpi-icon">👤</div>
+        <div class="dash-kpi-value" id="dashClientCount">0</div>
+        <div class="dash-kpi-label">Total Clients</div>
+      </div>
+      <div class="dash-kpi-card warn" id="dashCriticalBalanceCard">
+        <div class="dash-kpi-icon">⚠️</div>
+        <div class="dash-kpi-value" id="dashCriticalCount">0</div>
+        <div class="dash-kpi-label">Critical Balances</div>
+      </div>
+    </div>
+
+    <!-- Row 1: Sales Bar Chart + Airline Balances Alert -->
+    <div class="dash-two-col">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Sales by Airline</span>
+        </div>
+        <div class="card-body">
+          <div class="bar-chart-wrap" id="dashAirlineChart" style="height:100px"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">⚠️ Critical Balances</span>
+        </div>
+        <div class="card-body" id="dashCriticalBalances">
+          <div style="color:var(--gray-400);font-size:13px;text-align:center;padding:16px">All balances OK</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2: Unpaid Clients + Payment Status Breakdown -->
+    <div class="dash-two-col">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">🔴 Clients Yet to Pay</span>
+          <span id="unpaidClientCount" style="font-size:11px;color:var(--red);font-weight:700"></span>
+        </div>
+        <div class="card-body" id="dashUnpaidClients" style="max-height:280px;overflow-y:auto">
+          <div style="color:var(--gray-400);font-size:13px;text-align:center;padding:16px">All clients settled ✓</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Payment Status Split</span>
+        </div>
+        <div class="card-body">
+          <div id="dashPaymentBars" class="bar-chart-wrap" style="height:100px"></div>
+          <div id="dashPaymentLegend" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;font-size:11px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 3: Recent Bookings -->
+    <div class="card">
+      <div class="card-header"><span class="card-title">Recent Bookings (Last 10)</span></div>
+      <div class="clients-table">
+        <table>
+          <thead>
+            <tr><th>Client</th><th>Airline</th><th>Amount</th><th>Status</th><th>Type</th><th>Date</th></tr>
+          </thead>
+          <tbody id="dashRecentBookings"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ GOALS SECTION ══ -->
+  <div id="goals" class="section">
+    <div class="section-title">Goals & Targets</div>
+    <div class="goals-period-grid">
+      <!-- Weekly -->
+      <div class="goal-card">
+        <div class="goal-card-head">
+          <div class="goal-card-title">📅 Weekly Goal</div>
+          <span class="goal-card-icon">🎯</span>
+        </div>
+        <div class="goal-card-body">
+          <div class="goal-input-row">
+            <input type="number" id="weeklyGoalInput" placeholder="Set weekly target (₦)" min="0" />
+            <button class="goal-set-btn" onclick="setGoal('weekly')">Set</button>
+          </div>
+          <div id="weeklyGoalDisplay"></div>
+        </div>
+      </div>
+      <!-- Monthly -->
+      <div class="goal-card">
+        <div class="goal-card-head">
+          <div class="goal-card-title">🗓 Monthly Goal</div>
+          <span class="goal-card-icon">🏆</span>
+        </div>
+        <div class="goal-card-body">
+          <div class="goal-input-row">
+            <input type="number" id="monthlyGoalInput" placeholder="Set monthly target (₦)" min="0" />
+            <button class="goal-set-btn" onclick="setGoal('monthly')">Set</button>
+          </div>
+          <div id="monthlyGoalDisplay"></div>
+        </div>
+      </div>
+      <!-- Yearly -->
+      <div class="goal-card">
+        <div class="goal-card-head">
+          <div class="goal-card-title">📆 Yearly Goal</div>
+          <span class="goal-card-icon">🥇</span>
+        </div>
+        <div class="goal-card-body">
+          <div class="goal-input-row">
+            <input type="number" id="yearlyGoalInput" placeholder="Set yearly target (₦)" min="0" />
+            <button class="goal-set-btn" onclick="setGoal('yearly')">Set</button>
+          </div>
+          <div id="yearlyGoalDisplay"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Goals history -->
+    <div class="card">
+      <div class="card-header"><span class="card-title">Progress Summary</span></div>
+      <div class="card-body" id="goalsSummary" style="min-height:80px"></div>
+    </div>
+  </div>
 
   <!-- ══ AIRLINES SECTION ══ -->
   <div id="airlines" class="section active">
@@ -2094,9 +2496,11 @@
   </div>
 
   <!-- ══ ADMIN DASHBOARD ══ -->
-  <!-- ══ STAFF SECTION ══ -->
   <div id="staff" class="section">
-    <div class="section-title">Staff Directory & Performance</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
+      <div class="section-title" style="margin-bottom:0">Staff Directory & Performance</div>
+      <button class="add-staff-btn" onclick="openAddStaffModal()">➕ Add Staff Member</button>
+    </div>
 
     <!-- KPI Summary Row -->
     <div class="admin-grid" style="margin-bottom:24px" id="staffKpiRow">
@@ -2246,6 +2650,8 @@
 
 </div><!-- /main -->
 
+</div><!-- /app-body -->
+
 <!-- ══ MODALS ══ -->
 
 <!-- Update Balance Modal -->
@@ -2320,6 +2726,55 @@
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('addClientModal')">Cancel</button>
       <button class="btn-primary" onclick="saveNewClient()">Save Client</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Staff Modal -->
+<div class="modal-overlay" id="addStaffModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">➕ Add New Staff Member</span>
+      <button class="modal-close" onclick="closeModal('addStaffModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Full Name *</label>
+          <input type="text" id="newStaffName" placeholder="e.g. Amina Bello" />
+        </div>
+        <div class="form-group">
+          <label>Username *</label>
+          <input type="text" id="newStaffUsername" placeholder="e.g. amina_b" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="newStaffEmail" placeholder="staff@tdis.com" />
+        </div>
+        <div class="form-group">
+          <label>Phone</label>
+          <input type="tel" id="newStaffPhone" placeholder="+234..." />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Password *</label>
+          <input type="password" id="newStaffPassword" placeholder="Min 6 characters" />
+        </div>
+        <div class="form-group">
+          <label>Role</label>
+          <select id="newStaffRole">
+            <option value="staff">Staff Agent</option>
+            <option value="admin">Administrator</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('addStaffModal')">Cancel</button>
+      <button class="btn-primary" onclick="saveNewStaffMember()">Add Staff</button>
     </div>
   </div>
 </div>
@@ -2865,6 +3320,7 @@ async function loadAllData() {
   renderBookingUpdates();
   renderClients();
   populateStaffDropdowns();
+  renderDashboard();
 
   // Listen for real-time updates from other staff
   fsListen('balances', (data) => {
@@ -2911,7 +3367,10 @@ function showTab(id, btn) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  btn.classList.add('active');
+  if (btn) btn.classList.add('active');
+  // Also mark nav-id button active if it exists
+  const navBtn = document.getElementById('nav-' + id);
+  if (navBtn) navBtn.classList.add('active');
   
   logActivity('VIEW_TAB', `Accessed ${id} tab`);
   
@@ -2921,6 +3380,8 @@ function showTab(id, btn) {
   if (id === 'clients') renderClients();
   if (id === 'admin') renderAdminDashboard();
   if (id === 'staff') renderStaffTab();
+  if (id === 'dashboard') renderDashboard();
+  if (id === 'goals') renderGoals();
 }
 
 // ─── AIRLINES ───
@@ -3906,7 +4367,291 @@ function showToast(msg, type='success') {
   setTimeout(() => t.remove(), 3500);
 }
 
-// ─── EXPOSE FUNCTIONS TO GLOBAL SCOPE (required for onclick handlers in module scripts) ───
+// ─── SIDEBAR TOGGLE ───
+function toggleSubmenu(id, btn) {
+  const sub = document.getElementById(id);
+  const arrow = document.getElementById(id + 'Arrow');
+  if (!sub) return;
+  const isOpen = sub.classList.contains('open');
+  sub.classList.toggle('open', !isOpen);
+  if (arrow) arrow.classList.toggle('open', !isOpen);
+}
+
+function filterSidebarMenu(val) {
+  const v = val.toLowerCase();
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    const text = btn.textContent.toLowerCase();
+    btn.style.display = (!v || text.includes(v)) ? '' : 'none';
+  });
+  document.querySelectorAll('.sidebar-section').forEach(sec => {
+    const visible = Array.from(sec.querySelectorAll('.tab-btn')).some(b => b.style.display !== 'none');
+    sec.style.display = visible ? '' : 'none';
+  });
+}
+
+// ─── DASHBOARD ───
+function renderDashboard() {
+  // KPIs
+  const totalRevenue = bookingUpdates.filter(b => b.status !== 'Cancelled').reduce((s,b) => s+b.amount, 0);
+  const paidCount = bookingUpdates.filter(b => b.status === 'Paid').length;
+  const pendingCount = bookingUpdates.filter(b => b.status === 'Pending').length;
+  const onHoldCount = bookingUpdates.filter(b => b.bookingType === 'On Hold').length;
+  const totalOwed = clients.reduce((s,c) => s + getClientAmountOwed(c.name), 0);
+  const criticalBalances = balances.filter(b => b.balance < 200000);
+
+  const el = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
+  el('dashTotalRevenue', '₦' + totalRevenue.toLocaleString('en-NG'));
+  el('dashPaidCount', paidCount);
+  el('dashPendingCount', pendingCount);
+  el('dashOwedAmount', '₦' + totalOwed.toLocaleString('en-NG'));
+  el('dashOnHold', onHoldCount);
+  el('dashClientCount', clients.length);
+  el('dashCriticalCount', criticalBalances.length);
+
+  // Critical balances
+  const critDiv = document.getElementById('dashCriticalBalances');
+  if (critDiv) {
+    if (!criticalBalances.length) {
+      critDiv.innerHTML = '<div style="color:var(--green);font-size:13px;text-align:center;padding:16px">✓ All balances healthy</div>';
+    } else {
+      critDiv.innerHTML = criticalBalances.map(b => `
+        <div class="critical-airline-row">
+          <div>
+            <div style="font-weight:700;color:var(--navy-dark);font-size:13px">${b.airline}</div>
+            <div style="font-size:10px;color:var(--gray-400)">Updated: ${b.updated}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-family:'Syne',sans-serif;font-weight:800;color:var(--red);font-size:15px">₦${b.balance.toLocaleString('en-NG')}</div>
+            <div style="font-size:10px;font-weight:700;color:var(--red)">⚠ CRITICAL</div>
+          </div>
+        </div>`).join('');
+    }
+  }
+
+  // Unpaid clients
+  const unpaidDiv = document.getElementById('dashUnpaidClients');
+  const unpaidCntEl = document.getElementById('unpaidClientCount');
+  if (unpaidDiv) {
+    const unpaid = clients.filter(c => getClientAmountOwed(c.name) > 0)
+      .sort((a,b) => getClientAmountOwed(b.name) - getClientAmountOwed(a.name));
+    if (unpaidCntEl) unpaidCntEl.textContent = unpaid.length ? unpaid.length + ' clients' : '';
+    if (!unpaid.length) {
+      unpaidDiv.innerHTML = '<div style="color:var(--green);font-size:13px;text-align:center;padding:16px">✓ All clients settled</div>';
+    } else {
+      unpaidDiv.innerHTML = unpaid.map(c => {
+        const owed = getClientAmountOwed(c.name);
+        const bkgs = bookingUpdates.filter(b => b.client===c.name && (b.status==='Pending'||b.status==='Partial'));
+        return `<div class="unpaid-row">
+          <div>
+            <div style="font-weight:700;color:var(--navy-dark);font-size:13px">${c.name}</div>
+            <div style="font-size:10px;color:var(--gray-400)">${c.phone} · ${bkgs.length} open booking${bkgs.length!==1?'s':''}</div>
+          </div>
+          <span class="unpaid-owe">₦${owed.toLocaleString('en-NG')}</span>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  // Airline bar chart
+  const chartDiv = document.getElementById('dashAirlineChart');
+  if (chartDiv) {
+    const airlineSales = {};
+    bookingUpdates.forEach(b => {
+      if (!airlineSales[b.airline]) airlineSales[b.airline] = 0;
+      airlineSales[b.airline] += b.amount || 0;
+    });
+    const sorted = Object.entries(airlineSales).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    const maxVal = Math.max(...sorted.map(e=>e[1]), 1);
+    chartDiv.innerHTML = sorted.length ? sorted.map(([airline, amt]) => {
+      const pct = Math.round((amt/maxVal)*100);
+      const abbr = airline.split(' ').map(w=>w[0]).join('').substring(0,3);
+      return `<div class="bar-col" style="flex:1">
+        <div class="bar gold" style="height:${Math.max(pct,4)}%;width:100%"></div>
+        <div class="bl">${abbr}</div>
+      </div>`;
+    }).join('') : '<div style="color:var(--gray-400);font-size:12px;padding:20px;text-align:center;width:100%">No data yet</div>';
+  }
+
+  // Payment status bars
+  const payBarsDiv = document.getElementById('dashPaymentBars');
+  const payLegend = document.getElementById('dashPaymentLegend');
+  if (payBarsDiv) {
+    const statusGroups = { Paid: 0, Partial: 0, Pending: 0, Cancelled: 0 };
+    bookingUpdates.forEach(b => { if (statusGroups[b.status]!=null) statusGroups[b.status]++; });
+    const maxS = Math.max(...Object.values(statusGroups), 1);
+    const colors = { Paid:'green', Partial:'gold', Pending:'red', Cancelled:'bar' };
+    payBarsDiv.innerHTML = Object.entries(statusGroups).map(([st,cnt]) => `
+      <div class="bar-col">
+        <div class="bar ${colors[st]}" style="height:${Math.max(Math.round(cnt/maxS*100),4)}%;width:100%"></div>
+        <div class="bl">${st.slice(0,3)}</div>
+      </div>`).join('');
+    if (payLegend) {
+      const legColors = { Paid:'var(--green)', Partial:'var(--gold-light)', Pending:'var(--red)', Cancelled:'var(--gray-400)' };
+      payLegend.innerHTML = Object.entries(statusGroups).map(([st,cnt]) =>
+        `<span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:${legColors[st]};flex-shrink:0"></span><span style="color:var(--gray-600)">${st}: <strong>${cnt}</strong></span></span>`
+      ).join('');
+    }
+  }
+
+  // Recent bookings table
+  const tbody = document.getElementById('dashRecentBookings');
+  if (tbody) {
+    const recent = bookingUpdates.slice(0, 10);
+    if (!recent.length) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray-400);padding:20px">No bookings yet</td></tr>';
+    } else {
+      const statusColor = {Paid:'var(--green)',Pending:'var(--amber)',Partial:'#4f46e5',Cancelled:'var(--red)'};
+      tbody.innerHTML = recent.map(b => `<tr>
+        <td><strong>${b.client}</strong></td>
+        <td>${b.airline}</td>
+        <td style="font-family:'Syne',sans-serif;font-weight:700">₦${b.amount.toLocaleString('en-NG')}</td>
+        <td><span class="status-badge ${b.status.toLowerCase()}">${b.status}</span></td>
+        <td>${b.bookingType || '—'}</td>
+        <td style="font-size:11px;color:var(--gray-400)">${b.updated}</td>
+      </tr>`).join('');
+    }
+  }
+
+  // Update goals too
+  renderGoals();
+}
+
+// ─── GOALS ───
+let salesGoals = JSON.parse(localStorage.getItem('tdis_goals') || '{}');
+
+function saveGoals() {
+  localStorage.setItem('tdis_goals', JSON.stringify(salesGoals));
+}
+
+function getCurrentPeriodSales(period) {
+  const now = new Date();
+  return bookingUpdates.filter(b => {
+    if (b.status === 'Cancelled') return false;
+    // Parse date from b.updated string (fallback: always include)
+    return true;
+  }).reduce((s,b) => s + (b.amount||0), 0);
+  // Note: full date filtering would need ISO timestamps in bookings.
+  // Since bookingUpdates use locale strings, we use total revenue as proxy.
+}
+
+function getRevenueForPeriod(period) {
+  const now = new Date();
+  const total = bookingUpdates.filter(b => b.status !== 'Cancelled').reduce((s,b) => s+(b.amount||0), 0);
+  // Approximate: use all revenue since no ISO timestamps stored
+  return total;
+}
+
+function setGoal(period) {
+  const inp = document.getElementById(period + 'GoalInput');
+  const val = parseFloat(inp.value);
+  if (isNaN(val) || val <= 0) { showToast('Enter a valid target amount', 'warn'); return; }
+  salesGoals[period] = val;
+  saveGoals();
+  inp.value = '';
+  renderGoals();
+  showToast(`✓ ${period.charAt(0).toUpperCase()+period.slice(1)} goal set: ₦${val.toLocaleString('en-NG')}`, 'success');
+}
+
+function renderGoals() {
+  const periods = ['weekly', 'monthly', 'yearly'];
+  const revenue = bookingUpdates.filter(b=>b.status!=='Cancelled').reduce((s,b)=>s+(b.amount||0),0);
+
+  periods.forEach(period => {
+    const displayDiv = document.getElementById(period + 'GoalDisplay');
+    if (!displayDiv) return;
+    const goal = salesGoals[period];
+    if (!goal) {
+      displayDiv.innerHTML = '<div style="color:var(--gray-400);font-size:12px;text-align:center;padding:12px 0">No goal set yet</div>';
+      return;
+    }
+    const current = revenue; // Using total revenue as basis
+    const pct = Math.min(Math.round((current / goal) * 100), 100);
+    const achieved = current >= goal;
+    displayDiv.innerHTML = `
+      <div class="goal-pct-row">
+        <div>
+          <div style="font-size:11px;color:var(--gray-400);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Current Revenue</div>
+          <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:800;color:var(--navy-dark)">₦${current.toLocaleString('en-NG')}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--gray-400);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Target</div>
+          <div style="font-family:'Syne',sans-serif;font-size:15px;font-weight:800;color:var(--navy-dark)">₦${goal.toLocaleString('en-NG')}</div>
+        </div>
+      </div>
+      <div class="goal-bar-bg">
+        <div class="goal-bar ${achieved?'achieved':''}" style="width:${pct}%"></div>
+      </div>
+      <div class="goal-pct-row" style="margin-bottom:4px">
+        <span class="goal-pct ${achieved?'achieved':''}">${pct}%</span>
+        <span style="font-size:11px;color:var(--gray-400)">${achieved ? 'Goal Achieved! 🎉' : '₦'+(goal-current).toLocaleString('en-NG')+' to go'}</span>
+      </div>
+      ${achieved ? `<div class="goal-trophy">🏆</div><div class="goal-achieved-text">🎉 Target Reached!</div>` : ''}
+    `;
+  });
+
+  // Summary card
+  const summaryDiv = document.getElementById('goalsSummary');
+  if (summaryDiv) {
+    const revenue = bookingUpdates.filter(b=>b.status!=='Cancelled').reduce((s,b)=>s+(b.amount||0),0);
+    const rows = periods.map(p => {
+      const g = salesGoals[p];
+      if (!g) return `<div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--gray-100)"><span style="text-transform:capitalize;font-weight:600;color:var(--navy-dark)">${p}</span><span style="color:var(--gray-400);font-size:12px">No goal set</span></div>`;
+      const pct = Math.min(Math.round((revenue/g)*100), 100);
+      const achieved = revenue >= g;
+      return `<div style="display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid var(--gray-100)">
+        <div style="font-weight:700;color:var(--navy-dark);text-transform:capitalize;min-width:60px">${p} ${achieved?'🏆':''}</div>
+        <div style="flex:1;height:8px;background:var(--gray-100);border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${achieved?'var(--green)':'var(--navy)'};border-radius:4px;transition:width 0.8s ease"></div></div>
+        <div style="font-size:12px;font-weight:700;color:${achieved?'var(--green)':'var(--navy-dark)'};min-width:40px;text-align:right">${pct}%</div>
+        <div style="font-size:11px;color:var(--gray-400);min-width:120px;text-align:right">₦${revenue.toLocaleString('en-NG')} / ₦${g.toLocaleString('en-NG')}</div>
+      </div>`;
+    }).join('');
+    summaryDiv.innerHTML = rows || '<div style="color:var(--gray-400);text-align:center;padding:20px">Set goals above to see progress here</div>';
+  }
+}
+
+// ─── ADD STAFF ───
+function openAddStaffModal() {
+  document.getElementById('addStaffModal').classList.add('show');
+}
+
+function saveNewStaffMember() {
+  const name = document.getElementById('newStaffName').value.trim();
+  const username = document.getElementById('newStaffUsername').value.trim();
+  const email = document.getElementById('newStaffEmail').value.trim();
+  const phone = document.getElementById('newStaffPhone').value.trim();
+  const password = document.getElementById('newStaffPassword').value.trim();
+  const role = document.getElementById('newStaffRole').value;
+  if (!name || !username || !password) { showToast('Name, username, and password are required', 'warn'); return; }
+  if (password.length < 6) { showToast('Password must be at least 6 characters', 'warn'); return; }
+  if (allUsers.find(u => u.username === username)) { showToast('Username already exists', 'warn'); return; }
+  const newUser = {
+    id: Math.max(...allUsers.map(u => u.id), 0) + 1,
+    username, password, name, email, phone, role,
+    permissions: role === 'admin'
+      ? ['view_all','manage_users','manage_balances','view_analytics','edit_clients','delete_bookings','view_balances','update_bookings','manage_clients','view_clients']
+      : ['view_balances','update_bookings','manage_clients','view_clients'],
+    status: 'active',
+    createdAt: new Date().toISOString()
+  };
+  allUsers.push(newUser);
+  localStorage.setItem('tdis_users', JSON.stringify(allUsers));
+  fsSave('users', allUsers);
+  logActivity('CREATE_STAFF', `Added new staff: ${name}`);
+  closeModal('addStaffModal');
+  ['newStaffName','newStaffUsername','newStaffEmail','newStaffPhone','newStaffPassword'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
+  renderStaffTab();
+  populateStaffDropdowns();
+  showToast('✓ Staff member added: ' + name, 'success');
+}
+
+// Expose new globals
+window.toggleSubmenu = toggleSubmenu;
+window.filterSidebarMenu = filterSidebarMenu;
+window.renderDashboard = renderDashboard;
+window.renderGoals = renderGoals;
+window.setGoal = setGoal;
+window.openAddStaffModal = openAddStaffModal;
+window.saveNewStaffMember = saveNewStaffMember;
 window.toggleSignup = toggleSignup;
 window.demoLogin = demoLogin;
 window.handleLogout = handleLogout;
@@ -3948,8 +4693,8 @@ window.toggleStaffEdit = toggleStaffEdit;
 window.saveStaffContact = saveStaffContact;
 
 // ─── INIT ───
-// Show airlines tab on load
-showTab('airlines', document.querySelector('.tab-btn'));
+// Show dashboard tab on load
+showTab('dashboard', document.getElementById('nav-dashboard'));
 
 // Initialize session then load all data from Firestore
 initializeSession();
@@ -3982,8 +4727,8 @@ function attachRipples() {
   });
 }
 
-// ── Tab click ripple ─────────────────────────
-document.querySelectorAll('.tab-btn').forEach(btn => {
+// ── Sidebar button click ripple ──────────────────────
+document.querySelectorAll('.sidebar .tab-btn').forEach(btn => {
   btn.addEventListener('click', function(e) {
     const r = document.createElement('span');
     r.className = 'ripple';
@@ -4052,6 +4797,8 @@ window.showTab = function(id, btn) {
     if (id === 'updateBookings') { staggerCards('.booking-update-grid .card', 80); populateStaffDropdowns(); }
     if (id === 'staff') { renderStaffTab(); staggerCards('#staffCardsGrid .staff-card', 70); staggerCards('#staffKpiRow .stat-card', 60); }
     if (id === 'admin') staggerCards('.stat-card', 60);
+    if (id === 'dashboard') { renderDashboard(); staggerCards('.dash-kpi-card', 50); }
+    if (id === 'goals') { renderGoals(); staggerCards('.goal-card', 80); }
   }, 50);
 };
 
@@ -4109,15 +4856,15 @@ window.renderAdminDashboard = function(...args) {
 (function bootAnimations() {
   attachRipples();
 
-  // Stagger nav tabs
-  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+  // Stagger sidebar nav items
+  document.querySelectorAll('.sidebar .tab-btn').forEach((btn, i) => {
     btn.style.opacity = '0';
-    btn.style.transform = 'translateY(-8px)';
+    btn.style.transform = 'translateX(-8px)';
     setTimeout(() => {
-      btn.style.transition = 'opacity 0.3s ease, transform 0.3s ease, color 0.25s, border-color 0.25s';
+      btn.style.transition = 'opacity 0.3s ease, transform 0.3s ease, color 0.25s, background 0.2s';
       btn.style.opacity = '1';
-      btn.style.transform = 'translateY(0)';
-    }, 200 + i * 60);
+      btn.style.transform = 'translateX(0)';
+    }, 200 + i * 40);
   });
 
   // Header brand entrance
