@@ -2314,9 +2314,9 @@
   <div class="sidebar-section">
     <div class="sidebar-section-label">People</div>
     <!-- Staff parent with submenu -->
-    <button class="tab-btn" id="nav-staff-parent" onclick="toggleSubmenu('staffSubmenu', this)">
+    <button class="tab-btn" id="nav-staff-parent" onclick="handleStaffNavClick(this)">
       <span class="tab-icon">👥</span> Staff
-      <span class="menu-arrow" id="staffSubmenuArrow">▶</span>
+      <span class="menu-arrow" id="staffSubmenuArrow" class="desktop-only-arrow">▶</span>
     </button>
     <div class="submenu" id="staffSubmenu">
       <button class="tab-btn" id="nav-staff" onclick="showTab('staff', this)">
@@ -2336,9 +2336,9 @@
   <!-- Admin -->
   <div class="sidebar-section">
     <div class="sidebar-section-label">System</div>
-    <button class="tab-btn" id="nav-admin-parent" onclick="toggleSubmenu('adminSubmenu', this)">
+    <button class="tab-btn" id="nav-admin-parent" onclick="handleAdminNavClick(this)">
       <span class="tab-icon">⚙️</span> Admin
-      <span class="menu-arrow" id="adminSubmenuArrow">▶</span>
+      <span class="menu-arrow" id="adminSubmenuArrow" class="desktop-only-arrow">▶</span>
     </button>
     <div class="submenu" id="adminSubmenu">
       <button class="tab-btn" id="adminTabBtn" style="display:none" onclick="showTab('admin', this)">
@@ -3263,6 +3263,61 @@
     <div class="modal-footer">
       <button class="btn-secondary" onclick="closeModal('addStaffModal')">Cancel</button>
       <button class="btn-primary" onclick="saveNewStaffMember()">Add Staff</button>
+    </div>
+  </div>
+</div>
+
+<!-- Payment Update Modal -->
+<div class="modal-overlay" id="paymentUpdateModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">💳 Update Payment Record</span>
+      <button class="modal-close" onclick="closeModal('paymentUpdateModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Booking summary -->
+      <div style="background:var(--off-white);border:1.5px solid var(--gray-200);border-radius:var(--radius-sm);padding:14px;margin-bottom:18px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:12px;color:var(--gray-400);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Client</span>
+          <span style="font-weight:700;color:var(--navy-dark)" id="pmClient">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:12px;color:var(--gray-400);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Airline</span>
+          <span style="font-weight:600;color:var(--gray-600)" id="pmAirline">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span style="font-size:12px;color:var(--gray-400);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Booking Amount</span>
+          <span style="font-weight:700;color:var(--navy-dark)" id="pmAmount">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between">
+          <span style="font-size:12px;color:var(--gray-400);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">PNR</span>
+          <code style="font-size:12px;background:var(--gray-100);padding:2px 7px;border-radius:4px" id="pmPnr">—</code>
+        </div>
+      </div>
+      <!-- Editable fields -->
+      <div class="form-group" style="margin-bottom:14px">
+        <label>Payment Status</label>
+        <select id="pmStatus">
+          <option value="Pending">⏳ Pending</option>
+          <option value="Partial">◐ Partial</option>
+          <option value="Paid">✓ Paid</option>
+          <option value="Cancelled">✕ Cancelled</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:14px">
+        <label>Amount Received (₦)</label>
+        <input type="number" id="pmAmountPaid" placeholder="0" min="0" />
+      </div>
+      <div class="form-group">
+        <label>Updated By</label>
+        <select id="pmUpdatedBy">
+          <option value="">— Select staff —</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('paymentUpdateModal')">Cancel</button>
+      <button class="btn-primary" onclick="savePaymentUpdate()">💾 Save Update</button>
     </div>
   </div>
 </div>
@@ -4463,8 +4518,8 @@ function renderBookingUpdates() {
       ? `<span style="font-size:10px;background:var(--green-light);color:var(--green);font-weight:700;padding:2px 6px;border-radius:10px;margin-left:4px">✅ ISSUED</span>`
       : '';
     return `
-    <tr>
-      <td><strong>${b.client}</strong></td>
+    <tr style="cursor:pointer" onclick="openPaymentUpdateModal(${i})" title="Click to update payment">
+      <td><strong style="color:var(--navy);text-decoration:underline dotted;text-underline-offset:3px">${b.client}</strong></td>
       <td>${b.airline}</td>
       <td style="font-weight:600;color:var(--navy-dark)">₦${b.amount.toLocaleString('en-NG')}</td>
       <td><span class="status-badge ${statusClass}">${statusIcon} ${b.status}</span></td>
@@ -4486,7 +4541,11 @@ function renderBookingUpdates() {
           : '<span style="color:var(--gray-400);font-size:11px">—</span>'}
       </td>
       <td style="font-size:12px;color:var(--gray-400)">${b.updated}</td>
-      <td><span class="action-link" onclick="deleteBookingUpdate(${i})">Delete</span></td>
+      <td onclick="event.stopPropagation()">
+        ${currentUser && currentUser.role === 'admin'
+          ? `<span class="action-link" style="color:var(--red)" onclick="deleteBookingUpdate(${i})">Delete</span>`
+          : '<span style="color:var(--gray-300);font-size:11px">—</span>'}
+      </td>
     </tr>
   `; }).join('');
 }
@@ -5655,6 +5714,84 @@ window.runBulkAction = runBulkAction;
 window.confirmReset = confirmReset;
 window.downloadCSV = downloadCSV;
 window.populateCommissionAirlines = populateCommissionAirlines;
+
+// ── Mobile-aware nav handlers ──
+function handleStaffNavClick(btn) {
+  if (window.innerWidth <= 900) {
+    showTab('staff', btn);
+  } else {
+    toggleSubmenu('staffSubmenu', btn);
+  }
+}
+function handleAdminNavClick(btn) {
+  if (window.innerWidth <= 900) {
+    if (!hasPermission('manage_users')) { showToast('You do not have permission to access this tab', 'warn'); return; }
+    showTab('admin', btn);
+  } else {
+    toggleSubmenu('adminSubmenu', btn);
+  }
+}
+
+// ── Payment Update Modal ──
+let _pmIndex = -1;
+
+function openPaymentUpdateModal(index) {
+  const b = bookingUpdates[index];
+  if (!b) return;
+  _pmIndex = index;
+
+  document.getElementById('pmClient').textContent = b.client;
+  document.getElementById('pmAirline').textContent = b.airline;
+  document.getElementById('pmAmount').textContent = '₦' + b.amount.toLocaleString('en-NG');
+  document.getElementById('pmPnr').textContent = b.pnr || '—';
+  document.getElementById('pmStatus').value = b.status || 'Pending';
+  document.getElementById('pmAmountPaid').value = b.amountPaid != null ? b.amountPaid : '';
+
+  // Populate updated-by dropdown
+  const sel = document.getElementById('pmUpdatedBy');
+  sel.innerHTML = '<option value="">— Select staff —</option>';
+  allUsers.filter(u => u.status === 'active').forEach(u => {
+    const opt = document.createElement('option');
+    opt.value = u.name;
+    opt.textContent = u.name;
+    if (u.name === b.updatedBy) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  if (!b.updatedBy && currentUser) sel.value = currentUser.name;
+
+  document.getElementById('paymentUpdateModal').classList.add('show');
+}
+
+function savePaymentUpdate() {
+  if (_pmIndex < 0 || _pmIndex >= bookingUpdates.length) return;
+  const b = bookingUpdates[_pmIndex];
+
+  const newStatus = document.getElementById('pmStatus').value;
+  const newAmountPaid = parseFloat(document.getElementById('pmAmountPaid').value) || 0;
+  const newUpdatedBy = document.getElementById('pmUpdatedBy').value;
+
+  if (!newUpdatedBy) { showToast('Please select who updated this record', 'warn'); return; }
+
+  b.status = newStatus;
+  b.amountPaid = newAmountPaid;
+  b.updatedBy = newUpdatedBy;
+  b.updated = new Date().toLocaleString('en-NG', {day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+
+  localStorage.setItem('tdis_bookingUpdates', JSON.stringify(bookingUpdates));
+  fsSave('bookingUpdates', bookingUpdates);
+  logActivity('PAYMENT_UPDATE', `Updated ${b.client} — ${b.airline}: status=${newStatus}, paid=₦${newAmountPaid.toLocaleString('en-NG')}, by=${newUpdatedBy}`);
+
+  closeModal('paymentUpdateModal');
+  renderBookingUpdates();
+  renderDashboard();
+  showToast(`✓ Payment record updated for ${b.client}`, 'success');
+  _pmIndex = -1;
+}
+
+window.handleStaffNavClick = handleStaffNavClick;
+window.handleAdminNavClick = handleAdminNavClick;
+window.openPaymentUpdateModal = openPaymentUpdateModal;
+window.savePaymentUpdate = savePaymentUpdate;
 
 // Expose new globals
 window.toggleSubmenu = toggleSubmenu;
