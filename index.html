@@ -1823,6 +1823,133 @@
   }
   .goals-history-card { background: white; border: 1.5px solid var(--gray-200); border-radius: var(--radius); overflow: hidden; }
 
+  /* ─── ADMIN CONTROL CENTRE ─── */
+  .admin-tab-nav {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .adm-tab {
+    padding: 8px 14px;
+    border: 1.5px solid var(--gray-200);
+    border-radius: 8px;
+    background: white;
+    color: var(--gray-600);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.18s;
+    font-family: 'DM Sans', sans-serif;
+    white-space: nowrap;
+  }
+  .adm-tab:hover { border-color: var(--navy); color: var(--navy); background: var(--gray-100); }
+  .adm-tab.active { background: var(--navy-dark); color: var(--gold-light); border-color: var(--navy-dark); }
+
+  .adm-panel { display: none; }
+  .adm-panel.active { display: block; }
+
+  .adm-control-card {
+    background: white;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius);
+    padding: 22px;
+    transition: all 0.25s;
+  }
+  .adm-control-card:hover { box-shadow: var(--shadow); }
+  .adm-danger-card { border-color: var(--red); background: var(--red-light); }
+  .adm-control-icon { font-size: 26px; margin-bottom: 10px; }
+  .adm-control-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--navy-dark);
+    margin-bottom: 6px;
+  }
+  .adm-control-desc { font-size: 12px; color: var(--gray-400); line-height: 1.5; }
+
+  .adm-btn {
+    padding: 9px 16px;
+    border: none;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .adm-btn-primary { background: var(--navy); color: white; }
+  .adm-btn-primary:hover { background: var(--navy-light); }
+  .adm-btn-secondary { background: var(--gray-100); color: var(--navy-dark); }
+  .adm-btn-secondary:hover { background: var(--gray-200); }
+  .adm-btn-danger { background: var(--red); color: white; }
+  .adm-btn-danger:hover { background: #a93226; }
+  .adm-btn-success { background: var(--green); color: white; }
+  .adm-btn-success:hover { background: #155d38; }
+  .adm-btn-amber { background: var(--amber); color: white; }
+  .adm-btn-amber:hover { background: #b45309; }
+
+  .adm-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--gray-100);
+    cursor: pointer;
+  }
+  .adm-toggle-row:last-child { border-bottom: none; }
+  .adm-toggle-label { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .adm-toggle-switch {
+    width: 42px; height: 24px;
+    background: var(--gray-200);
+    border-radius: 12px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.25s;
+    flex-shrink: 0;
+  }
+  .adm-toggle-switch.on { background: var(--green); }
+  .adm-toggle-knob {
+    position: absolute;
+    width: 18px; height: 18px;
+    background: white;
+    border-radius: 50%;
+    top: 3px; left: 3px;
+    transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  }
+  .adm-toggle-switch.on .adm-toggle-knob { transform: translateX(18px); }
+
+  .staff-ctrl-card {
+    background: white;
+    border: 1.5px solid var(--gray-200);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+  .staff-ctrl-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    background: var(--off-white);
+    border-bottom: 1px solid var(--gray-100);
+  }
+  .staff-ctrl-info { display: flex; align-items: center; gap: 12px; }
+  .staff-ctrl-avatar {
+    width: 38px; height: 38px;
+    border-radius: 50%;
+    background: var(--navy);
+    color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800;
+    flex-shrink: 0;
+  }
+  .staff-ctrl-name { font-weight: 700; font-size: 14px; color: var(--navy-dark); }
+  .staff-ctrl-meta { font-size: 11px; color: var(--gray-400); }
+  .staff-ctrl-body { padding: 16px 18px; display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-end; }
+
   /* ─── STAFF ADD BUTTON ─── */
   .add-staff-btn {
     padding: 9px 16px;
@@ -2559,11 +2686,22 @@
     </div>
   </div>
 
-  <div id="admin" class="section" style="display:none">
-    <div class="section-title">Admin Dashboard — User & Permission Management</div>
-    
-    <!-- Stats -->
-    <div class="admin-grid">
+  <div id="admin" class="section">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+      <div class="section-title" style="margin-bottom:0">⚙️ Admin Control Centre</div>
+      <!-- Admin Sub-tabs -->
+      <div class="admin-tab-nav" id="adminTabNav">
+        <button class="adm-tab active" onclick="switchAdminTab('data',this)" data-tab="data">📊 Data Management</button>
+        <button class="adm-tab" onclick="switchAdminTab('staff-ctrl',this)" data-tab="staff-ctrl">👥 Staff Controls</button>
+        <button class="adm-tab" onclick="switchAdminTab('system',this)" data-tab="system">🔧 System Settings</button>
+        <button class="adm-tab" onclick="switchAdminTab('audit',this)" data-tab="audit">🔍 Audit & Security</button>
+        <button class="adm-tab" onclick="switchAdminTab('finance',this)" data-tab="finance">💰 Financial Controls</button>
+        <button class="adm-tab" onclick="switchAdminTab('users',this)" data-tab="users">🔒 Users & Permissions</button>
+      </div>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="admin-grid" style="margin-bottom:24px">
       <div class="stat-card">
         <div class="stat-value" id="statTotalUsers">0</div>
         <div class="stat-label">Total Users</div>
@@ -2580,73 +2718,345 @@
         <div class="stat-value" id="statTotalBalance">₦0</div>
         <div class="stat-label">Total Balance</div>
       </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statTotalBookings">0</div>
+        <div class="stat-label">Total Bookings</div>
+      </div>
     </div>
 
-    <!-- Create New User -->
-    <div class="card" style="margin-bottom:24px">
-      <div class="card-header">
-        <span class="card-title">Create New User</span>
-      </div>
-      <div class="card-body">
-        <div class="form-row">
-          <div class="form-group">
-            <label>Username</label>
-            <input type="text" id="newUserUsername" placeholder="e.g. agent_mark" />
-          </div>
-          <div class="form-group">
-            <label>Password</label>
-            <input type="password" id="newUserPassword" placeholder="Min 6 characters" />
+    <!-- ══ TAB: DATA MANAGEMENT ══ -->
+    <div class="adm-panel active" id="admPanel-data">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px">
+
+        <!-- Export Bookings -->
+        <div class="adm-control-card">
+          <div class="adm-control-icon">📥</div>
+          <div class="adm-control-title">Export Bookings to CSV</div>
+          <div class="adm-control-desc">Download all booking records as a spreadsheet file.</div>
+          <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+            <button class="adm-btn adm-btn-primary" onclick="exportBookingsCSV()">Export All Bookings</button>
+            <button class="adm-btn adm-btn-secondary" onclick="exportPaidBookingsCSV()">Paid Only</button>
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Full Name</label>
-            <input type="text" id="newUserName" placeholder="e.g. Mark Johnson" />
+
+        <!-- Export Clients -->
+        <div class="adm-control-card">
+          <div class="adm-control-icon">👤</div>
+          <div class="adm-control-title">Export Clients to CSV</div>
+          <div class="adm-control-desc">Download the full client database with contact details and booking history.</div>
+          <div style="margin-top:14px">
+            <button class="adm-btn adm-btn-primary" onclick="exportClientsCSV()">Export Clients</button>
           </div>
-          <div class="form-group">
-            <label>Role</label>
-            <select id="newUserRole">
-              <option value="staff">Staff Agent</option>
-              <option value="admin">Administrator</option>
+        </div>
+
+        <!-- Bulk Actions -->
+        <div class="adm-control-card">
+          <div class="adm-control-icon">⚡</div>
+          <div class="adm-control-title">Bulk Booking Actions</div>
+          <div class="adm-control-desc">Mark multiple bookings as cancelled, or archive old records in bulk.</div>
+          <div style="margin-top:12px">
+            <select id="bulkActionType" style="width:100%;margin-bottom:10px;padding:9px 12px;font-size:13px;border:1.5px solid var(--gray-200);border-radius:8px;background:var(--off-white);color:var(--gray-600);font-family:'DM Sans',sans-serif;outline:none">
+              <option value="">— Select action —</option>
+              <option value="cancel-pending">Cancel all Pending bookings</option>
+              <option value="clear-cancelled">Delete all Cancelled bookings</option>
             </select>
+            <button class="adm-btn adm-btn-danger" onclick="runBulkAction()">⚠ Run Bulk Action</button>
           </div>
         </div>
-        <button class="search-btn" onclick="createNewUser()">➕ Create User</button>
+
+        <!-- Reset / Clear Data -->
+        <div class="adm-control-card adm-danger-card">
+          <div class="adm-control-icon">🗑️</div>
+          <div class="adm-control-title">Reset Specific Data</div>
+          <div class="adm-control-desc">Permanently clear selected data. <strong>This cannot be undone.</strong></div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+            <button class="adm-btn adm-btn-danger" onclick="confirmReset('bookings')">Clear All Bookings</button>
+            <button class="adm-btn adm-btn-danger" onclick="confirmReset('clients')">Clear All Clients</button>
+            <button class="adm-btn adm-btn-danger" onclick="confirmReset('balances')">Reset All Balances to ₦0</button>
+            <button class="adm-btn adm-btn-danger" onclick="confirmReset('logs')">Clear Activity Logs</button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Manage Users -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Manage Users & Permissions</span>
-      </div>
-      <div class="card-body">
-        <div id="usersManagementList"></div>
+    <!-- ══ TAB: STAFF CONTROLS ══ -->
+    <div class="adm-panel" id="admPanel-staff-ctrl">
+      <div id="staffControlsList"></div>
+    </div>
+
+    <!-- ══ TAB: SYSTEM SETTINGS ══ -->
+    <div class="adm-panel" id="admPanel-system">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:20px">
+
+        <!-- Company Info -->
+        <div class="adm-control-card" style="grid-column:1/-1">
+          <div class="adm-control-icon">🏢</div>
+          <div class="adm-control-title">Company Information</div>
+          <div class="adm-control-desc">Displayed on invoices and reports.</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px">
+            <div class="form-group">
+              <label>Company Name</label>
+              <input type="text" id="sysCompanyName" placeholder="TDIS Logistics Ltd" />
+            </div>
+            <div class="form-group">
+              <label>IATA Code</label>
+              <input type="text" id="sysIataCode" placeholder="e.g. TD" />
+            </div>
+            <div class="form-group">
+              <label>Phone</label>
+              <input type="text" id="sysCompanyPhone" placeholder="+234..." />
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" id="sysCompanyEmail" placeholder="info@company.com" />
+            </div>
+            <div class="form-group" style="grid-column:1/-1">
+              <label>Address</label>
+              <input type="text" id="sysCompanyAddress" placeholder="Street, City, State" />
+            </div>
+          </div>
+          <button class="adm-btn adm-btn-primary" style="margin-top:14px" onclick="saveCompanyInfo()">💾 Save Company Info</button>
+        </div>
+
+        <!-- Balance Thresholds -->
+        <div class="adm-control-card">
+          <div class="adm-control-icon">⚠️</div>
+          <div class="adm-control-title">Balance Alert Thresholds</div>
+          <div class="adm-control-desc">Set at what balance level airlines are flagged as Low or Critical.</div>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">
+            <div class="form-group">
+              <label>🔴 Critical below (₦)</label>
+              <input type="number" id="sysThresholdCritical" placeholder="200000" min="0" />
+            </div>
+            <div class="form-group">
+              <label>🟡 Low below (₦)</label>
+              <input type="number" id="sysThresholdLow" placeholder="500000" min="0" />
+            </div>
+          </div>
+          <button class="adm-btn adm-btn-primary" style="margin-top:14px" onclick="saveThresholds()">Save Thresholds</button>
+        </div>
+
+        <!-- Feature Toggles -->
+        <div class="adm-control-card">
+          <div class="adm-control-icon">🔀</div>
+          <div class="adm-control-title">Feature Toggles</div>
+          <div class="adm-control-desc">Enable or disable system features for all users.</div>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px" id="featureToggleList">
+            <label class="adm-toggle-row">
+              <span class="adm-toggle-label">
+                <span style="font-weight:600;color:var(--navy-dark)">Goals & Targets</span>
+                <span style="font-size:11px;color:var(--gray-400)">Revenue goal tracking</span>
+              </span>
+              <div class="adm-toggle-switch" onclick="toggleFeature('goals',this)" data-feature="goals" data-on="true">
+                <div class="adm-toggle-knob"></div>
+              </div>
+            </label>
+            <label class="adm-toggle-row">
+              <span class="adm-toggle-label">
+                <span style="font-weight:600;color:var(--navy-dark)">Activity Logging</span>
+                <span style="font-size:11px;color:var(--gray-400)">Track all user actions</span>
+              </span>
+              <div class="adm-toggle-switch" onclick="toggleFeature('logging',this)" data-feature="logging" data-on="true">
+                <div class="adm-toggle-knob"></div>
+              </div>
+            </label>
+            <label class="adm-toggle-row">
+              <span class="adm-toggle-label">
+                <span style="font-weight:600;color:var(--navy-dark)">Client Debt Alerts</span>
+                <span style="font-size:11px;color:var(--gray-400)">Dashboard owed amount warnings</span>
+              </span>
+              <div class="adm-toggle-switch" onclick="toggleFeature('debtAlerts',this)" data-feature="debtAlerts" data-on="true">
+                <div class="adm-toggle-knob"></div>
+              </div>
+            </label>
+            <label class="adm-toggle-row">
+              <span class="adm-toggle-label">
+                <span style="font-weight:600;color:var(--navy-dark)">Balance Refund on Delete</span>
+                <span style="font-size:11px;color:var(--gray-400)">Auto-restore airline balance when booking deleted</span>
+              </span>
+              <div class="adm-toggle-switch" onclick="toggleFeature('refundOnDelete',this)" data-feature="refundOnDelete" data-on="true">
+                <div class="adm-toggle-knob"></div>
+              </div>
+            </label>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- System Logs -->
-    <div class="card" style="margin-top:24px">
-      <div class="card-header">
-        <span class="card-title">System Logs & Activity</span>
+    <!-- ══ TAB: AUDIT & SECURITY ══ -->
+    <div class="adm-panel" id="admPanel-audit">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="text" id="auditSearchInput" placeholder="🔍 Search logs…" oninput="renderAuditLogs()" style="padding:8px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;width:220px;font-family:'DM Sans',sans-serif;outline:none;background:var(--off-white)" />
+          <select id="auditUserFilter" onchange="renderAuditLogs()" style="padding:8px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-family:'DM Sans',sans-serif;outline:none;background:var(--off-white);color:var(--gray-600)">
+            <option value="">All Users</option>
+          </select>
+          <select id="auditActionFilter" onchange="renderAuditLogs()" style="padding:8px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-family:'DM Sans',sans-serif;outline:none;background:var(--off-white);color:var(--gray-600)">
+            <option value="">All Actions</option>
+            <option>LOGIN</option>
+            <option>LOGOUT</option>
+            <option>CREATE_BOOKING</option>
+            <option>DELETE_BOOKING</option>
+            <option>PAYMENT_UPDATE</option>
+            <option>CREATE_CLIENT</option>
+            <option>BALANCE_UPDATE</option>
+            <option>CREATE_STAFF</option>
+            <option>PERMISSION_CHANGE</option>
+          </select>
+        </div>
+        <button class="adm-btn adm-btn-secondary" onclick="exportLogsCSV()">📥 Export Logs CSV</button>
       </div>
-      <div class="clients-table" style="margin-top:16px">
-        <table>
-          <thead>
-            <tr>
-              <th>Timestamp</th>
-              <th>User</th>
-              <th>Action</th>
-              <th>Details</th>
-            </tr>
-          </thead>
-          <tbody id="systemLogsTableBody">
-            <tr><td colspan="4" style="text-align:center;padding:20px;color:var(--gray-400)">No logs yet</td></tr>
-          </tbody>
-        </table>
+
+      <!-- Session Stats -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:20px" id="auditStatsRow">
+        <div class="stat-card"><div class="stat-value" id="auditStatTotal">0</div><div class="stat-label">Total Log Entries</div></div>
+        <div class="stat-card"><div class="stat-value" id="auditStatLogins">0</div><div class="stat-label">Login Events</div></div>
+        <div class="stat-card"><div class="stat-value" id="auditStatDeletes">0</div><div class="stat-label">Delete Actions</div></div>
+        <div class="stat-card"><div class="stat-value" id="auditStatPayments">0</div><div class="stat-label">Payment Updates</div></div>
+      </div>
+
+      <!-- Logs Table -->
+      <div class="card">
+        <div class="card-header"><span class="card-title">Activity Log</span><span id="auditLogCount" style="font-size:11px;color:var(--gray-400)"></span></div>
+        <div class="clients-table">
+          <table>
+            <thead>
+              <tr><th>Timestamp</th><th>User</th><th>Action</th><th>Details</th></tr>
+            </thead>
+            <tbody id="systemLogsTableBody">
+              <tr><td colspan="4" style="text-align:center;padding:20px;color:var(--gray-400)">No logs yet</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Failed Logins -->
+      <div class="card" style="margin-top:20px">
+        <div class="card-header"><span class="card-title">🔐 Failed Login Attempts</span></div>
+        <div class="clients-table">
+          <table>
+            <thead><tr><th>Timestamp</th><th>Username Attempted</th><th>IP / Session</th><th>Reason</th></tr></thead>
+            <tbody id="failedLoginsTableBody">
+              <tr><td colspan="4" style="text-align:center;padding:20px;color:var(--gray-400)">No failed attempts recorded</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
-  </div>
+
+    <!-- ══ TAB: FINANCIAL CONTROLS ══ -->
+    <div class="adm-panel" id="admPanel-finance">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:20px">
+
+        <!-- Commission Rates -->
+        <div class="adm-control-card">
+          <div class="adm-control-icon">💹</div>
+          <div class="adm-control-title">Commission Rates</div>
+          <div class="adm-control-desc">Set default commission percentages per airline or globally.</div>
+          <div style="margin-top:14px" id="commissionRatesList">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+              <select id="commAirlineSelect" style="flex:1;padding:9px 12px;font-size:13px;border:1.5px solid var(--gray-200);border-radius:8px;background:var(--off-white);color:var(--gray-600);font-family:'DM Sans',sans-serif;outline:none"></select>
+              <input type="number" id="commRateInput" placeholder="%" min="0" max="100" step="0.1" style="width:80px;padding:9px 12px;font-size:13px;border:1.5px solid var(--gray-200);border-radius:8px;background:var(--off-white);outline:none" />
+              <button class="adm-btn adm-btn-primary" onclick="saveCommissionRate()">Set</button>
+            </div>
+            <div id="commissionRatesDisplay" style="font-size:12px;color:var(--gray-400);margin-top:8px"></div>
+          </div>
+        </div>
+
+        <!-- Markup Rules -->
+        <div class="adm-control-card">
+          <div class="adm-control-icon">📈</div>
+          <div class="adm-control-title">Global Markup Rule</div>
+          <div class="adm-control-desc">Apply a flat percentage markup to all booking amounts when calculating client prices.</div>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">
+            <div class="form-group">
+              <label>Default Markup (%)</label>
+              <input type="number" id="sysMarkupRate" placeholder="e.g. 5" min="0" max="100" step="0.5" />
+            </div>
+            <div class="form-group">
+              <label>Markup Label (shown on invoice)</label>
+              <input type="text" id="sysMarkupLabel" placeholder="e.g. Service Charge" />
+            </div>
+          </div>
+          <button class="adm-btn adm-btn-primary" style="margin-top:14px" onclick="saveMarkupRule()">Save Markup Rule</button>
+        </div>
+
+        <!-- Invoice Formatting -->
+        <div class="adm-control-card">
+          <div class="adm-control-icon">🧾</div>
+          <div class="adm-control-title">Invoice Number Format</div>
+          <div class="adm-control-desc">Configure how invoice/booking reference numbers are generated.</div>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:14px">
+            <div class="form-group">
+              <label>Prefix</label>
+              <input type="text" id="sysInvPrefix" placeholder="e.g. TDIS-" maxlength="10" />
+            </div>
+            <div class="form-group">
+              <label>Starting Number</label>
+              <input type="number" id="sysInvStartNum" placeholder="e.g. 1001" min="1" />
+            </div>
+            <div class="form-group">
+              <label>Preview</label>
+              <div id="invoicePreview" style="padding:9px 14px;background:var(--gold-pale);border:1.5px solid var(--gold);border-radius:8px;font-family:'Syne',sans-serif;font-weight:700;font-size:14px;color:var(--brown)">TDIS-1001</div>
+            </div>
+          </div>
+          <button class="adm-btn adm-btn-primary" style="margin-top:14px" onclick="saveInvoiceFormat()">Save Format</button>
+        </div>
+
+        <!-- Spending Limits (alias for Staff Controls tab) -->
+        <div class="adm-control-card">
+          <div class="adm-control-icon">🚧</div>
+          <div class="adm-control-title">Staff Spending Limits</div>
+          <div class="adm-control-desc">Set per-staff maximum booking amount they can process without admin approval.</div>
+          <div style="font-size:12px;color:var(--gray-400);margin:12px 0">Configure individual limits in the Staff Controls tab.</div>
+          <button class="adm-btn adm-btn-secondary" onclick="switchAdminTab('staff-ctrl', document.querySelector('[data-tab=staff-ctrl]'))">Go to Staff Controls →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ TAB: USERS & PERMISSIONS ══ -->
+    <div class="adm-panel" id="admPanel-users">
+      <!-- Create New User -->
+      <div class="card" style="margin-bottom:24px">
+        <div class="card-header"><span class="card-title">Create New User</span></div>
+        <div class="card-body">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Username</label>
+              <input type="text" id="newUserUsername" placeholder="e.g. agent_mark" />
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" id="newUserPassword" placeholder="Min 6 characters" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Full Name</label>
+              <input type="text" id="newUserName" placeholder="e.g. Mark Johnson" />
+            </div>
+            <div class="form-group">
+              <label>Role</label>
+              <select id="newUserRole">
+                <option value="staff">Staff Agent</option>
+                <option value="admin">Administrator</option>
+              </select>
+            </div>
+          </div>
+          <button class="search-btn" onclick="createNewUser()">➕ Create User</button>
+        </div>
+      </div>
+
+      <!-- Manage Users -->
+      <div class="card">
+        <div class="card-header"><span class="card-title">Manage Users & Permissions</span></div>
+        <div class="card-body">
+          <div id="usersManagementList"></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /admin section -->
 
 </div><!-- /main -->
 
@@ -2918,6 +3328,8 @@ document.getElementById('loginForm')?.addEventListener('submit', async (e) => {
   } catch (error) {
     showLoadingSpinner(false);
     showLoginError('Invalid email or password. Use admin@tdis.com / admin123');
+    systemLogs.push({ action: 'FAILED_LOGIN', user: 'Unknown', timestamp: new Date().toLocaleString('en-NG', {day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'}), details: `Failed login attempt with username: ${email}` });
+    localStorage.setItem('tdis_systemLogs', JSON.stringify(systemLogs));
   }
 });
 
@@ -3103,57 +3515,8 @@ function setupRealtimeSync() {
 }
 
 // ─── ADMIN FUNCTIONS ───
-function renderAdminDashboard() {
-  if (currentUser.role !== 'admin') return;
-  
-  // Update stats
-  const totalBalance = balances.reduce((s, b) => s + b.balance, 0);
-  document.getElementById('statTotalUsers').textContent = allUsers.length;
-  document.getElementById('statActiveUsers').textContent = allUsers.filter(u => u.status === 'active').length;
-  document.getElementById('statTotalClients').textContent = clients.length;
-  document.getElementById('statTotalBalance').textContent = '₦' + totalBalance.toLocaleString('en-NG');
-  
-  // Render users management
-  const listEl = document.getElementById('usersManagementList');
-  listEl.innerHTML = allUsers.filter(u => u.id !== currentUser.id).map(u => `
-    <div style="background:var(--off-white);border:1px solid var(--gray-200);border-radius:var(--radius-sm);padding:16px;margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div>
-          <div style="font-weight:700;color:var(--navy-dark);margin-bottom:2px">${u.name}</div>
-          <div style="font-size:12px;color:var(--gray-400)">@${u.username}</div>
-        </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <span class="user-status-badge ${u.status === 'active' ? 'active' : 'inactive'}">${u.status === 'active' ? '● Active' : '● Inactive'}</span>
-          <button class="delete-user-btn" onclick="deleteUser(${u.id})">Delete</button>
-        </div>
-      </div>
-      
-      <div style="display:flex;justify-content:space-between;margin-bottom:12px;font-size:12px">
-        <div><strong>Role:</strong> ${u.role === 'admin' ? '👑 Administrator' : '👤 Staff Agent'}</div>
-        <div><strong>Created:</strong> ${new Date(u.createdAt).toLocaleDateString('en-NG')}</div>
-      </div>
-      
-      <div style="border-top:1px solid var(--gray-100);padding-top:12px">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-400);margin-bottom:8px">Permissions</div>
-        ${renderPermissions(u)}
-      </div>
-    </div>
-  `).join('');
-  
-  // Render system logs
-  const logsEl = document.getElementById('systemLogsTableBody');
-  if (systemLogs.length === 0) {
-    logsEl.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--gray-400)">No logs yet</td></tr>`;
-  } else {
-    logsEl.innerHTML = systemLogs.slice(-20).reverse().map(log => `
-      <tr>
-        <td style="font-size:12px">${new Date(log.timestamp).toLocaleString('en-NG')}</td>
-        <td><strong>${log.user}</strong></td>
-        <td>${log.action}</td>
-        <td style="font-size:12px;color:var(--gray-400)">${log.details}</td>
-      </tr>
-    `).join('');
-  }
+function renderAdminDashboard_legacy() {
+  // Replaced by new renderAdminDashboard defined in Admin Control Centre block
 }
 
 function renderPermissions(user) {
@@ -4644,6 +5007,564 @@ function saveNewStaffMember() {
   showToast('✓ Staff member added: ' + name, 'success');
 }
 
+// ═══════════════════════════════════════════════
+//  ADMIN CONTROL CENTRE — NEW FEATURES
+// ═══════════════════════════════════════════════
+
+// ── Admin sub-tab switching ──
+function switchAdminTab(tabId, btn) {
+  document.querySelectorAll('.adm-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.adm-tab').forEach(b => b.classList.remove('active'));
+  const panel = document.getElementById('admPanel-' + tabId);
+  if (panel) panel.classList.add('active');
+  if (btn) btn.classList.add('active');
+
+  if (tabId === 'audit') renderAuditLogs();
+  if (tabId === 'staff-ctrl') renderStaffControls();
+  if (tabId === 'system') loadSystemSettings();
+  if (tabId === 'finance') loadFinanceSettings();
+}
+
+// ── renderAdminDashboard patch — populates stats + users list ──
+function renderAdminDashboard() {
+  const el = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  el('statTotalUsers', allUsers.length);
+  el('statActiveUsers', allUsers.filter(u => u.status === 'active').length);
+  el('statTotalClients', clients.length);
+  el('statTotalBalance', '₦' + balances.reduce((s,b)=>s+b.balance,0).toLocaleString('en-NG'));
+  el('statTotalBookings', bookingUpdates.length);
+
+  renderUsersManagementList();
+  loadSystemSettings();
+  loadFinanceSettings();
+  populateAuditUserFilter();
+  populateCommissionAirlines();
+}
+
+// ── Users management list ──
+function renderUsersManagementList() {
+  const container = document.getElementById('usersManagementList');
+  if (!container) return;
+  const allPerms = [
+    {key:'view_all', label:'View All'},
+    {key:'manage_users', label:'Manage Users'},
+    {key:'manage_balances', label:'Manage Balances'},
+    {key:'view_analytics', label:'View Analytics'},
+    {key:'edit_clients', label:'Edit Clients'},
+    {key:'delete_bookings', label:'Delete Bookings'},
+    {key:'view_balances', label:'View Balances'},
+    {key:'update_bookings', label:'Update Bookings'},
+    {key:'manage_clients', label:'Manage Clients'},
+    {key:'view_clients', label:'View Clients'},
+  ];
+  container.innerHTML = allUsers.map(u => `
+    <div style="border:1.5px solid var(--gray-200);border-radius:var(--radius);margin-bottom:16px;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--off-white);border-bottom:1px solid var(--gray-100)">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:36px;height:36px;border-radius:50%;background:var(--navy);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0">
+            ${u.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase()}
+          </div>
+          <div>
+            <div style="font-weight:700;font-size:14px;color:var(--navy-dark)">${u.name}</div>
+            <div style="font-size:11px;color:var(--gray-400)">@${u.username} · <span class="staff-role-badge ${u.role}" style="background:${u.role==='admin'?'var(--gold-pale)':'var(--gray-100)'};color:${u.role==='admin'?'var(--brown)':'var(--navy-dark)'}">${u.role}</span></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="user-status-badge ${u.status}">${u.status}</span>
+          ${u.id !== (currentUser||{}).id ? `<button class="adm-btn ${u.status==='active'?'adm-btn-amber':'adm-btn-success'}" onclick="toggleUserStatus(${u.id})">${u.status==='active'?'⏸ Deactivate':'▶ Activate'}</button>` : ''}
+          ${u.id !== (currentUser||{}).id ? `<button class="adm-btn adm-btn-secondary" onclick="resetUserPassword(${u.id})">🔑 Reset PW</button>` : ''}
+          ${u.id !== (currentUser||{}).id ? `<button class="delete-user-btn" onclick="deleteUser(${u.id})">✕</button>` : '<span style="font-size:11px;color:var(--gray-400)">(you)</span>'}
+        </div>
+      </div>
+      <div style="padding:14px 18px">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-400);margin-bottom:10px">Permissions</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          ${allPerms.map(p => `
+            <label class="permission-checkbox" style="min-width:160px">
+              <input type="checkbox" ${(u.permissions||[]).includes(p.key)?'checked':''} onchange="updateUserPermission(${u.id},'${p.key}',this.checked)" />
+              <span class="permission-label">${p.label}</span>
+            </label>`).join('')}
+        </div>
+      </div>
+    </div>`).join('') || '<div style="color:var(--gray-400);text-align:center;padding:24px">No users yet.</div>';
+}
+
+// ── Toggle user active/inactive ──
+function toggleUserStatus(userId) {
+  const u = allUsers.find(u => u.id === userId);
+  if (!u) return;
+  u.status = u.status === 'active' ? 'inactive' : 'active';
+  localStorage.setItem('tdis_users', JSON.stringify(allUsers));
+  fsSave('users', allUsers);
+  logActivity('STATUS_CHANGE', `${u.name} set to ${u.status}`);
+  renderUsersManagementList();
+  renderStaffControls();
+  showToast(`✓ ${u.name} is now ${u.status}`, u.status === 'active' ? 'success' : 'warn');
+}
+
+// ── Reset password ──
+function resetUserPassword(userId) {
+  const u = allUsers.find(u => u.id === userId);
+  if (!u) return;
+  const newPw = prompt(`Set a new password for ${u.name}:`);
+  if (!newPw || newPw.length < 6) { showToast('Password must be at least 6 characters', 'warn'); return; }
+  u.password = newPw;
+  localStorage.setItem('tdis_users', JSON.stringify(allUsers));
+  fsSave('users', allUsers);
+  logActivity('PASSWORD_RESET', `Password reset for ${u.name}`);
+  showToast(`✓ Password updated for ${u.name}`, 'success');
+}
+
+// ── Staff Controls tab ──
+function renderStaffControls() {
+  const container = document.getElementById('staffControlsList');
+  if (!container) return;
+  const spendingLimits = JSON.parse(localStorage.getItem('tdis_spendingLimits') || '{}');
+
+  container.innerHTML = `
+    <div style="font-size:13px;color:var(--gray-400);margin-bottom:16px">
+      Activate/deactivate staff accounts and set per-staff booking spending limits.
+    </div>
+    ${allUsers.map(u => {
+      const initials = u.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+      const limit = spendingLimits[u.id] || '';
+      return `
+      <div class="staff-ctrl-card">
+        <div class="staff-ctrl-header">
+          <div class="staff-ctrl-info">
+            <div class="staff-ctrl-avatar">${initials}</div>
+            <div>
+              <div class="staff-ctrl-name">${u.name}</div>
+              <div class="staff-ctrl-meta">@${u.username} · <span style="font-weight:700;color:${u.role==='admin'?'var(--brown)':'var(--navy-dark)'}">${u.role}</span></div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="user-status-badge ${u.status}">${u.status}</span>
+            ${u.id !== (currentUser||{}).id
+              ? `<button class="adm-btn ${u.status==='active'?'adm-btn-amber':'adm-btn-success'}" onclick="toggleUserStatus(${u.id})">${u.status==='active'?'⏸ Deactivate':'▶ Activate'}</button>`
+              : '<span style="font-size:11px;color:var(--gray-400)">Current session</span>'}
+            ${u.id !== (currentUser||{}).id ? `<button class="adm-btn adm-btn-secondary" onclick="resetUserPassword(${u.id})">🔑 Reset Password</button>` : ''}
+          </div>
+        </div>
+        <div class="staff-ctrl-body">
+          <div class="form-group" style="flex:1;min-width:220px">
+            <label>Spending Limit (₦ per booking, 0 = unlimited)</label>
+            <input type="number" id="spendLimit_${u.id}" value="${limit}" placeholder="0 = no limit" min="0"
+              style="padding:9px 12px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;font-family:'DM Sans',sans-serif;outline:none;background:var(--off-white);width:100%" />
+          </div>
+          <button class="adm-btn adm-btn-primary" onclick="saveSpendingLimit(${u.id})">💾 Save Limit</button>
+        </div>
+      </div>`;
+    }).join('')}`;
+}
+
+function saveSpendingLimit(userId) {
+  const input = document.getElementById('spendLimit_' + userId);
+  if (!input) return;
+  const val = parseFloat(input.value) || 0;
+  const limits = JSON.parse(localStorage.getItem('tdis_spendingLimits') || '{}');
+  limits[userId] = val;
+  localStorage.setItem('tdis_spendingLimits', JSON.stringify(limits));
+  const u = allUsers.find(u => u.id === userId);
+  logActivity('SPENDING_LIMIT', `Spending limit for ${u?.name || userId} set to ₦${val.toLocaleString('en-NG') || 'unlimited'}`);
+  showToast(`✓ Spending limit saved${val ? ' — ₦' + val.toLocaleString('en-NG') : ' (unlimited)'}`, 'success');
+}
+
+// ── System Settings ──
+let sysSettings = JSON.parse(localStorage.getItem('tdis_sysSettings') || '{}');
+let featureFlags = JSON.parse(localStorage.getItem('tdis_features') || '{"goals":true,"logging":true,"debtAlerts":true,"refundOnDelete":true}');
+
+function loadSystemSettings() {
+  const s = sysSettings;
+  const setVal = (id, v) => { const e = document.getElementById(id); if (e && v != null) e.value = v; };
+  setVal('sysCompanyName', s.companyName);
+  setVal('sysIataCode', s.iataCode);
+  setVal('sysCompanyPhone', s.companyPhone);
+  setVal('sysCompanyEmail', s.companyEmail);
+  setVal('sysCompanyAddress', s.companyAddress);
+  setVal('sysThresholdCritical', s.thresholdCritical != null ? s.thresholdCritical : 200000);
+  setVal('sysThresholdLow', s.thresholdLow != null ? s.thresholdLow : 500000);
+
+  // Feature toggles
+  document.querySelectorAll('.adm-toggle-switch[data-feature]').forEach(sw => {
+    const key = sw.dataset.feature;
+    const isOn = featureFlags[key] !== false;
+    sw.classList.toggle('on', isOn);
+    sw.dataset.on = isOn ? 'true' : 'false';
+  });
+}
+
+function saveCompanyInfo() {
+  sysSettings.companyName = document.getElementById('sysCompanyName')?.value.trim();
+  sysSettings.iataCode = document.getElementById('sysIataCode')?.value.trim();
+  sysSettings.companyPhone = document.getElementById('sysCompanyPhone')?.value.trim();
+  sysSettings.companyEmail = document.getElementById('sysCompanyEmail')?.value.trim();
+  sysSettings.companyAddress = document.getElementById('sysCompanyAddress')?.value.trim();
+  localStorage.setItem('tdis_sysSettings', JSON.stringify(sysSettings));
+  logActivity('SETTINGS_CHANGE', 'Company information updated');
+  showToast('✓ Company info saved', 'success');
+}
+
+function saveThresholds() {
+  const crit = parseFloat(document.getElementById('sysThresholdCritical')?.value);
+  const low = parseFloat(document.getElementById('sysThresholdLow')?.value);
+  if (isNaN(crit) || isNaN(low)) { showToast('Enter valid threshold amounts', 'warn'); return; }
+  if (low <= crit) { showToast('Low threshold must be above Critical threshold', 'warn'); return; }
+  sysSettings.thresholdCritical = crit;
+  sysSettings.thresholdLow = low;
+  localStorage.setItem('tdis_sysSettings', JSON.stringify(sysSettings));
+  logActivity('SETTINGS_CHANGE', `Balance thresholds updated — Critical: ₦${crit.toLocaleString('en-NG')}, Low: ₦${low.toLocaleString('en-NG')}`);
+  showToast('✓ Thresholds saved', 'success');
+}
+
+function toggleFeature(key, sw) {
+  const isOn = sw.dataset.on !== 'true';
+  featureFlags[key] = isOn;
+  sw.classList.toggle('on', isOn);
+  sw.dataset.on = isOn ? 'true' : 'false';
+  localStorage.setItem('tdis_features', JSON.stringify(featureFlags));
+  logActivity('FEATURE_TOGGLE', `Feature "${key}" ${isOn ? 'enabled' : 'disabled'}`);
+  showToast(`✓ ${key} ${isOn ? 'enabled' : 'disabled'}`, isOn ? 'success' : 'warn');
+}
+
+// ── Audit Logs ──
+function populateAuditUserFilter() {
+  const sel = document.getElementById('auditUserFilter');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All Users</option>';
+  allUsers.forEach(u => {
+    const opt = document.createElement('option');
+    opt.value = u.name;
+    opt.textContent = u.name;
+    sel.appendChild(opt);
+  });
+  sel.value = current;
+}
+
+function renderAuditLogs() {
+  const logs = systemLogs; // use in-memory array, synced with tdis_systemLogs
+  const search = (document.getElementById('auditSearchInput')?.value || '').toLowerCase();
+  const userFilter = document.getElementById('auditUserFilter')?.value || '';
+  const actionFilter = document.getElementById('auditActionFilter')?.value || '';
+
+  // Stats
+  const totalLogins = logs.filter(l => l.action === 'LOGIN').length;
+  const totalDeletes = logs.filter(l => l.action && l.action.startsWith('DELETE')).length;
+  const totalPayments = logs.filter(l => l.action === 'PAYMENT_UPDATE').length;
+  const el = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  el('auditStatTotal', logs.length);
+  el('auditStatLogins', totalLogins);
+  el('auditStatDeletes', totalDeletes);
+  el('auditStatPayments', totalPayments);
+
+  let filtered = logs.filter(l => {
+    if (userFilter && l.user !== userFilter) return false;
+    if (actionFilter && l.action !== actionFilter) return false;
+    if (search && !(
+      (l.action||'').toLowerCase().includes(search) ||
+      (l.user||'').toLowerCase().includes(search) ||
+      (l.details||'').toLowerCase().includes(search)
+    )) return false;
+    return true;
+  }).reverse();
+
+  const tbody = document.getElementById('systemLogsTableBody');
+  if (!tbody) return;
+  const countEl = document.getElementById('auditLogCount');
+  if (countEl) countEl.textContent = filtered.length + ' entries';
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--gray-400)">No log entries match your filters</td></tr>';
+    return;
+  }
+
+  const actionColors = {
+    LOGIN: 'var(--green)', LOGOUT: 'var(--gray-400)',
+    DELETE_BOOKING: 'var(--red)', CREATE_BOOKING: 'var(--navy)',
+    PAYMENT_UPDATE: '#4f46e5', CREATE_CLIENT: 'var(--navy)',
+    BALANCE_UPDATE: 'var(--amber)', CREATE_STAFF: 'var(--green)',
+    PERMISSION_CHANGE: 'var(--amber)', PASSWORD_RESET: 'var(--red)',
+    STATUS_CHANGE: 'var(--amber)', FEATURE_TOGGLE: '#4f46e5',
+    SPENDING_LIMIT: 'var(--gold)', SETTINGS_CHANGE: 'var(--navy)',
+  };
+
+  tbody.innerHTML = filtered.slice(0, 200).map(l => {
+    const color = actionColors[l.action] || 'var(--gray-600)';
+    return `<tr>
+      <td style="font-size:11px;color:var(--gray-400);white-space:nowrap">${l.timestamp || '—'}</td>
+      <td style="font-weight:600;color:var(--navy-dark)">${l.user || '—'}</td>
+      <td><span style="padding:3px 8px;border-radius:6px;font-size:10px;font-weight:700;color:${color};background:${color}18">${l.action || '—'}</span></td>
+      <td style="font-size:12px;color:var(--gray-600)">${l.details || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  // Failed logins
+  const failedLogs = logs.filter(l => l.action === 'FAILED_LOGIN');
+  const failedTbody = document.getElementById('failedLoginsTableBody');
+  if (failedTbody) {
+    if (!failedLogs.length) {
+      failedTbody.innerHTML = '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--gray-400)">No failed attempts recorded</td></tr>';
+    } else {
+      failedTbody.innerHTML = failedLogs.reverse().map(l => `<tr>
+        <td style="font-size:11px;color:var(--gray-400)">${l.timestamp || '—'}</td>
+        <td style="font-weight:600;color:var(--red)">${l.details?.match(/username: (\S+)/)?.[1] || l.details || '—'}</td>
+        <td style="font-size:11px;color:var(--gray-400)">Session</td>
+        <td style="font-size:12px">${l.details || '—'}</td>
+      </tr>`).join('');
+    }
+  }
+}
+
+function exportLogsCSV() {
+  const logs = systemLogs;
+  if (!logs.length) { showToast('No logs to export', 'warn'); return; }
+  const header = ['Timestamp', 'User', 'Action', 'Details'];
+  const rows = logs.map(l => [l.timestamp, l.user, l.action, l.details].map(v => `"${(v||'').replace(/"/g,'""')}"`));
+  downloadCSV([header, ...rows], 'tdis_activity_logs.csv');
+  logActivity('EXPORT', 'Exported activity logs to CSV');
+}
+
+// ── Financial Controls ──
+let commissionRates = JSON.parse(localStorage.getItem('tdis_commissionRates') || '{}');
+let markupRule = JSON.parse(localStorage.getItem('tdis_markupRule') || '{}');
+let invoiceFormat = JSON.parse(localStorage.getItem('tdis_invoiceFormat') || '{"prefix":"TDIS-","startNum":1001}');
+
+function loadFinanceSettings() {
+  // Markup
+  const mEl = document.getElementById('sysMarkupRate');
+  const mLbl = document.getElementById('sysMarkupLabel');
+  if (mEl && markupRule.rate != null) mEl.value = markupRule.rate;
+  if (mLbl && markupRule.label) mLbl.value = markupRule.label;
+
+  // Invoice format
+  const pfx = document.getElementById('sysInvPrefix');
+  const num = document.getElementById('sysInvStartNum');
+  if (pfx) pfx.value = invoiceFormat.prefix || 'TDIS-';
+  if (num) num.value = invoiceFormat.startNum || 1001;
+  updateInvoicePreview();
+
+  // Commission display
+  renderCommissionDisplay();
+}
+
+function populateCommissionAirlines() {
+  const sel = document.getElementById('commAirlineSelect');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— All Airlines (global) —</option>';
+  AIRLINES.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a.name;
+    opt.textContent = a.name;
+    sel.appendChild(opt);
+  });
+}
+
+function saveCommissionRate() {
+  const airline = document.getElementById('commAirlineSelect')?.value || '';
+  const rate = parseFloat(document.getElementById('commRateInput')?.value);
+  if (isNaN(rate) || rate < 0) { showToast('Enter a valid commission rate', 'warn'); return; }
+  const key = airline || '__global__';
+  commissionRates[key] = rate;
+  localStorage.setItem('tdis_commissionRates', JSON.stringify(commissionRates));
+  document.getElementById('commRateInput').value = '';
+  logActivity('SETTINGS_CHANGE', `Commission rate set — ${airline || 'Global'}: ${rate}%`);
+  renderCommissionDisplay();
+  showToast(`✓ Commission rate saved: ${rate}% for ${airline || 'all airlines'}`, 'success');
+}
+
+function renderCommissionDisplay() {
+  const div = document.getElementById('commissionRatesDisplay');
+  if (!div) return;
+  const entries = Object.entries(commissionRates);
+  if (!entries.length) { div.innerHTML = '<span style="color:var(--gray-400)">No rates set yet</span>'; return; }
+  div.innerHTML = entries.map(([k, v]) =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--gold-pale);color:var(--brown);padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700;margin:2px">
+      ${k === '__global__' ? '🌐 Global' : k}: ${v}%
+      <span style="cursor:pointer;opacity:0.6;margin-left:2px" onclick="deleteCommissionRate('${k}')">✕</span>
+    </span>`
+  ).join('');
+}
+
+function deleteCommissionRate(key) {
+  delete commissionRates[key];
+  localStorage.setItem('tdis_commissionRates', JSON.stringify(commissionRates));
+  renderCommissionDisplay();
+  showToast('Commission rate removed', 'warn');
+}
+
+function saveMarkupRule() {
+  const rate = parseFloat(document.getElementById('sysMarkupRate')?.value);
+  const label = document.getElementById('sysMarkupLabel')?.value.trim() || 'Service Charge';
+  if (isNaN(rate) || rate < 0) { showToast('Enter a valid markup percentage', 'warn'); return; }
+  markupRule = { rate, label };
+  localStorage.setItem('tdis_markupRule', JSON.stringify(markupRule));
+  logActivity('SETTINGS_CHANGE', `Markup rule set: ${rate}% (${label})`);
+  showToast(`✓ Markup rule saved: ${rate}% — ${label}`, 'success');
+}
+
+function updateInvoicePreview() {
+  const pfx = document.getElementById('sysInvPrefix')?.value || 'TDIS-';
+  const num = document.getElementById('sysInvStartNum')?.value || '1001';
+  const prev = document.getElementById('invoicePreview');
+  if (prev) prev.textContent = pfx + num;
+}
+
+// Attach live preview update
+(function() {
+  const p = document.getElementById('sysInvPrefix');
+  const n = document.getElementById('sysInvStartNum');
+  if (p) p.addEventListener('input', updateInvoicePreview);
+  if (n) n.addEventListener('input', updateInvoicePreview);
+})();
+
+function saveInvoiceFormat() {
+  const prefix = document.getElementById('sysInvPrefix')?.value.trim() || 'TDIS-';
+  const startNum = parseInt(document.getElementById('sysInvStartNum')?.value) || 1001;
+  invoiceFormat = { prefix, startNum };
+  localStorage.setItem('tdis_invoiceFormat', JSON.stringify(invoiceFormat));
+  logActivity('SETTINGS_CHANGE', `Invoice format saved: ${prefix}${startNum}`);
+  showToast(`✓ Invoice format saved: ${prefix}${startNum}`, 'success');
+}
+
+// ── CSV Export helpers ──
+function downloadCSV(rows, filename) {
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
+function exportBookingsCSV() {
+  if (!bookingUpdates.length) { showToast('No bookings to export', 'warn'); return; }
+  const header = ['Client','Airline','Amount','Status','Booking Type','PNR','Amount Paid','Initiated By','Updated By','Date'];
+  const rows = bookingUpdates.map(b => [
+    b.client, b.airline, b.amount, b.status, b.bookingType||'',
+    b.pnr||'', b.amountPaid||0, b.initiatedBy||'', b.updatedBy||'', b.updated
+  ].map(v => `"${String(v).replace(/"/g,'""')}"`));
+  downloadCSV([header, ...rows], 'tdis_bookings.csv');
+  logActivity('EXPORT', `Exported ${bookingUpdates.length} bookings to CSV`);
+  showToast(`✓ Exported ${bookingUpdates.length} bookings`, 'success');
+}
+
+function exportPaidBookingsCSV() {
+  const paid = bookingUpdates.filter(b => b.status === 'Paid');
+  if (!paid.length) { showToast('No paid bookings to export', 'warn'); return; }
+  const header = ['Client','Airline','Amount','PNR','Initiated By','Date'];
+  const rows = paid.map(b => [b.client, b.airline, b.amount, b.pnr||'', b.initiatedBy||'', b.updated]
+    .map(v => `"${String(v).replace(/"/g,'""')}"`));
+  downloadCSV([header, ...rows], 'tdis_paid_bookings.csv');
+  logActivity('EXPORT', `Exported ${paid.length} paid bookings to CSV`);
+  showToast(`✓ Exported ${paid.length} paid bookings`, 'success');
+}
+
+function exportClientsCSV() {
+  if (!clients.length) { showToast('No clients to export', 'warn'); return; }
+  const header = ['Name','Phone','Email','Passport','Total Bookings','Amount Owed'];
+  const rows = clients.map(c => [
+    c.name, c.phone||'', c.email||'', c.passport||'',
+    c.bookings||0, getClientAmountOwed(c.name)
+  ].map(v => `"${String(v).replace(/"/g,'""')}"`));
+  downloadCSV([header, ...rows], 'tdis_clients.csv');
+  logActivity('EXPORT', `Exported ${clients.length} clients to CSV`);
+  showToast(`✓ Exported ${clients.length} clients`, 'success');
+}
+
+// ── Bulk Actions ──
+function runBulkAction() {
+  const action = document.getElementById('bulkActionType')?.value;
+  if (!action) { showToast('Select an action first', 'warn'); return; }
+
+  if (action === 'cancel-pending') {
+    const pending = bookingUpdates.filter(b => b.status === 'Pending');
+    if (!pending.length) { showToast('No pending bookings found', 'warn'); return; }
+    if (!confirm(`Cancel all ${pending.length} pending bookings? This cannot be undone.`)) return;
+    pending.forEach(b => { b.status = 'Cancelled'; });
+    localStorage.setItem('tdis_bookingUpdates', JSON.stringify(bookingUpdates));
+    fsSave('bookingUpdates', bookingUpdates);
+    logActivity('BULK_ACTION', `Cancelled ${pending.length} pending bookings`);
+    renderBookingUpdates();
+    showToast(`✓ ${pending.length} bookings cancelled`, 'success');
+  } else if (action === 'clear-cancelled') {
+    const cancelled = bookingUpdates.filter(b => b.status === 'Cancelled');
+    if (!cancelled.length) { showToast('No cancelled bookings found', 'warn'); return; }
+    if (!confirm(`Permanently delete all ${cancelled.length} cancelled bookings?`)) return;
+    const before = bookingUpdates.length;
+    bookingUpdates.splice(0, bookingUpdates.length, ...bookingUpdates.filter(b => b.status !== 'Cancelled'));
+    localStorage.setItem('tdis_bookingUpdates', JSON.stringify(bookingUpdates));
+    fsSave('bookingUpdates', bookingUpdates);
+    logActivity('BULK_ACTION', `Deleted ${before - bookingUpdates.length} cancelled bookings`);
+    renderBookingUpdates();
+    showToast(`✓ Deleted ${before - bookingUpdates.length} cancelled bookings`, 'success');
+  }
+  document.getElementById('bulkActionType').value = '';
+}
+
+// ── Data Reset ──
+function confirmReset(type) {
+  const labels = {
+    bookings: 'all bookings', clients: 'all clients',
+    balances: 'all airline balances to ₦0', logs: 'activity logs'
+  };
+  if (!confirm(`⚠️ Are you sure you want to clear ${labels[type]}? This CANNOT be undone.`)) return;
+  if (!confirm(`This is your final warning. Clear ${labels[type]}?`)) return;
+
+  if (type === 'bookings') {
+    bookingUpdates.splice(0, bookingUpdates.length);
+    localStorage.setItem('tdis_bookingUpdates', JSON.stringify(bookingUpdates));
+    fsSave('bookingUpdates', bookingUpdates);
+    renderBookingUpdates(); renderDashboard();
+    logActivity('DATA_RESET', 'All bookings cleared by admin');
+    showToast('✓ All bookings cleared', 'success');
+  } else if (type === 'clients') {
+    clients.splice(0, clients.length);
+    localStorage.setItem('tdis_clients', JSON.stringify(clients));
+    fsSave('clients', clients);
+    renderClients(); renderDashboard();
+    logActivity('DATA_RESET', 'All clients cleared by admin');
+    showToast('✓ All clients cleared', 'success');
+  } else if (type === 'balances') {
+    balances.forEach(b => { b.balance = 0; });
+    localStorage.setItem('tdis_balances', JSON.stringify(balances));
+    fsSave('balances', balances);
+    renderBalances();
+    logActivity('DATA_RESET', 'All airline balances reset to ₦0');
+    showToast('✓ All balances reset', 'success');
+  } else if (type === 'logs') {
+    systemLogs.splice(0, systemLogs.length);
+    localStorage.setItem('tdis_systemLogs', '[]');
+    renderAuditLogs();
+    showToast('✓ Activity logs cleared', 'success');
+  }
+}
+
+// Expose new globals
+window.switchAdminTab = switchAdminTab;
+window.renderUsersManagementList = renderUsersManagementList;
+window.toggleUserStatus = toggleUserStatus;
+window.resetUserPassword = resetUserPassword;
+window.renderStaffControls = renderStaffControls;
+window.saveSpendingLimit = saveSpendingLimit;
+window.saveCompanyInfo = saveCompanyInfo;
+window.saveThresholds = saveThresholds;
+window.toggleFeature = toggleFeature;
+window.renderAuditLogs = renderAuditLogs;
+window.exportLogsCSV = exportLogsCSV;
+window.saveCommissionRate = saveCommissionRate;
+window.deleteCommissionRate = deleteCommissionRate;
+window.saveMarkupRule = saveMarkupRule;
+window.saveInvoiceFormat = saveInvoiceFormat;
+window.updateInvoicePreview = updateInvoicePreview;
+window.exportBookingsCSV = exportBookingsCSV;
+window.exportPaidBookingsCSV = exportPaidBookingsCSV;
+window.exportClientsCSV = exportClientsCSV;
+window.runBulkAction = runBulkAction;
+window.confirmReset = confirmReset;
+window.downloadCSV = downloadCSV;
+window.populateCommissionAirlines = populateCommissionAirlines;
+
 // Expose new globals
 window.toggleSubmenu = toggleSubmenu;
 window.filterSidebarMenu = filterSidebarMenu;
@@ -4655,7 +5576,6 @@ window.saveNewStaffMember = saveNewStaffMember;
 window.toggleSignup = toggleSignup;
 window.demoLogin = demoLogin;
 window.handleLogout = handleLogout;
-window.showTab = showTab;
 window.renderAirlines = renderAirlines;
 window.renderBalances = renderBalances;
 window.openBalanceModal = openBalanceModal;
@@ -4784,9 +5704,8 @@ function animateNumber(el, target, prefix = '', suffix = '', duration = 800) {
 }
 
 // ── Section switch enhancement ────────────────
-const _origShowTab = window.showTab;
 window.showTab = function(id, btn) {
-  _origShowTab(id, btn);
+  showTab(id, btn);
   // Re-stagger new content
   setTimeout(() => {
     attachRipples();
@@ -4796,27 +5715,24 @@ window.showTab = function(id, btn) {
     if (id === 'clients') staggerCards('#clientsTableBody tr', 40);
     if (id === 'updateBookings') { staggerCards('.booking-update-grid .card', 80); populateStaffDropdowns(); }
     if (id === 'staff') { renderStaffTab(); staggerCards('#staffCardsGrid .staff-card', 70); staggerCards('#staffKpiRow .stat-card', 60); }
-    if (id === 'admin') staggerCards('.stat-card', 60);
+    if (id === 'admin') { staggerCards('.stat-card', 60); setTimeout(() => { populateAuditUserFilter(); populateCommissionAirlines(); }, 80); }
     if (id === 'dashboard') { renderDashboard(); staggerCards('.dash-kpi-card', 50); }
     if (id === 'goals') { renderGoals(); staggerCards('.goal-card', 80); }
   }, 50);
 };
 
 // ── Patch renderAirlines to add stagger ──────
-const _origRenderAirlines = window.renderAirlines;
 window.renderAirlines = function(...args) {
-  _origRenderAirlines(...args);
+  renderAirlines(...args);
   setTimeout(() => staggerCards('#airlinesGrid .airline-tile', 45), 30);
 };
 
 // ── Patch renderBalances to add stagger ──────
-const _origRenderBalances = window.renderBalances;
 window.renderBalances = function(...args) {
-  _origRenderBalances(...args);
+  renderBalances(...args);
   setTimeout(() => {
     staggerCards('#balancesGrid .balance-card', 55);
     attachReveal();
-    // Animate balance bars
     document.querySelectorAll('.balance-bar').forEach(bar => {
       const w = bar.style.width;
       bar.style.width = '0';
@@ -4826,9 +5742,8 @@ window.renderBalances = function(...args) {
 };
 
 // ── Patch renderClients for row stagger ──────
-const _origRenderClients = window.renderClients;
 window.renderClients = function(...args) {
-  _origRenderClients(...args);
+  renderClients(...args);
   setTimeout(() => {
     document.querySelectorAll('#clientsTableBody tr').forEach((tr, i) => {
       tr.style.opacity = '0';
@@ -4843,9 +5758,8 @@ window.renderClients = function(...args) {
 };
 
 // ── Patch renderAdminDashboard ────────────────
-const _origRenderAdmin = window.renderAdminDashboard;
 window.renderAdminDashboard = function(...args) {
-  _origRenderAdmin(...args);
+  renderAdminDashboard(...args);
   setTimeout(() => {
     staggerCards('.stat-card', 70);
     attachReveal();
