@@ -1234,17 +1234,95 @@
 
   /* Responsive */
   @media (max-width: 900px) {
-    .booking-grid { grid-template-columns: 1fr; }
-    .main { padding: 16px; }
-    header { padding: 0 16px; }
+
+    /* ── Layout ── */
+    .main { padding: 12px; }
+    header { padding: 0 12px; }
     .app-body { flex-direction: column; }
-    .sidebar { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; padding: 8px; gap: 4px; overflow-x: auto; }
-    .sidebar-section { padding: 4px; }
+
+    /* ── Sidebar becomes horizontal scrollable top bar ── */
+    .sidebar {
+      width: 100%;
+      height: auto;
+      position: static;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      padding: 6px 8px;
+      gap: 4px;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .sidebar::-webkit-scrollbar { display: none; }
+    .sidebar-section { padding: 0; display: contents; }
     .sidebar-section-label { display: none; }
-    .tab-btn { white-space: nowrap; padding: 7px 10px; font-size: 12px; }
-    .submenu { display: none; }
-    .dash-two-col, .dash-three-col { grid-template-columns: 1fr; }
-    .goals-period-grid { grid-template-columns: 1fr; }
+    .tab-btn { white-space: nowrap; padding: 7px 11px; font-size: 11px; flex-shrink: 0; }
+    .submenu { display: none !important; }
+
+    /* ── Section visibility — only .active shows ── */
+    .section { display: none !important; }
+    .section.active { display: block !important; }
+
+    /* ── Dashboard ── */
+    .dash-two-col, .dash-three-col { grid-template-columns: 1fr !important; }
+    .goals-period-grid { grid-template-columns: 1fr !important; }
+    .booking-grid { grid-template-columns: 1fr !important; }
+
+    /* ── Tables — scroll horizontally, never clip ── */
+    .clients-table {
+      overflow-x: auto !important;
+      -webkit-overflow-scrolling: touch;
+    }
+    .clients-table table { min-width: 580px; }
+    td, th { padding: 10px 12px; font-size: 12px; }
+
+    /* ── Update Bookings — stack to single column ── */
+    .booking-update-grid {
+      display: block !important;
+    }
+    .booking-update-grid > * { margin-bottom: 16px; }
+    .form-row { grid-template-columns: 1fr !important; }
+    .form-row-3 { grid-template-columns: 1fr !important; }
+
+    /* ── Admin dashboard ── */
+    .admin-tab-nav { gap: 4px; margin-bottom: 12px; overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
+    .admin-tab-nav::-webkit-scrollbar { display: none; }
+    .adm-tab { font-size: 10px; padding: 6px 9px; flex-shrink: 0; }
+    .admin-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 10px; }
+    .stat-card { padding: 14px 12px; }
+    .stat-value { font-size: 20px; }
+    .adm-control-card { padding: 16px; }
+
+    /* ── Staff Directory — override inline styles via JS-friendly approach ── */
+    .staff-card { width: 100% !important; box-sizing: border-box; }
+    #staffKpiRow { grid-template-columns: repeat(2, 1fr) !important; }
+
+    /* ── Cards ── */
+    .card { margin-bottom: 12px; }
+    .card-body { padding: 14px; }
+
+    /* ── Modal fix ── */
+    .modal-content { width: 95vw !important; max-height: 92vh; overflow-y: auto; padding: 18px; }
+
+    /* ── Staff control cards ── */
+    .staff-ctrl-body { flex-direction: column; }
+    .staff-ctrl-header { flex-wrap: wrap; gap: 10px; }
+
+    /* ── Finance / system grids ── */
+    .adm-control-card [style*="grid-template-columns"] { 
+      display: flex !important;
+      flex-direction: column !important;
+    }
+  }
+
+  /* Extra small screens */
+  @media (max-width: 480px) {
+    .admin-grid { grid-template-columns: 1fr 1fr !important; }
+    #staffKpiRow { grid-template-columns: 1fr 1fr !important; }
+    .adm-tab { font-size: 9px; padding: 5px 7px; }
+    .stat-value { font-size: 18px; }
+    .section-title { font-size: 16px; }
   }
 
   /* ═══════════════════════════════════════════════════
@@ -4534,6 +4612,10 @@ function renderStaffTab() {
   const grid = document.getElementById('staffCardsGrid');
   if (!grid) return;
 
+  // Respect mobile — override inline style based on viewport
+  const isMobile = window.innerWidth <= 900;
+  grid.style.gridTemplateColumns = isMobile ? '1fr' : 'repeat(auto-fill, minmax(340px, 1fr))';
+
   const maxRevenue = Math.max(...allUsers.map(u => (statsMap[u.name] || {}).revenue || 0), 1);
   const filteredUsers = allUsers.filter(u => !filterVal || u.name.toLowerCase().includes(filterVal));
 
@@ -5039,6 +5121,15 @@ function renderAdminDashboard() {
   loadFinanceSettings();
   populateAuditUserFilter();
   populateCommissionAirlines();
+
+  // Fix any inline grid styles for mobile
+  if (window.innerWidth <= 900) {
+    document.querySelectorAll('#admin [style*="grid-template-columns"]').forEach(el => {
+      el.style.gridTemplateColumns = '1fr';
+      el.style.display = 'flex';
+      el.style.flexDirection = 'column';
+    });
+  }
 }
 
 // ── Users management list ──
@@ -5619,6 +5710,21 @@ showTab('dashboard', document.getElementById('nav-dashboard'));
 // Initialize session then load all data from Firestore
 initializeSession();
 loadAllData();
+
+// Reflow inline grids on resize/orientation change
+window.addEventListener('resize', () => {
+  const isMobile = window.innerWidth <= 900;
+  const grid = document.getElementById('staffCardsGrid');
+  if (grid) grid.style.gridTemplateColumns = isMobile ? '1fr' : 'repeat(auto-fill, minmax(340px, 1fr))';
+  const activeSection = document.querySelector('.section.active');
+  if (activeSection && activeSection.id === 'admin' && isMobile) {
+    document.querySelectorAll('#admin [style*="grid-template-columns"]').forEach(el => {
+      el.style.gridTemplateColumns = '1fr';
+      el.style.display = 'flex';
+      el.style.flexDirection = 'column';
+    });
+  }
+});
 
 // ═══════════════════════════════════════════════
 //  TDIS 2.0 — ANIMATION ENGINE
