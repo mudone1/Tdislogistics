@@ -2099,8 +2099,13 @@
     font-size: 10px; font-weight: 700;
     text-transform: uppercase; letter-spacing: 0.5px;
   }
-  .staff-role-badge.admin { background: var(--gold-light); color: var(--navy-dark); }
-  .staff-role-badge.staff { background: rgba(255,255,255,0.2); color: white; }
+  .staff-role-badge.admin       { background: var(--gold-light); color: var(--navy-dark); }  /* legacy compat */
+  .staff-role-badge.manager     { background: var(--gold-light); color: var(--navy-dark); }
+  .staff-role-badge.agent       { background: rgba(255,255,255,0.2); color: white; }
+  .staff-role-badge.staff       { background: rgba(255,255,255,0.2); color: white; }          /* legacy compat */
+  .staff-role-badge.independent { background: rgba(79,70,229,0.25); color: #c7d2fe; }
+  .staff-role-badge.frontdesk   { background: rgba(20,184,166,0.25); color: #99f6e4; }
+  .staff-role-badge.superadmin  { background: #7f1d1d; color: #fca5a5; }
   .staff-contact {
     padding: 14px 20px;
     border-bottom: 1px solid var(--gray-100);
@@ -2220,8 +2225,10 @@
       <input type="email" id="signupEmail" placeholder="Email" required autocomplete="off" />
       <input type="password" id="signupPassword" placeholder="Password (min 6 chars)" required autocomplete="off" />
       <select id="signupRole" style="padding:12px;border:1px solid var(--gray-200);border-radius:8px;font-size:14px">
-        <option value="staff">Staff Agent</option>
-        <option value="admin">Administrator</option>
+        <option value="agent">Staff Agent</option>
+        <option value="manager">Operational Manager</option>
+        <option value="independent">TDIS Independent Agent</option>
+        <option value="frontdesk">Front Desk Staff</option>
       </select>
       <button type="submit" class="login-btn">Create Account →</button>
       <p style="text-align:center;margin-top:15px;font-size:14px">
@@ -3116,8 +3123,10 @@
             <div class="form-group">
               <label>Role</label>
               <select id="newUserRole">
-                <option value="staff">Staff Agent</option>
-                <option value="admin">Administrator</option>
+                <option value="agent">Staff Agent</option>
+                <option value="manager">Operational Manager</option>
+                <option value="independent">TDIS Independent Agent</option>
+                <option value="frontdesk">Front Desk Staff</option>
               </select>
             </div>
           </div>
@@ -3254,8 +3263,10 @@
         <div class="form-group">
           <label>Role</label>
           <select id="newStaffRole">
-            <option value="staff">Staff Agent</option>
-            <option value="admin">Administrator</option>
+            <option value="agent">Staff Agent</option>
+            <option value="manager">Operational Manager</option>
+            <option value="independent">TDIS Independent Agent</option>
+            <option value="frontdesk">Front Desk Staff</option>
           </select>
         </div>
       </div>
@@ -3485,9 +3496,9 @@ document.getElementById('signupForm')?.addEventListener('submit', async (e) => {
       name: name,
       email: email,
       role: role,
-      permissions: role === 'admin' ? 
+      permissions: isAdminRole(role) ? 
         ['view_all', 'manage_users', 'manage_balances', 'view_analytics', 'edit_clients', 'delete_bookings'] :
-        ['view_balances', 'update_bookings', 'manage_clients'],
+        ['view_balances', 'update_bookings', 'manage_clients', 'view_clients'],
       status: 'active',
       createdAt: new Date().toISOString()
     });
@@ -3610,15 +3621,39 @@ function updateUIForUser() {
   const initials = currentUser.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
   document.getElementById('userAvatar').textContent = initials;
   document.getElementById('userName').textContent = currentUser.name;
-  document.getElementById('userRole').textContent = currentUser.role === 'admin' ? 'Administrator' : 'Staff Agent';
+  document.getElementById('userRole').textContent = getRoleLabel(currentUser.role);
   
   // Show admin tab if user is admin
-  document.getElementById('adminTabBtn').style.display = currentUser.role === 'admin' ? 'block' : 'none';
+  document.getElementById('adminTabBtn').style.display = isAdminRole(currentUser.role) ? 'block' : 'none';
+}
+
+// ─── ROLE DEFINITIONS ───
+const ROLES = [
+  { value: 'manager',     label: 'Operational Manager',          isAdmin: true  },
+  { value: 'agent',       label: 'Staff Agent',                  isAdmin: false },
+  { value: 'independent', label: 'TDIS Independent Agent',       isAdmin: false },
+  { value: 'frontdesk',   label: 'Front Desk Staff',             isAdmin: false },
+  // superadmin exists but is never shown in dropdowns — developer only
+];
+function getRoleLabel(role) {
+  if (role === 'admin') return 'Operational Manager'; // legacy
+  if (role === 'staff') return 'Staff Agent';         // legacy
+  const found = ROLES.find(r => r.value === role);
+  return found ? found.label : role;
+}
+function isAdminRole(role) {
+  if (role === 'admin' || role === 'superadmin') return true;
+  return ROLES.some(r => r.value === role && r.isAdmin);
+}
+function roleOptionsHTML(selectedValue) {
+  return ROLES.map(r =>
+    `<option value="${r.value}"${selectedValue === r.value ? ' selected' : ''}>${r.label}</option>`
+  ).join('');
 }
 
 function hasPermission(permission) {
   if (!currentUser) return false;
-  if (currentUser.role === 'admin') return true; // Admins have all permissions
+  if (isAdminRole(currentUser.role)) return true;
   return currentUser.permissions && currentUser.permissions.includes(permission);
 }
 
@@ -3640,7 +3675,7 @@ function setupRealtimeSync() {
     }
     if (e.key === 'tdis_users') {
       allUsers = JSON.parse(e.newValue || '[]');
-      if (currentUser.role === 'admin' && document.querySelector('.section.active').id === 'admin') renderAdminDashboard();
+      if (isAdminRole(currentUser.role) && document.querySelector('.section.active').id === 'admin') renderAdminDashboard();
     }
   });
   
@@ -3714,9 +3749,9 @@ function createNewUser() {
   const newUser = {
     id: Math.max(...allUsers.map(u => u.id), 0) + 1,
     username, password, name, role,
-    permissions: role === 'admin' 
+    permissions: isAdminRole(role)
       ? ['view_all', 'manage_users', 'manage_balances', 'view_analytics', 'edit_clients', 'delete_bookings']
-      : ['view_balances', 'update_bookings', 'manage_clients'],
+      : ['view_balances', 'update_bookings', 'manage_clients', 'view_clients'],
     status: 'active',
     createdAt: new Date().toISOString()
   };
@@ -4542,7 +4577,7 @@ function renderBookingUpdates() {
       </td>
       <td style="font-size:12px;color:var(--gray-400)">${b.updated}</td>
       <td onclick="event.stopPropagation()">
-        ${currentUser && currentUser.role === 'admin'
+        ${currentUser && isAdminRole(currentUser.role)
           ? `<span class="action-link" style="color:var(--red)" onclick="deleteBookingUpdate(${i})">Delete</span>`
           : '<span style="color:var(--gray-300);font-size:11px">—</span>'}
       </td>
@@ -4593,7 +4628,7 @@ function populateStaffDropdowns() {
     staffList.forEach(u => {
       const opt = document.createElement('option');
       opt.value = u.name;
-      opt.textContent = `${u.name} (${u.role === 'admin' ? 'Admin' : 'Staff'})`;
+      opt.textContent = `${u.name} (${getRoleLabel(u.role)})`;
       sel.appendChild(opt);
     });
     // Restore previous value if still valid
@@ -4693,11 +4728,11 @@ function renderStaffTab() {
     card.className = 'staff-card';
     card.innerHTML = `
       <div class="staff-card-header">
-        <div class="staff-avatar-lg">${initials}</div>
+        <div class="staff-avatar-lg" id="staff-avatar-display-${u.id}">${initials}</div>
         <div class="staff-info">
-          <div class="staff-name">${u.name}</div>
+          <div class="staff-name" id="staff-name-display-${u.id}">${u.name}</div>
           <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
-            <span class="staff-role-badge ${u.role}">${u.role}</span>
+            <span class="staff-role-badge ${u.role}">${getRoleLabel(u.role)}</span>
             <span style="font-size:11px;color:rgba(255,255,255,0.6);display:flex;align-items:center">${statusDot}${u.status}</span>
           </div>
         </div>
@@ -4753,6 +4788,7 @@ function renderStaffTab() {
       </div>
 
       <div class="staff-edit-row" id="staff-edit-row-${u.id}">
+        <input type="text" id="staff-name-input-${u.id}" placeholder="✏ Full name" value="${u.name}" style="font-weight:700" />
         <input type="tel" id="staff-phone-input-${u.id}" placeholder="📞 Phone number" value="${phone}" />
         <input type="email" id="staff-email-input-${u.id}" placeholder="📧 Email address" value="${email}" />
         <div class="staff-edit-actions">
@@ -4792,7 +4828,7 @@ function renderStaffTab() {
           </div>
         </div>
       </td>
-      <td><span class="staff-role-badge ${u.role}" style="background:${u.role==='admin'?'var(--gold-pale)':'var(--gray-100)'};color:${u.role==='admin'?'var(--brown)':'var(--navy-dark)'}">${u.role}</span></td>
+      <td><span class="staff-role-badge ${u.role}" style="background:${isAdminRole(u.role)?'var(--gold-pale)':'var(--gray-100)'};color:${isAdminRole(u.role)?'var(--brown)':'var(--navy-dark)'}">${getRoleLabel(u.role)}</span></td>
       <td><strong style="font-size:14px;color:var(--navy-dark)">${st.total}</strong></td>
       <td><span style="color:var(--green);font-weight:700">${st.issued}</span></td>
       <td><span style="color:var(--amber);font-weight:700">${st.onHold}</span></td>
@@ -4812,23 +4848,59 @@ function toggleStaffEdit(userId) {
 }
 
 function saveStaffContact(userId) {
-  const phone = (document.getElementById('staff-phone-input-' + userId) || {}).value?.trim() || '';
-  const email = (document.getElementById('staff-email-input-' + userId) || {}).value?.trim() || '';
   const user = allUsers.find(u => u.id == userId);
   if (!user) return;
+
+  const newName = (document.getElementById('staff-name-input-' + userId) || {}).value?.trim() || '';
+  const phone   = (document.getElementById('staff-phone-input-' + userId) || {}).value?.trim() || '';
+  const email   = (document.getElementById('staff-email-input-' + userId) || {}).value?.trim() || '';
+
+  if (!newName) { showToast('Name cannot be empty', 'warn'); return; }
+
+  const oldName = user.name;
+  const nameChanged = newName !== oldName;
+
+  // Update user record
+  user.name  = newName;
   user.phone = phone;
   user.email = email;
+
+  // If name changed, update all booking records that reference the old name
+  if (nameChanged) {
+    let bookingsUpdatedCount = 0;
+    bookingUpdates.forEach(b => {
+      if (b.initiatedBy === oldName) { b.initiatedBy = newName; bookingsUpdatedCount++; }
+      if (b.updatedBy === oldName)   { b.updatedBy   = newName; bookingsUpdatedCount++; }
+    });
+    if (bookingsUpdatedCount) {
+      localStorage.setItem('tdis_bookingUpdates', JSON.stringify(bookingUpdates));
+      fsSave('bookingUpdates', bookingUpdates);
+    }
+  }
+
   localStorage.setItem('tdis_users', JSON.stringify(allUsers));
   fsSave('users', allUsers);
-  // Update display immediately
+  logActivity('STAFF_EDIT', `Updated staff: ${oldName}${nameChanged ? ' → ' + newName : ''} (phone, email)`);
+
+  // Update card header live without full re-render
+  const nameDisplay = document.getElementById('staff-name-display-' + userId);
+  const avatarDisplay = document.getElementById('staff-avatar-display-' + userId);
+  const newInitials = newName.split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+  if (nameDisplay) nameDisplay.textContent = newName;
+  if (avatarDisplay) avatarDisplay.textContent = newInitials;
+
+  // Update contact display
   const pd = document.getElementById('staff-phone-display-' + userId);
   const ed = document.getElementById('staff-email-display-' + userId);
   if (pd) { pd.textContent = phone || 'No phone — click Edit'; pd.style.color = phone ? 'var(--navy-dark)' : 'var(--gray-400)'; }
   if (ed) { ed.textContent = email || 'No email — click Edit'; ed.style.color = email ? 'var(--navy-dark)' : 'var(--gray-400)'; }
+
   toggleStaffEdit(userId);
-  // Also refresh staff dropdowns in booking form
   populateStaffDropdowns();
-  showToast('✓ Contact saved for ' + user.name, 'success');
+
+  showToast(`✓ ${newName} updated${nameChanged ? ' (name & bookings updated)' : ''}`, 'success');
+  // Full re-render to refresh KPIs and sales table with new name
+  renderStaffTab();
 }
 
 // ─── WIRE UP CLIENT SEARCH (done here in module scope, no inline handlers needed) ───
@@ -5131,7 +5203,7 @@ function saveNewStaffMember() {
   const newUser = {
     id: Math.max(...allUsers.map(u => u.id), 0) + 1,
     username, password, name, email, phone, role,
-    permissions: role === 'admin'
+    permissions: isAdminRole(role)
       ? ['view_all','manage_users','manage_balances','view_analytics','edit_clients','delete_bookings','view_balances','update_bookings','manage_clients','view_clients']
       : ['view_balances','update_bookings','manage_clients','view_clients'],
     status: 'active',
@@ -5216,7 +5288,7 @@ function renderUsersManagementList() {
           </div>
           <div>
             <div style="font-weight:700;font-size:14px;color:var(--navy-dark)">${u.name}</div>
-            <div style="font-size:11px;color:var(--gray-400)">@${u.username} · <span class="staff-role-badge ${u.role}" style="background:${u.role==='admin'?'var(--gold-pale)':'var(--gray-100)'};color:${u.role==='admin'?'var(--brown)':'var(--navy-dark)'}">${u.role}</span></div>
+            <div style="font-size:11px;color:var(--gray-400)">@${u.username} · <span class="staff-role-badge ${u.role}" style="background:${isAdminRole(u.role)?'var(--gold-pale)':'var(--gray-100)'};color:${isAdminRole(u.role)?'var(--brown)':'var(--navy-dark)'}">${getRoleLabel(u.role)}</span></div>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
@@ -5285,7 +5357,7 @@ function renderStaffControls() {
             <div class="staff-ctrl-avatar">${initials}</div>
             <div>
               <div class="staff-ctrl-name">${u.name}</div>
-              <div class="staff-ctrl-meta">@${u.username} · <span style="font-weight:700;color:${u.role==='admin'?'var(--brown)':'var(--navy-dark)'}">${u.role}</span></div>
+              <div class="staff-ctrl-meta">@${u.username} · <span style="font-weight:700;color:${isAdminRole(u.role)?'var(--brown)':'var(--navy-dark)'}">${getRoleLabel(u.role)}</span></div>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px">
