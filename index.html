@@ -2315,6 +2315,9 @@
     <button class="tab-btn" id="nav-clients" onclick="showTab('clients', this)">
       <span class="tab-icon">👤</span> Client Database
     </button>
+    <button class="tab-btn" id="nav-clientDebt" onclick="showTab('clientDebt', this)">
+      <span class="tab-icon">💰</span> Client Debt
+    </button>
   </div>
 
   <!-- People -->
@@ -3145,11 +3148,143 @@
 
   </div><!-- /admin section -->
 
+  <!-- ══ CLIENT DEBT SECTION ══ -->
+  <div id="clientDebt" class="section">
+    <div class="section-title">Client Debt Tracker</div>
+
+    <!-- Summary KPI strip -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px">
+      <div class="stat-card">
+        <div class="stat-value" id="debtTotalGroups" style="font-size:22px">0</div>
+        <div class="stat-label">Client Groups</div>
+      </div>
+      <div class="stat-card" style="border-color:var(--red)">
+        <div class="stat-value" id="debtTotalOwed" style="font-size:22px;color:var(--red)">₦0</div>
+        <div class="stat-label">Total Outstanding</div>
+      </div>
+      <div class="stat-card" style="border-color:var(--amber)">
+        <div class="stat-value" id="debtPendingCount" style="font-size:22px;color:var(--amber)">0</div>
+        <div class="stat-label">Pending Groups</div>
+      </div>
+      <div class="stat-card" style="border-color:var(--green)">
+        <div class="stat-value" id="debtPaidCount" style="font-size:22px;color:var(--green)">0</div>
+        <div class="stat-label">Fully Paid</div>
+      </div>
+    </div>
+
+    <!-- Top action bar -->
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      <input type="text" id="debtSearchInput" placeholder="🔍 Search group name…" oninput="renderDebtGroups()"
+        style="padding:9px 14px;border:1.5px solid var(--gray-200);border-radius:8px;font-size:13px;width:240px;font-family:'DM Sans',sans-serif;outline:none;background:var(--off-white)" />
+      <button onclick="openAddDebtGroupModal()"
+        style="padding:10px 20px;background:var(--navy);color:white;border:none;border-radius:8px;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:7px">
+        ➕ Add Client Group
+      </button>
+    </div>
+
+    <!-- Groups list -->
+    <div id="debtGroupsList"></div>
+  </div>
+
 </div><!-- /main -->
 
 </div><!-- /app-body -->
 
-<!-- ══ MODALS ══ -->
+<!-- ══ DEBT: Add Group Modal ══ -->
+<div class="modal-overlay" id="addDebtGroupModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">➕ Add Client Group</span>
+      <button class="modal-close" onclick="closeModal('addDebtGroupModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group" style="margin-bottom:14px">
+        <label>Group Name *</label>
+        <input type="text" id="newDebtGroupName" placeholder="e.g. Okafor Family, ABC Corp…" />
+      </div>
+      <div class="form-group">
+        <label>Initial Bill Amount (₦) *</label>
+        <input type="number" id="newDebtGroupBill" placeholder="e.g. 150000" min="0" />
+      </div>
+      <p style="font-size:11px;color:var(--gray-400);margin-top:10px">This sets the opening balance. You can add more transactions later.</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('addDebtGroupModal')">Cancel</button>
+      <button class="btn-primary" onclick="saveDebtGroup()">Save Group</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ DEBT: Add Transaction Modal ══ -->
+<div class="modal-overlay" id="addDebtTxModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title" id="debtTxModalTitle">Add Transaction</span>
+      <button class="modal-close" onclick="closeModal('addDebtTxModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="background:var(--off-white);border:1.5px solid var(--gray-200);border-radius:8px;padding:12px;margin-bottom:16px">
+        <div style="font-size:12px;color:var(--gray-400);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Group</div>
+        <div style="font-weight:700;color:var(--navy-dark);font-size:15px" id="debtTxGroupLabel">—</div>
+      </div>
+      <div class="form-group" style="margin-bottom:14px">
+        <label>Description / Note *</label>
+        <input type="text" id="debtTxDesc" placeholder="e.g. Abuja-Lagos ticket, partial payment…" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Amount (₦) *</label>
+          <input type="number" id="debtTxAmount" placeholder="0" min="0" />
+        </div>
+        <div class="form-group">
+          <label>Type</label>
+          <select id="debtTxType">
+            <option value="charge">Charge (add debt)</option>
+            <option value="payment">Payment (reduce debt)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:10px">
+        <label>Payment Status</label>
+        <select id="debtTxStatus">
+          <option value="pending">⏳ Pending</option>
+          <option value="paid">✅ Paid</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('addDebtTxModal')">Cancel</button>
+      <button class="btn-primary" onclick="saveDebtTransaction()">Save Transaction</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ DEBT: Payment Message Modal ══ -->
+<div class="modal-overlay" id="debtPayMsgModal">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <span class="modal-title">💬 Payment Request Message</span>
+      <button class="modal-close" onclick="closeModal('debtPayMsgModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group" style="margin-bottom:16px">
+        <label>Where is Payable?</label>
+        <select id="debtPayBank" onchange="updateDebtPayMsg()">
+          <option value="zenith">Zenith Bank</option>
+          <option value="firstbank">First Bank</option>
+        </select>
+      </div>
+      <div style="background:var(--navy-dark);border-radius:8px;padding:16px;position:relative">
+        <pre id="debtPayMsgText" style="font-family:'DM Sans',sans-serif;font-size:14px;color:white;white-space:pre-wrap;line-height:1.7;margin:0"></pre>
+      </div>
+      <p style="font-size:11px;color:var(--gray-400);margin-top:10px;text-align:center">Tap Copy to share with client</p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeModal('debtPayMsgModal')">Close</button>
+      <button class="btn-primary" onclick="copyDebtPayMsg()">📋 Copy Message</button>
+    </div>
+  </div>
+</div>
 
 <!-- Update Balance Modal -->
 <div class="modal-overlay" id="balanceModal">
@@ -5912,7 +6047,300 @@ window.renderStaffTab = renderStaffTab;
 window.toggleStaffEdit = toggleStaffEdit;
 window.saveStaffContact = saveStaffContact;
 
-// ─── INIT ───
+
+// ══════════════════════════════════════════════════════
+//  CLIENT DEBT TRACKER — full logic
+// ══════════════════════════════════════════════════════
+
+// ── Bank details ─────────────────────────────────────
+const DEBT_BANKS = {
+  zenith:    { name: 'Zenith Bank',    acct: '2434690017', holder: 'Adewale Adelabu' },
+  firstbank: { name: 'First Bank',     acct: '3040467545', holder: 'Adewale Adelabu' },
+};
+
+// ── Data store (persisted in localStorage) ───────────
+let debtGroups = JSON.parse(localStorage.getItem('tdis_debtGroups') || '[]');
+// debtGroups: [{ id, name, initialBill, transactions:[{id,date,desc,amount,type,status}], createdAt }]
+
+function saveDebtData() {
+  localStorage.setItem('tdis_debtGroups', JSON.stringify(debtGroups));
+}
+
+// ── Helpers ──────────────────────────────────────────
+function getGroupBalance(group) {
+  // Start from initial bill
+  let bal = group.initialBill || 0;
+  (group.transactions || []).forEach(tx => {
+    if (tx.type === 'charge')   bal += tx.amount;
+    if (tx.type === 'payment')  bal -= tx.amount;
+  });
+  return bal;
+}
+
+function fmtNGN(n) {
+  return '₦' + Number(n).toLocaleString('en-NG');
+}
+
+// ── Render summary KPIs ───────────────────────────────
+function renderDebtKPIs() {
+  const totalOwed = debtGroups.reduce((s, g) => {
+    const bal = getGroupBalance(g);
+    return s + (bal > 0 ? bal : 0);
+  }, 0);
+  const pending = debtGroups.filter(g => {
+    const lastTx = (g.transactions || []).slice(-1)[0];
+    return !lastTx || lastTx.status !== 'paid' || getGroupBalance(g) > 0;
+  }).length;
+  const paid = debtGroups.filter(g => getGroupBalance(g) <= 0).length;
+
+  document.getElementById('debtTotalGroups').textContent = debtGroups.length;
+  document.getElementById('debtTotalOwed').textContent = fmtNGN(totalOwed);
+  document.getElementById('debtPendingCount').textContent = pending;
+  document.getElementById('debtPaidCount').textContent = paid;
+}
+
+// ── Render groups list ────────────────────────────────
+function renderDebtGroups() {
+  const search = (document.getElementById('debtSearchInput')?.value || '').toLowerCase();
+  const container = document.getElementById('debtGroupsList');
+  if (!container) return;
+
+  renderDebtKPIs();
+
+  const filtered = debtGroups.filter(g => g.name.toLowerCase().includes(search));
+
+  if (!filtered.length) {
+    container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--gray-400);font-size:14px">
+      ${search ? 'No groups match your search.' : 'No client groups yet. Click <b>Add Client Group</b> to get started.'}
+    </div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(g => {
+    const bal = getGroupBalance(g);
+    const isSettled = bal <= 0;
+    const txList = (g.transactions || []);
+    const txRows = txList.length ? txList.map(tx => `
+      <tr>
+        <td style="font-size:12px;color:var(--gray-400)">${tx.date}</td>
+        <td style="font-size:13px">${tx.desc}</td>
+        <td style="font-size:13px;font-weight:700;color:${tx.type==='charge'?'var(--red)':'var(--green)'}">${tx.type==='charge'?'+':'-'}${fmtNGN(tx.amount)}</td>
+        <td>
+          <span style="padding:3px 9px;border-radius:10px;font-size:11px;font-weight:700;
+            background:${tx.status==='paid'?'var(--green-light)':'var(--amber-light)'};
+            color:${tx.status==='paid'?'var(--green)':'var(--amber)'}">
+            ${tx.status==='paid'?'✅ Paid':'⏳ Pending'}
+          </span>
+        </td>
+        <td>
+          <button onclick="deleteDebtTx('${g.id}','${tx.id}')"
+            style="padding:4px 8px;background:var(--red-light);color:var(--red);border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer">🗑</button>
+          ${tx.status==='pending'?`<button onclick="markDebtTxPaid('${g.id}','${tx.id}')"
+            style="padding:4px 8px;background:var(--green-light);color:var(--green);border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;margin-left:4px">Mark Paid</button>`:''}
+        </td>
+      </tr>`).join('') :
+      `<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--gray-400);font-size:13px">No transactions yet</td></tr>`;
+
+    return `
+    <div class="card" style="margin-bottom:20px;overflow:visible">
+      <div class="card-header" style="background:${isSettled?'var(--green-light)':'var(--off-white)'};border-bottom:1px solid var(--gray-100)">
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span class="card-title" style="font-size:15px">${g.name}</span>
+          <span style="font-size:11px;color:var(--gray-400)">Added ${new Date(g.createdAt).toLocaleDateString('en-NG',{day:'2-digit',month:'short',year:'numeric'})}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="text-align:right">
+            <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:${isSettled?'var(--green)':'var(--red)'}">
+              ${isSettled ? '✅ Settled' : fmtNGN(bal)}
+            </div>
+            ${!isSettled?`<div style="font-size:11px;color:var(--gray-400)">Outstanding</div>`:''}
+          </div>
+          ${!isSettled ? `<button onclick="openDebtPayMsgModal('${g.id}')"
+            style="padding:8px 14px;background:var(--navy);color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
+            💬 Payment Msg
+          </button>` : ''}
+          <button onclick="openAddDebtTxModal('${g.id}')"
+            style="padding:8px 14px;background:var(--gold-light);color:var(--navy-dark);border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
+            ➕ Add Transaction
+          </button>
+          <button onclick="deleteDebtGroup('${g.id}')"
+            style="padding:8px 12px;background:var(--red-light);color:var(--red);border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
+            🗑
+          </button>
+        </div>
+      </div>
+      <div style="padding:0">
+        <!-- Summary row -->
+        <div style="display:flex;gap:0;border-bottom:1px solid var(--gray-100)">
+          <div style="flex:1;padding:12px 18px;border-right:1px solid var(--gray-100)">
+            <div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Initial Bill</div>
+            <div style="font-weight:700;color:var(--navy-dark)">${fmtNGN(g.initialBill||0)}</div>
+          </div>
+          <div style="flex:1;padding:12px 18px;border-right:1px solid var(--gray-100)">
+            <div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Transactions</div>
+            <div style="font-weight:700;color:var(--navy-dark)">${txList.length}</div>
+          </div>
+          <div style="flex:1;padding:12px 18px">
+            <div style="font-size:10px;color:var(--gray-400);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Balance</div>
+            <div style="font-weight:800;color:${isSettled?'var(--green)':'var(--red)'}">${isSettled?'₦0 (Settled)':fmtNGN(bal)}</div>
+          </div>
+        </div>
+        <!-- Transactions table -->
+        <div class="clients-table" style="max-height:260px;overflow-y:auto">
+          <table>
+            <thead>
+              <tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody>${txRows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Add Group Modal ───────────────────────────────────
+function openAddDebtGroupModal() {
+  document.getElementById('newDebtGroupName').value = '';
+  document.getElementById('newDebtGroupBill').value = '';
+  document.getElementById('addDebtGroupModal').classList.add('show');
+}
+
+function saveDebtGroup() {
+  const name = document.getElementById('newDebtGroupName').value.trim();
+  const bill = parseFloat(document.getElementById('newDebtGroupBill').value);
+  if (!name) { showToast('Please enter a group name', 'error'); return; }
+  if (isNaN(bill) || bill < 0) { showToast('Please enter a valid initial bill amount', 'error'); return; }
+
+  debtGroups.push({
+    id: 'dg_' + Date.now(),
+    name,
+    initialBill: bill,
+    transactions: [],
+    createdAt: new Date().toISOString()
+  });
+  saveDebtData();
+  closeModal('addDebtGroupModal');
+  renderDebtGroups();
+  showToast('✓ Client group added', 'success');
+}
+
+// ── Add Transaction Modal ─────────────────────────────
+let _debtTxTargetGroupId = null;
+
+function openAddDebtTxModal(groupId) {
+  _debtTxTargetGroupId = groupId;
+  const g = debtGroups.find(x => x.id === groupId);
+  if (!g) return;
+  document.getElementById('debtTxGroupLabel').textContent = g.name;
+  document.getElementById('debtTxModalTitle').textContent = 'Add Transaction — ' + g.name;
+  document.getElementById('debtTxDesc').value = '';
+  document.getElementById('debtTxAmount').value = '';
+  document.getElementById('debtTxType').value = 'charge';
+  document.getElementById('debtTxStatus').value = 'pending';
+  document.getElementById('addDebtTxModal').classList.add('show');
+}
+
+function saveDebtTransaction() {
+  const g = debtGroups.find(x => x.id === _debtTxTargetGroupId);
+  if (!g) return;
+  const desc = document.getElementById('debtTxDesc').value.trim();
+  const amount = parseFloat(document.getElementById('debtTxAmount').value);
+  const type = document.getElementById('debtTxType').value;
+  const status = document.getElementById('debtTxStatus').value;
+  if (!desc) { showToast('Please enter a description', 'error'); return; }
+  if (isNaN(amount) || amount <= 0) { showToast('Please enter a valid amount', 'error'); return; }
+
+  g.transactions.push({
+    id: 'tx_' + Date.now(),
+    date: new Date().toLocaleDateString('en-NG', {day:'2-digit',month:'short',year:'numeric'}),
+    desc, amount, type, status
+  });
+  saveDebtData();
+  closeModal('addDebtTxModal');
+  renderDebtGroups();
+  showToast('✓ Transaction saved', 'success');
+}
+
+function markDebtTxPaid(groupId, txId) {
+  const g = debtGroups.find(x => x.id === groupId);
+  if (!g) return;
+  const tx = g.transactions.find(t => t.id === txId);
+  if (!tx) return;
+  tx.status = 'paid';
+  saveDebtData();
+  renderDebtGroups();
+  showToast('✓ Marked as paid', 'success');
+}
+
+function deleteDebtTx(groupId, txId) {
+  if (!confirm('Delete this transaction?')) return;
+  const g = debtGroups.find(x => x.id === groupId);
+  if (!g) return;
+  g.transactions = g.transactions.filter(t => t.id !== txId);
+  saveDebtData();
+  renderDebtGroups();
+  showToast('Transaction deleted', 'info');
+}
+
+function deleteDebtGroup(groupId) {
+  if (!confirm('Delete this entire client group and all its transactions?')) return;
+  debtGroups = debtGroups.filter(g => g.id !== groupId);
+  saveDebtData();
+  renderDebtGroups();
+  showToast('Group deleted', 'info');
+}
+
+// ── Payment Message Modal ─────────────────────────────
+let _debtPayGroupId = null;
+
+function openDebtPayMsgModal(groupId) {
+  _debtPayGroupId = groupId;
+  document.getElementById('debtPayBank').value = 'zenith';
+  updateDebtPayMsg();
+  document.getElementById('debtPayMsgModal').classList.add('show');
+}
+
+function updateDebtPayMsg() {
+  const g = debtGroups.find(x => x.id === _debtPayGroupId);
+  if (!g) return;
+  const bal = getGroupBalance(g);
+  const bankKey = document.getElementById('debtPayBank').value;
+  const bank = DEBT_BANKS[bankKey];
+  const amount = bal.toLocaleString('en-NG');
+  const msg = `${amount}\n${bank.acct}\n${bank.holder}\n${bank.name}`;
+  document.getElementById('debtPayMsgText').textContent = msg;
+}
+
+function copyDebtPayMsg() {
+  const txt = document.getElementById('debtPayMsgText').textContent;
+  navigator.clipboard.writeText(txt).then(() => {
+    showToast('✓ Message copied!', 'success');
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('✓ Message copied!', 'success');
+  });
+}
+
+// ── Expose to global scope ────────────────────────────
+window.renderDebtGroups     = renderDebtGroups;
+window.openAddDebtGroupModal = openAddDebtGroupModal;
+window.saveDebtGroup        = saveDebtGroup;
+window.openAddDebtTxModal   = openAddDebtTxModal;
+window.saveDebtTransaction  = saveDebtTransaction;
+window.markDebtTxPaid       = markDebtTxPaid;
+window.deleteDebtTx         = deleteDebtTx;
+window.deleteDebtGroup      = deleteDebtGroup;
+window.openDebtPayMsgModal  = openDebtPayMsgModal;
+window.updateDebtPayMsg     = updateDebtPayMsg;
+window.copyDebtPayMsg       = copyDebtPayMsg;
+
+
 // Show dashboard tab on load
 showTab('dashboard', document.getElementById('nav-dashboard'));
 
@@ -6033,6 +6461,7 @@ window.showTab = function(id, btn) {
     if (id === 'admin') { staggerCards('.stat-card', 60); setTimeout(() => { populateAuditUserFilter(); populateCommissionAirlines(); }, 80); }
     if (id === 'dashboard') { renderDashboard(); staggerCards('.dash-kpi-card', 50); }
     if (id === 'goals') { renderGoals(); staggerCards('.goal-card', 80); }
+    if (id === 'clientDebt') { renderDebtGroups(); }
   }, 50);
 };
 
