@@ -2201,7 +2201,7 @@
 <body>
 
 <!-- LOGIN OVERLAY -->
-<div class="login-overlay" id="loginOverlay">
+<div class="login-overlay hidden" id="loginOverlay">
   <div class="login-container">
     <div class="login-header">
       <div class="login-logo">🛫 TDIS</div>
@@ -2296,6 +2296,9 @@
     <button class="tab-btn" id="nav-airlines" onclick="showTab('airlines', this)">
       <span class="tab-icon">🏢</span> Airlines
     </button>
+    <button class="tab-btn" id="nav-clientDebt" onclick="showTab('clientDebt', this)">
+      <span class="tab-icon">💰</span> Client Debt
+    </button>
     <button class="tab-btn" id="nav-balances" onclick="showTab('balances', this)">
       <span class="tab-icon">💳</span> Account Balances
     </button>
@@ -2314,9 +2317,6 @@
     <div class="sidebar-section-label">Clients</div>
     <button class="tab-btn" id="nav-clients" onclick="showTab('clients', this)">
       <span class="tab-icon">👤</span> Client Database
-    </button>
-    <button class="tab-btn" id="nav-clientDebt" onclick="showTab('clientDebt', this)">
-      <span class="tab-icon">💰</span> Client Debt
     </button>
   </div>
 
@@ -2362,7 +2362,7 @@
 <div class="main">
 
   <!-- ══ DASHBOARD SECTION ══ -->
-  <div id="dashboard" class="section active">
+  <div id="dashboard" class="section">
     <div class="section-title">Operations Dashboard</div>
 
     <!-- KPI Cards -->
@@ -6342,7 +6342,7 @@ window.copyDebtPayMsg       = copyDebtPayMsg;
 
 
 // Show dashboard tab on load
-showTab('dashboard', document.getElementById('nav-dashboard'));
+showTab('airlines', document.getElementById('nav-airlines'));
 
 // Initialize session then load all data from Firestore
 initializeSession();
