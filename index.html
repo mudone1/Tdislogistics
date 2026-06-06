@@ -3255,6 +3255,7 @@
         <select id="debtTxStatus">
           <option value="pending">⏳ Pending</option>
           <option value="paid">✅ Paid</option>
+          <option value="refunded_credit">🔵 Refunded (Credit)</option>
         </select>
       </div>
     </div>
@@ -6153,9 +6154,9 @@ function renderDebtGroups() {
         </td>
         <td>
           <span style="padding:3px 9px;border-radius:10px;font-size:11px;font-weight:700;
-            background:${tx.status==='paid'?'var(--green-light)':'var(--amber-light)'};
-            color:${tx.status==='paid'?'var(--green)':'var(--amber)'}">
-            ${tx.status==='paid'?'✅ Paid':'⏳ Pending'}
+            background:${tx.status==='paid'?'var(--green-light)':tx.status==='refunded_credit'?'#dbeafe':'var(--amber-light)'};
+            color:${tx.status==='paid'?'var(--green)':tx.status==='refunded_credit'?'#2563eb':'var(--amber)'}">
+            ${tx.status==='paid'?'✅ Paid':tx.status==='refunded_credit'?'🔵 Refunded (Credit)':'⏳ Pending'}
           </span>
         </td>
         <td>
@@ -6182,12 +6183,12 @@ function renderDebtGroups() {
         </div>
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <div style="text-align:right">
-            <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:${isSettled?'var(--green)':'var(--red)'}">
-              ${isSettled ? '✅ Settled' : fmtNGN(bal)}
+            <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;color:${isSettled?'var(--green)':bal<0?'#2563eb':'var(--red)'}">
+              ${isSettled ? '✅ Settled' : bal<0 ? fmtNGN(Math.abs(bal)) : fmtNGN(bal)}
             </div>
-            ${!isSettled?`<div style="font-size:11px;color:var(--gray-400)">Outstanding</div>`:''}
+            ${!isSettled ? `<div style="font-size:11px;color:${bal<0?'#2563eb':'var(--gray-400)'};">${bal<0 ? '🔵 We Owe This Group' : 'Outstanding'}</div>` : ''}
           </div>
-          ${!isSettled ? `<button onclick="openDebtPayMsgModal('${g.id}')"
+          ${!isSettled && bal>0 ? `<button onclick="openDebtPayMsgModal('${g.id}')"
             style="padding:8px 14px;background:var(--navy);color:white;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">
             💬 Payment Msg
           </button>` : ''}
