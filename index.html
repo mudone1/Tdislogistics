@@ -3221,7 +3221,7 @@
     </div>
 
     <!-- Row 3: Groups we owe + Settled groups -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px">
       <div class="card">
         <div class="card-header"><span class="card-title">🔵 Groups We Owe</span></div>
         <div id="ddWeOwe" style="padding:16px"></div>
@@ -3229,6 +3229,47 @@
       <div class="card">
         <div class="card-header"><span class="card-title">✅ Recently Settled</span></div>
         <div id="ddSettled" style="padding:16px"></div>
+      </div>
+    </div>
+
+    <!-- Row 4: Weekly / Monthly Analysis -->
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header" style="flex-wrap:wrap;gap:10px">
+        <span class="card-title">📅 Weekly & Monthly Behaviour</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:12px;font-weight:700;color:var(--gray-500)">View:</label>
+          <select id="ddPeriodMode" onchange="renderPeriodAnalysis()"
+            style="padding:6px 10px;border:1.5px solid var(--gray-200);border-radius:7px;font-size:12px;font-family:'DM Sans',sans-serif;background:var(--off-white);font-weight:700">
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+          <select id="ddPeriodCount" onchange="renderPeriodAnalysis()"
+            style="padding:6px 10px;border:1.5px solid var(--gray-200);border-radius:7px;font-size:12px;font-family:'DM Sans',sans-serif;background:var(--off-white);font-weight:700">
+            <option value="6">Last 6</option>
+            <option value="8">Last 8</option>
+            <option value="12">Last 12</option>
+          </select>
+        </div>
+      </div>
+      <div style="padding:20px">
+        <!-- Summary stats for period -->
+        <div id="ddPeriodKpis" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px"></div>
+        <!-- Bar chart -->
+        <div id="ddPeriodChart" style="overflow-x:auto"></div>
+        <!-- Table breakdown -->
+        <div id="ddPeriodTable" style="margin-top:20px;overflow-x:auto"></div>
+      </div>
+    </div>
+
+    <!-- Row 5: Top clients by frequency + Avg debt per group -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div class="card">
+        <div class="card-header"><span class="card-title">🔁 Most Active Groups</span></div>
+        <div id="ddMostActive" style="padding:0"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">📊 Debt Age (Days Outstanding)</span></div>
+        <div id="ddDebtAge" style="padding:16px"></div>
       </div>
     </div>
   </div>
@@ -6568,7 +6609,200 @@ function renderDebtDashboard() {
       <span style="font-size:13px;font-weight:700;color:var(--navy-dark)">${g.name}</span>
       <span style="font-size:12px;font-weight:700;color:var(--green);background:var(--green-light);padding:3px 9px;border-radius:10px">✅ Settled</span>
     </div>`).join('') : `<div style="text-align:center;color:var(--gray-400);font-size:13px">No settled groups yet</div>`;
+
+  // Most Active Groups (by transaction count)
+  const activeGroups = [...groups].map(g => ({name:g.name, count:(g.transactions||[]).length, total:(g.transactions||[]).reduce((s,t)=>s+(t.type==='charge'?t.amount:0),0)}))
+    .sort((a,b)=>b.count-a.count).slice(0,8);
+  const maxCount = activeGroups.length ? activeGroups[0].count : 1;
+  document.getElementById('ddMostActive').innerHTML = activeGroups.length ? activeGroups.map((g,i) => {
+    const pct = Math.round((g.count/maxCount)*100);
+    return `<div style="padding:12px 18px;border-bottom:1px solid var(--gray-100)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+        <span style="font-size:13px;font-weight:700;color:var(--navy-dark)">${i+1}. ${g.name}</span>
+        <span style="font-size:12px;color:var(--gray-500)">${g.count} tx · ${fmtNGN(g.total)}</span>
+      </div>
+      <div style="background:var(--gray-100);border-radius:4px;height:5px">
+        <div style="background:var(--navy);border-radius:4px;height:5px;width:${pct}%"></div>
+      </div>
+    </div>`;
+  }).join('') : `<div style="padding:24px;text-align:center;color:var(--gray-400);font-size:13px">No data yet</div>`;
+
+  // Debt Age — how many days since group was created and still has outstanding balance
+  const now = Date.now();
+  const debtAgeGroups = pendingGroups.map(g => ({
+    name: g.name,
+    bal: getGroupBalance(g),
+    days: Math.floor((now - new Date(g.createdAt).getTime()) / 86400000)
+  })).sort((a,b)=>b.days-a.days).slice(0,8);
+  const maxDays = debtAgeGroups.length ? debtAgeGroups[0].days : 1;
+  document.getElementById('ddDebtAge').innerHTML = debtAgeGroups.length ? debtAgeGroups.map(g => {
+    const pct = Math.round((g.days/maxDays)*100);
+    const color = g.days > 30 ? 'var(--red)' : g.days > 14 ? 'var(--amber)' : 'var(--green)';
+    return `<div style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:5px">
+        <span style="font-size:13px;font-weight:700;color:var(--navy-dark)">${g.name}</span>
+        <span style="font-size:12px;font-weight:700;color:${color}">${g.days}d · ${fmtNGN(g.bal)}</span>
+      </div>
+      <div style="background:var(--gray-100);border-radius:4px;height:6px">
+        <div style="background:${color};border-radius:4px;height:6px;width:${pct}%"></div>
+      </div>
+    </div>`;
+  }).join('') : `<div style="text-align:center;color:var(--gray-400);font-size:13px">No outstanding debts</div>`;
+
+  // Trigger period analysis
+  renderPeriodAnalysis();
 }
+
+// ── Weekly / Monthly period analysis ─────────────────
+function renderPeriodAnalysis() {
+  const modeEl  = document.getElementById('ddPeriodMode');
+  const countEl = document.getElementById('ddPeriodCount');
+  if (!modeEl || !countEl) return;
+
+  const mode  = modeEl.value;   // 'weekly' | 'monthly'
+  const count = parseInt(countEl.value); // 6 | 8 | 12
+
+  const groups = debtGroups || [];
+  const allTx  = groups.flatMap(g => (g.transactions||[]).map(tx => ({...tx, groupName:g.name})));
+
+  // ── Build period buckets ──────────────────────────
+  function getPeriodKey(dateStr, m) {
+    // dateStr format: "06 Jun 2026"
+    const d = new Date(dateStr);
+    if (isNaN(d)) return null;
+    if (m === 'weekly') {
+      // ISO week label e.g. "W23 2026"
+      const jan1    = new Date(d.getFullYear(), 0, 1);
+      const week    = Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7);
+      return `W${week} ${d.getFullYear()}`;
+    } else {
+      return d.toLocaleDateString('en-NG', {month:'short', year:'numeric'});
+    }
+  }
+
+  // Build ordered list of last N periods
+  const today = new Date();
+  const periods = [];
+  for (let i = count - 1; i >= 0; i--) {
+    if (mode === 'weekly') {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i * 7);
+      const jan1 = new Date(d.getFullYear(), 0, 1);
+      const week = Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7);
+      periods.push(`W${week} ${d.getFullYear()}`);
+    } else {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      periods.push(d.toLocaleDateString('en-NG', {month:'short', year:'numeric'}));
+    }
+  }
+  // Deduplicate while preserving order
+  const uniquePeriods = [...new Set(periods)];
+
+  // Bucket totals
+  const buckets = {};
+  uniquePeriods.forEach(p => { buckets[p] = {charges:0, payments:0, credits:0, txCount:0, newGroups:0}; });
+
+  allTx.forEach(tx => {
+    const key = getPeriodKey(tx.date, mode);
+    if (key && buckets[key]) {
+      buckets[key].txCount++;
+      if (tx.type==='charge')   buckets[key].charges  += tx.amount;
+      if (tx.type==='payment')  buckets[key].payments += tx.amount;
+      if (tx.type==='credit')   buckets[key].credits  += tx.amount;
+    }
+  });
+
+  // New groups per period
+  groups.forEach(g => {
+    const key = getPeriodKey(new Date(g.createdAt).toLocaleDateString('en-NG',{day:'2-digit',month:'short',year:'numeric'}), mode);
+    if (key && buckets[key]) buckets[key].newGroups++;
+  });
+
+  // ── Period KPIs (current period vs previous) ──────
+  const cur  = buckets[uniquePeriods[uniquePeriods.length-1]] || {};
+  const prev = buckets[uniquePeriods[uniquePeriods.length-2]] || {};
+  function chg(a,b) {
+    if (!b) return a>0?'+100%':'—';
+    const d = Math.round(((a-b)/b)*100);
+    return (d>=0?'+':'')+d+'%';
+  }
+  function chgColor(a,b) { return a>=b?'var(--green)':'var(--red)'; }
+
+  document.getElementById('ddPeriodKpis').innerHTML = [
+    {label:'This Period Charges',  val:fmtNGN(cur.charges||0),  sub:chg(cur.charges||0,prev.charges||0),  color:'var(--red)'},
+    {label:'This Period Collected',val:fmtNGN(cur.payments||0), sub:chg(cur.payments||0,prev.payments||0), color:'var(--green)'},
+    {label:'Credits This Period',  val:fmtNGN(cur.credits||0),  sub:chg(cur.credits||0,prev.credits||0),  color:'#2563eb'},
+    {label:'Transactions',         val:cur.txCount||0,           sub:chg(cur.txCount||0,prev.txCount||0),  color:'var(--navy)'},
+    {label:'New Groups',           val:cur.newGroups||0,         sub:chg(cur.newGroups||0,prev.newGroups||0), color:'var(--amber)'},
+  ].map(k=>`
+    <div class="stat-card" style="border-color:${k.color}">
+      <div class="stat-value" style="font-size:16px;color:${k.color}">${k.val}</div>
+      <div class="stat-label" style="font-size:11px">${k.label}</div>
+      <div style="font-size:11px;font-weight:700;color:${chgColor(1,0)};margin-top:4px">${k.sub} vs prev</div>
+    </div>`).join('');
+
+  // ── Bar chart ─────────────────────────────────────
+  const maxVal = Math.max(...uniquePeriods.map(p => Math.max(buckets[p].charges, buckets[p].payments)), 1);
+  const barW   = Math.max(44, Math.floor(560 / uniquePeriods.length) - 8);
+
+  document.getElementById('ddPeriodChart').innerHTML = `
+    <div style="display:flex;align-items:flex-end;gap:6px;min-width:max-content;padding-bottom:8px;border-bottom:2px solid var(--gray-100)">
+      ${uniquePeriods.map(p => {
+        const b = buckets[p];
+        const hC = Math.round((b.charges /maxVal)*140);
+        const hP = Math.round((b.payments/maxVal)*140);
+        const hCr= Math.round((b.credits /maxVal)*140);
+        return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;min-width:${barW}px">
+          <div style="display:flex;align-items:flex-end;gap:2px;height:144px">
+            <div title="Charges: ${fmtNGN(b.charges)}" style="width:${Math.floor(barW*0.28)}px;height:${hC}px;background:var(--red);border-radius:3px 3px 0 0;opacity:0.85;min-height:${b.charges?2:0}px"></div>
+            <div title="Collected: ${fmtNGN(b.payments)}" style="width:${Math.floor(barW*0.28)}px;height:${hP}px;background:var(--green);border-radius:3px 3px 0 0;opacity:0.85;min-height:${b.payments?2:0}px"></div>
+            <div title="Credit: ${fmtNGN(b.credits)}" style="width:${Math.floor(barW*0.28)}px;height:${hCr}px;background:#2563eb;border-radius:3px 3px 0 0;opacity:0.85;min-height:${b.credits?2:0}px"></div>
+          </div>
+          <div style="font-size:10px;color:var(--gray-500);text-align:center;font-weight:700;white-space:nowrap">${p}</div>
+          <div style="font-size:9px;color:var(--gray-400);text-align:center">${b.txCount} tx</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;font-weight:700">
+      <span style="color:var(--red)">■ Charges</span>
+      <span style="color:var(--green)">■ Collected</span>
+      <span style="color:#2563eb">■ Credit</span>
+    </div>`;
+
+  // ── Period table ──────────────────────────────────
+  document.getElementById('ddPeriodTable').innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:var(--navy-dark)">
+          <th style="padding:9px 14px;text-align:left;color:rgba(255,255,255,0.7);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Period</th>
+          <th style="padding:9px 14px;text-align:right;color:rgba(255,255,255,0.7);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Charged</th>
+          <th style="padding:9px 14px;text-align:right;color:rgba(255,255,255,0.7);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Collected</th>
+          <th style="padding:9px 14px;text-align:right;color:rgba(255,255,255,0.7);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Credit</th>
+          <th style="padding:9px 14px;text-align:right;color:rgba(255,255,255,0.7);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Net</th>
+          <th style="padding:9px 14px;text-align:right;color:rgba(255,255,255,0.7);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Tx</th>
+          <th style="padding:9px 14px;text-align:right;color:rgba(255,255,255,0.7);font-weight:700;text-transform:uppercase;letter-spacing:0.5px">New Groups</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${[...uniquePeriods].reverse().map((p,i) => {
+          const b   = buckets[p];
+          const net = b.charges - b.payments - b.credits;
+          const isLast = i===0;
+          return `<tr style="background:${isLast?'rgba(30,64,175,0.04)':'white'};border-bottom:1px solid var(--gray-100)">
+            <td style="padding:9px 14px;font-weight:${isLast?'800':'600'};color:var(--navy-dark)">${p}${isLast?' 🔹':''}</td>
+            <td style="padding:9px 14px;text-align:right;font-weight:700;color:var(--red)">${b.charges?fmtNGN(b.charges):'—'}</td>
+            <td style="padding:9px 14px;text-align:right;font-weight:700;color:var(--green)">${b.payments?fmtNGN(b.payments):'—'}</td>
+            <td style="padding:9px 14px;text-align:right;font-weight:700;color:#2563eb">${b.credits?fmtNGN(b.credits):'—'}</td>
+            <td style="padding:9px 14px;text-align:right;font-weight:800;color:${net>0?'var(--red)':net<0?'var(--green)':'var(--gray-400)'}">${net===0?'—':net>0?'+'+fmtNGN(net):'-'+fmtNGN(Math.abs(net))}</td>
+            <td style="padding:9px 14px;text-align:right;color:var(--gray-600)">${b.txCount||'—'}</td>
+            <td style="padding:9px 14px;text-align:right;color:var(--gray-600)">${b.newGroups||'—'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+window.renderPeriodAnalysis = renderPeriodAnalysis;
 
 window.renderDebtDashboard = renderDebtDashboard;
 
