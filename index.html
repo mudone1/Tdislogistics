@@ -3974,10 +3974,11 @@ function ensureAllAirlines(bal) {
 
 // Load all data from Firestore on startup
 async function loadAllData() {
-  const [fsBalances, fsClients, fsBookings] = await Promise.all([
+  const [fsBalances, fsClients, fsBookings, fsDebtGroups] = await Promise.all([
     fsLoad('balances', 'tdis_balances', []),
     fsLoad('clients', 'tdis_clients', []),
-    fsLoad('bookingUpdates', 'tdis_bookingUpdates', [])
+    fsLoad('bookingUpdates', 'tdis_bookingUpdates', []),
+    fsLoad('debtGroups', 'tdis_debtGroups', [])
   ]);
 
   balances = ensureAllAirlines(fsBalances);
@@ -3986,6 +3987,7 @@ async function loadAllData() {
     ...b,
     amountPaid: b.amountPaid != null ? b.amountPaid : (b.status === 'Paid' ? b.amount : 0)
   }));
+  debtGroups = fsDebtGroups;
 
   renderAirlines();
   renderBalances();
@@ -3993,6 +3995,7 @@ async function loadAllData() {
   renderClients();
   populateStaffDropdowns();
   renderDashboard();
+  renderDebtGroups();
 
   // Listen for real-time updates from other staff
   fsListen('balances', (data) => {
@@ -4013,6 +4016,11 @@ async function loadAllData() {
     localStorage.setItem('tdis_bookingUpdates', JSON.stringify(bookingUpdates)); fsSave('bookingUpdates', bookingUpdates);
     renderBookingUpdates(); renderClients();
     if (selectedUpdateClient) updateClientSummaryBox();
+  });
+  fsListen('debtGroups', (data) => {
+    debtGroups = data;
+    localStorage.setItem('tdis_debtGroups', JSON.stringify(debtGroups));
+    renderDebtGroups();
   });
 }
 
@@ -6065,11 +6073,12 @@ const DEBT_BANKS = {
 };
 
 // ── Data store (persisted in localStorage) ───────────
-let debtGroups = JSON.parse(localStorage.getItem('tdis_debtGroups') || '[]');
+let debtGroups = [];
 // debtGroups: [{ id, name, initialBill, transactions:[{id,date,desc,amount,type,status}], createdAt }]
 
 function saveDebtData() {
   localStorage.setItem('tdis_debtGroups', JSON.stringify(debtGroups));
+  fsSave('debtGroups', debtGroups);
 }
 
 // ── Helpers ──────────────────────────────────────────
@@ -6136,8 +6145,11 @@ function renderDebtGroups() {
       <tr>
         <td style="font-size:12px;color:var(--gray-400)">${tx.date}</td>
         <td style="font-size:13px">${tx.desc}</td>
-        <td style="font-size:13px;font-weight:700;color:${tx.type==='charge'?'var(--red)':tx.type==='credit'?'#2563eb':'var(--green)'}">
-          ${tx.type==='charge'?'+':tx.type==='credit'?'CR -':'-'}${fmtNGN(tx.amount)}
+        <td style="font-size:13px;font-weight:700;color:var(--red)">
+          ${tx.type==='charge' ? '+'+fmtNGN(tx.amount) : '<span style="color:var(--gray-300)">—</span>'}
+        </td>
+        <td style="font-size:13px;font-weight:700;color:var(--green)">
+          ${tx.type==='credit' ? '+'+fmtNGN(tx.amount) : tx.type==='payment' ? '+'+fmtNGN(tx.amount) : '<span style="color:var(--gray-300)">—</span>'}
         </td>
         <td>
           <span style="padding:3px 9px;border-radius:10px;font-size:11px;font-weight:700;
@@ -6153,7 +6165,7 @@ function renderDebtGroups() {
             style="padding:4px 8px;background:var(--green-light);color:var(--green);border:none;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;margin-left:4px">Mark Paid</button>`:''}
         </td>
       </tr>`).join('') :
-      `<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--gray-400);font-size:13px">No transactions yet</td></tr>`;
+      `<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--gray-400);font-size:13px">No transactions yet</td></tr>`;
 
     return `
     <div class="card" style="margin-bottom:20px;overflow:visible">
@@ -6217,7 +6229,7 @@ function renderDebtGroups() {
         <div class="clients-table" style="max-height:260px;overflow-y:auto">
           <table>
             <thead>
-              <tr><th>Date</th><th>Description</th><th>Amount</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>Date</th><th>Airline</th><th>Debt</th><th>Credit</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody>${txRows}</tbody>
           </table>
@@ -6592,5 +6604,5 @@ window.renderAdminDashboard = function(...args) {
 })();
 
 </script>
-</body> 
+</body>
 </html>
