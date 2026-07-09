@@ -1,163 +1,95 @@
-# Firebase Authentication Setup Guide
+# Firebase Setup Guide (Next.js version)
 
-## Step 1: Create Firebase Project
+This app talks to Firebase the same way the original HTML app did — one
+Firestore document per "collection" (`tdis_data/balances`, `tdis_data/clients`,
+etc.) plus optional Firebase Auth — but credentials now come from environment
+variables instead of being hard-coded in the page source.
 
-1. Go to [Firebase Console](https://console.firebase.google.com)
-2. Click "Add project"
-3. Enter project name: `tdis-logistics`
-4. Disable Google Analytics (optional)
-5. Click "Create project"
+**The app works fully without Firebase too.** If you don't configure it,
+everything falls back to browser `localStorage` — single device, no
+cross-device sync, but nothing crashes and no page is disabled.
 
-## Step 2: Set Up Authentication
+## Step 1: Create a Firebase project
 
-1. In Firebase Console, go to **Authentication** → **Get started**
-2. Click on "Email/Password"
-3. Enable it and click "Save"
+1. Go to the [Firebase Console](https://console.firebase.google.com)
+2. Click "Add project" → name it (e.g. `tdis-logistics`) → create it
 
-## Step 3: Create Firestore Database
+## Step 2: Enable Authentication (optional but recommended)
 
-1. Go to **Firestore Database** → **Create database**
-2. Choose **Start in test mode** (for development)
-3. Select region closest to you
-4. Click "Create"
+1. **Authentication** → **Get started** → enable **Email/Password**
 
-## Step 4: Get Your Firebase Credentials
+## Step 3: Create a Firestore database
 
-1. Go to **Project Settings** (gear icon)
-2. Scroll to "Your apps"
-3. Click "Add app" → choose **Web** (</> icon)
-4. Register app with name "TDIS Dashboard"
-5. Copy the config object that looks like this:
+1. **Firestore Database** → **Create database**
+2. Start in **test mode** for local development (tighten rules before going live — see Step 6)
 
-```javascript
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "your-project.firebaseapp.com",
-  projectId: "tdis-logistics",
-  storageBucket: "tdis-logistics.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
+## Step 4: Get your web app credentials
+
+1. **Project Settings** (gear icon) → scroll to "Your apps" → **Add app** → **Web**
+2. Register it (any nickname), then copy the config values shown
+
+## Step 5: Fill in your local env file
+
+Copy `.env.local.example` to `.env.local` in the project root and paste in
+the values from Step 4:
+
+```bash
+cp .env.local.example .env.local
 ```
 
-## Step 5: Update Your HTML File
-
-1. Open `index.html`
-2. Find the Firebase config (around line 1548)
-3. Replace the placeholder values with your actual credentials from Step 4
-
-## Step 6: Create Default Users in Firestore
-
-### Option A: Manual Creation (via Firebase Console)
-
-1. In Firestore, create a new collection called **users**
-2. Add these documents:
-
-**Document ID:** `admin@tdis.com`
-```json
-{
-  "name": "Admin User",
-  "email": "admin@tdis.com",
-  "role": "admin",
-  "permissions": ["view_all", "manage_users", "manage_balances", "view_analytics", "edit_clients", "delete_bookings"],
-  "status": "active",
-  "createdAt": "2024-01-01T00:00:00.000Z"
-}
+```
+NEXT_PUBLIC_FIREBASE_API_KEY=AIza...
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=tdis-logistics
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=tdis-logistics.appspot.com
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
+NEXT_PUBLIC_FIREBASE_APP_ID=...
 ```
 
-**Document ID:** `agent@tdis.com`
-```json
-{
-  "name": "Agent User",
-  "email": "agent@tdis.com",
-  "role": "staff",
-  "permissions": ["view_balances", "update_bookings", "manage_clients"],
-  "status": "active",
-  "createdAt": "2024-01-01T00:00:00.000Z"
-}
-```
+Restart `npm run dev` after editing `.env.local` — Next.js only reads env
+files at startup.
 
-### Option B: Create Users via Auth Console
+On Vercel/Netlify/etc, add the same variables in your project's
+Environment Variables settings (they must be prefixed `NEXT_PUBLIC_` to be
+readable in the browser, which is why they're named that way).
 
-1. Go to **Authentication** → **Users** tab
-2. Click **Add user**
-3. Create users:
-   - **Email:** admin@tdis.com | **Password:** demo123456
-   - **Email:** agent@tdis.com | **Password:** demo123456
+## Step 6: Lock down Firestore rules before going live
 
-4. Then manually add the Firestore documents as shown in Option A
-
-## Step 7: Enable Real-time Sync (Important!)
-
-1. Go to **Firestore Database** → **Rules**
-2. Replace the rules with:
+Test-mode rules allow anyone to read/write. Before real data goes in,
+go to **Firestore Database → Rules** and use something like:
 
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow users to read/write their own data and shared data
-    match /users/{document=**} {
-      allow read, write: if request.auth != null;
-    }
-    match /clients/{document=**} {
-      allow read, write: if request.auth != null;
-    }
-    match /bookings/{document=**} {
+    match /tdis_data/{document} {
       allow read, write: if request.auth != null;
     }
   }
 }
 ```
 
-3. Click **Publish**
+Then **Publish**.
 
-## Step 8: Test Login
+## Default sign-in for first login
 
-1. Open your HTML file in a browser
-2. You should see the Firebase login screen
-3. Sign up with a new account OR use:
-   - **Email:** admin@tdis.com
-   - **Password:** demo123456
+The app ships with two built-in local accounts so you can log in before any
+Firebase user exists:
 
-## Default Test Accounts
+| Role  | Email           | Password  |
+|-------|-----------------|-----------|
+| Admin | admin@tdis.com  | admin123  |
+| Agent | agent@tdis.com  | agent123  |
 
-After setup, you can use these credentials:
-
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | admin@tdis.com | demo123456 |
-| Agent | agent@tdis.com | demo123456 |
-
-## Important Security Notes ⚠️
-
-- **DO NOT** push your Firebase config to GitHub
-- **DO NOT** use test mode rules in production
-- Change password from `demo123456` in production
-- Use environment variables for sensitive data in production
-- Enable CORS properly for your domain
+**Change or remove these before going live** — they're defined in
+`src/lib/constants.ts` (`LOCAL_CREDENTIALS`).
 
 ## Troubleshooting
 
-### "Firebase is not defined"
-- Make sure Firebase SDK scripts are loading in head
-- Check browser console for 404 errors
-
-### "auth.signInWithEmailAndPassword is not a function"
-- Verify Firebase SDK version (should be 10.7.0 or later)
-
-### Firestore data not syncing
-- Check browser console for errors
-- Verify Firestore rules allow your user to read/write
-- Check if user UID matches document ID in some cases
-
-### Can't create account
-- Ensure email format is valid
-- Password must be at least 6 characters
-- Check Firestore quota limits
-
-## Need Help?
-
-- [Firebase Documentation](https://firebase.google.com/docs)
-- [Firebase Auth Guide](https://firebase.google.com/docs/auth)
-- [Firestore Setup Guide](https://firebase.google.com/docs/firestore)
+- **Data not syncing across devices** — check `.env.local` is filled in and
+  the dev server was restarted; open the browser console for `[firebase]`
+  warnings.
+- **"Firebase not configured" in console** — expected if you haven't set the
+  env vars yet; the app is deliberately running in local-only mode.
+- **Firestore permission-denied errors** — your security rules don't allow
+  the current auth state to read/write `tdis_data/*`; see Step 6.
