@@ -129,7 +129,7 @@ export type SectionId =
   | "goals"
   | "airlines"
   | "balances"
-  | "updateBookings"
+  | "availableTkt"
   | "clients"
   | "staff"
   | "admin"

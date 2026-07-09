@@ -768,3 +768,132 @@ tbody tr:hover td { background: linear-gradient(90deg, rgba(30,36,99,0.03), tran
   .stat-value { font-size: 18px; }
   .section-title { font-size: 16px; }
 }
+
+/* ═══════════════════════════════════════════════════
+   UI REFINEMENT PASS — modernization layer
+   Same brand colors/tokens as above; this section adds
+   sharper spacing, softer elevation, consistent icon
+   sizing, skeleton loaders, and the new dashboard
+   priority-grid layout. Nothing above this line was
+   changed, so the two are easy to diff.
+═══════════════════════════════════════════════════ */
+
+/* Sidebar: icon consistency + animated active indicator */
+.tab-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; color: currentColor; opacity: 0.85; }
+.tab-btn.active .tab-icon { opacity: 1; }
+.tab-btn.active::before { content: none; } /* replaced by animated .tab-active-dot */
+.tab-active-dot {
+  position: absolute;
+  left: 0; top: 20%; bottom: 20%;
+  width: 3px;
+  background: var(--gold-light);
+  border-radius: 2px;
+}
+.sidebar-search-wrap .s-icon { display: inline-flex; color: var(--gray-400); }
+.sidebar { border-right: 1px solid var(--gray-100); box-shadow: 1px 0 0 rgba(18,59,88,0.02); }
+.sidebar-section-label { opacity: 0.75; }
+
+/* Cards: softer, more consistent elevation */
+.card { border-radius: 16px; box-shadow: 0 1px 2px rgba(18,59,88,0.05); }
+.card:hover { box-shadow: 0 10px 28px rgba(18,59,88,0.10); }
+.stat-card, .dash-kpi-card, .balance-card, .goal-card, .adm-control-card { border-radius: 16px; }
+
+/* Typography scale tightened for a cleaner hierarchy */
+.section-title { font-size: 19px; letter-spacing: -0.2px; }
+.card-title { letter-spacing: 0.3px; font-size: 12.5px; }
+.dash-kpi-value, .stat-value { letter-spacing: -0.3px; }
+
+/* Tables: quieter header, subtle zebra for scanability */
+thead { background: var(--navy-dark); border-radius: 12px 12px 0 0; }
+tbody tr:nth-child(even) td { background: rgba(24,79,115,0.015); }
+tbody tr:hover td { background: linear-gradient(90deg, rgba(24,79,115,0.05), transparent); }
+
+/* Forms: consistent control height + calmer focus ring */
+input, select { border-radius: 10px; }
+input:focus, select:focus { box-shadow: 0 0 0 3px rgba(24,79,115,0.10); }
+
+/* ─── Skeleton loading states ─── */
+.skeleton {
+  background: linear-gradient(90deg, var(--gray-100) 25%, var(--gray-200) 37%, var(--gray-100) 63%);
+  background-size: 400% 100%;
+  animation: skeletonShine 1.4s ease infinite;
+  border-radius: 8px;
+}
+@keyframes skeletonShine { 0% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+.skeleton-shell { padding: 28px 32px; display: flex; flex-direction: column; gap: 16px; }
+.skeleton-row { display: flex; gap: 14px; }
+
+/* ─── Priority dashboard grid (new) ─── */
+.priority-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.priority-tile {
+  background: white;
+  border: 1.5px solid var(--gray-200);
+  border-radius: 16px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.22s cubic-bezier(.34,1.56,.64,1);
+  position: relative;
+}
+.priority-tile:hover { border-color: var(--navy); box-shadow: 0 10px 28px rgba(24,79,115,0.14); transform: translateY(-3px); }
+.priority-tile:disabled, .priority-tile.disabled { cursor: default; opacity: 0.85; }
+.priority-tile-icon {
+  width: 38px; height: 38px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--gold-pale);
+  color: var(--navy-dark);
+}
+.priority-tile-title { font-family: var(--font-inter-tight), 'Inter Tight', sans-serif; font-weight: 700; font-size: 13.5px; color: var(--navy-dark); }
+.priority-tile-value { font-family: var(--font-inter-tight), 'Inter Tight', sans-serif; font-weight: 800; font-size: 20px; color: var(--navy-dark); }
+.priority-tile-sub { font-size: 11.5px; color: var(--gray-400); }
+.priority-tile-badge {
+  position: absolute; top: 14px; right: 14px;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 3px 8px; border-radius: 20px;
+  background: var(--gold-pale); color: var(--brown);
+}
+
+.sync-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 16px;
+  background: var(--navy);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.sync-btn:hover { background: var(--navy-light); transform: translateY(-1px); }
+.sync-btn:disabled { opacity: 0.7; cursor: default; transform: none; }
+.sync-spin { animation: spin 1s linear infinite; }
+
+/* ─── Tablet breakpoint refinement ─── */
+@media (max-width: 1180px) and (min-width: 901px) {
+  .priority-grid { grid-template-columns: repeat(3, 1fr); }
+  .dash-two-col, .dash-three-col { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 900px) {
+  .priority-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .priority-tile { padding: 14px; }
+}
+@media (max-width: 480px) {
+  .priority-grid { grid-template-columns: 1fr; }
+}
+
+/* ─── Breadcrumb ─── */
+.breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--gray-400); margin-bottom: 14px; font-weight: 500; }
+.breadcrumb-home { color: var(--gray-400); }
+.breadcrumb-sep { opacity: 0.5; }
+.breadcrumb-current { color: var(--navy-dark); font-weight: 700; }
+@media (max-width: 900px) { .breadcrumb { margin-bottom: 10px; } }

@@ -133,7 +133,66 @@ session) rather than one more giant chat turn — it's much better suited to
 methodically verifying each of the ~100 original functions against this
 rebuild line-by-line.
 
-## Known limitations of this environment
+## UI refinement pass (v2)
+
+A follow-up pass modernized the interface without touching the TDIS brand
+identity (colors, logo, fonts stayed the same):
+
+- **Icons** — sidebar, breadcrumb, and the new dashboard tiles now use
+  `lucide-react` for consistent, professional iconography instead of emoji.
+  Other sections still use their original emoji for now — say the word if
+  you want those swapped too.
+- **Sidebar** — animated active-tab indicator (Framer Motion `layoutId`),
+  cleaner icon alignment.
+- **Breadcrumb** — added above each section (`TDIS / <section name>`).
+- **Cards, tables, forms** — softer shadows, tighter border-radius scale,
+  quieter table zebra-striping, calmer focus rings. Since these are shared
+  CSS classes, this modernizes every section at once.
+- **Loading state** — the old blank screen during the initial auth check is
+  now a skeleton shell (`DashboardSkeleton.tsx`).
+- **Tablet breakpoint** — added an intermediate 901–1180px layout so tablets
+  don't jump straight from desktop to the mobile stacked layout.
+- **Dashboard** — rebuilt around a "priority grid" of quick-access tiles
+  (see below), with staggered entrance animation.
+
+### Team Management removed (for now)
+
+The Staff Directory section is unlinked from the sidebar and routing per
+request, but the component (`StaffSection.tsx`) and its KPI logic are left
+intact and untouched. To bring it back:
+1. Add an entry back to `SIDEBAR_SECTIONS` in `src/lib/constants.ts`
+2. Add a `case "staff": return <StaffSection />;` back into the `renderSection`
+   switch in `src/app/page.tsx` (and re-add the import)
+
+### "Update Bookings" → "Available TKT to Issue"
+
+Renamed everywhere: sidebar label, section title, breadcrumb, and the
+internal `SectionId` value (`updateBookings` → `availableTkt` in
+`src/lib/types.ts`). The component file itself is still named
+`UpdateBookingsSection.tsx` — only the exported name used at the import site
+in `page.tsx` changed (`AvailableTktSection`), to avoid a risky rename
+across the codebase. Rename the file too if you want the filename to match.
+
+### Dashboard priority modules
+
+Per the requested priority order, the dashboard now leads with a tile grid:
+
+| Tile | Status |
+|---|---|
+| Airline Wallet Balances | **Real** — live total + count needing attention, click-through to Balances |
+| Available TKT to Issue | **Real** — live count, click-through to that section |
+| Report Generator | Placeholder ("Coming soon") — no report-generation feature exists yet |
+| AI Operations Assistant | Placeholder ("Coming soon") — no AI assistant feature exists yet |
+| Daily Sales | **Real** — computed from bookings in the last 24 hours |
+| Weekly Sales | **Real** — computed from bookings in the last 7 days |
+| Recent Reports | Placeholder ("Coming soon") — depends on Report Generator existing first |
+| Manual Sync | **Real** — re-pulls all Firestore collections on demand, with a spinning-icon loading state and a "last synced" timestamp |
+
+I didn't invent functionality behind Report Generator / AI Operations
+Assistant / Recent Reports since they weren't part of the original app or
+anything built so far — happy to scope and build any of them out as a next
+step once you confirm what each should actually do.
+
 
 This was built without network/npm access, so `npm install` and a real
 build have **not** been run against this code. I've been careful with

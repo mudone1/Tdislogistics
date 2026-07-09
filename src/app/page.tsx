@@ -9,23 +9,28 @@ import LoginScreen from "@/components/layout/LoginScreen";
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
 import ToastArea from "@/components/layout/ToastArea";
+import DashboardSkeleton from "@/components/layout/DashboardSkeleton";
+import Breadcrumb from "@/components/layout/Breadcrumb";
 import DashboardSection from "@/components/sections/DashboardSection";
 import GoalsSection from "@/components/sections/GoalsSection";
 import AirlinesSection from "@/components/sections/AirlinesSection";
 import BalancesSection from "@/components/sections/BalancesSection";
-import UpdateBookingsSection from "@/components/sections/UpdateBookingsSection";
+import AvailableTktSection from "@/components/sections/UpdateBookingsSection";
 import ClientsSection from "@/components/sections/ClientsSection";
-import StaffSection from "@/components/sections/StaffSection";
 import AdminSection from "@/components/sections/admin/AdminSection";
 import ClientDebtSection from "@/components/sections/ClientDebtSection";
 import DebtDashboardSection from "@/components/sections/DebtDashboardSection";
+
+// NOTE: "Team Management" (Staff Directory) is deliberately not routed here
+// for this phase — see src/components/sections/StaffSection.tsx and
+// src/lib/constants.ts for how to bring it back later.
 
 export default function Home() {
   const { currentUser, authReady, hasPermission } = useApp();
   const [active, setActive] = useState<SectionId>("dashboard");
 
   if (!authReady) {
-    return <div style={{ minHeight: "100vh" }} />;
+    return <DashboardSkeleton />;
   }
 
   if (!currentUser) {
@@ -42,19 +47,17 @@ export default function Home() {
   function renderSection(id: SectionId) {
     switch (id) {
       case "dashboard":
-        return <DashboardSection />;
+        return <DashboardSection onNavigate={setActive} />;
       case "goals":
         return <GoalsSection />;
       case "airlines":
         return <AirlinesSection />;
       case "balances":
         return <BalancesSection />;
-      case "updateBookings":
-        return hasPermission("update_bookings") ? <UpdateBookingsSection /> : <NoAccess />;
+      case "availableTkt":
+        return hasPermission("update_bookings") ? <AvailableTktSection /> : <NoAccess />;
       case "clients":
         return hasPermission("view_clients") ? <ClientsSection /> : <NoAccess />;
-      case "staff":
-        return <StaffSection />;
       case "clientDebt":
         return <ClientDebtSection />;
       case "debtDashboard":
@@ -62,7 +65,7 @@ export default function Home() {
       case "admin":
         return isAdmin ? <AdminSection /> : <NoAccess />;
       default:
-        return <DashboardSection />;
+        return <DashboardSection onNavigate={setActive} />;
     }
   }
 
@@ -72,6 +75,7 @@ export default function Home() {
       <div className="app-body">
         <Sidebar active={active} onSelect={setActive} />
         <div className="main">
+          <Breadcrumb active={active} />
           <AnimatePresence mode="wait">
             <div key={active} className="section active">
               {renderSection(active)}

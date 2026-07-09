@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { motion } from "framer-motion";
 import { useApp } from "@/lib/store";
-import { SIDEBAR_SECTIONS } from "@/lib/constants";
-import { isAdminRole } from "@/lib/constants";
+import { SIDEBAR_SECTIONS, isAdminRole } from "@/lib/constants";
+import { Icon } from "@/lib/icon-map";
 import type { SectionId } from "@/lib/types";
 
 export default function Sidebar({
@@ -35,7 +36,7 @@ export default function Sidebar({
     <nav className="sidebar">
       <div className="sidebar-search">
         <div className="sidebar-search-wrap">
-          <span className="s-icon">🔍</span>
+          <Icon name="search" size={13} className="s-icon" />
           <input
             type="text"
             placeholder="Search menu…"
@@ -48,15 +49,28 @@ export default function Sidebar({
       {sections.map((section) => (
         <div className="sidebar-section" key={section.label}>
           <div className="sidebar-section-label">{section.label}</div>
-          {section.items.map((item) => (
-            <button
-              key={item.id}
-              className={`tab-btn ${active === item.id ? "active" : ""}`}
-              onClick={() => onSelect(item.id as SectionId)}
-            >
-              <span className="tab-icon">{item.icon}</span> {item.label}
-            </button>
-          ))}
+          {section.items.map((item) => {
+            const isActive = active === item.id;
+            return (
+              <button
+                key={item.id}
+                className={`tab-btn ${isActive ? "active" : ""}`}
+                onClick={() => onSelect(item.id as SectionId)}
+              >
+                {isActive && (
+                  <motion.span
+                    layoutId="sidebar-active-indicator"
+                    className="tab-active-dot"
+                    transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                  />
+                )}
+                <span className="tab-icon">
+                  <Icon name={item.icon} size={16} />
+                </span>
+                {item.label}
+              </button>
+            );
+          })}
         </div>
       ))}
     </nav>

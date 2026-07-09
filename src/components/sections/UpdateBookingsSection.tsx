@@ -57,7 +57,10 @@ export default function UpdateBookingsSection() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-      <div className="section-title">Update Bookings</div>
+      <div className="section-title">Available TKT to Issue</div>
+      <p style={{ fontSize: 12.5, color: "var(--gray-400)", marginTop: -14, marginBottom: 20 }}>
+        Record tickets that are ready for issuance and track their payment status.
+      </p>
 
       <div className="dash-two-col booking-update-grid">
         <div className="card">

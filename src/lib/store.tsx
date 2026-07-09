@@ -127,6 +127,11 @@ interface AppState {
   // toasts
   toasts: Toast[];
   showToast: (message: string, type?: "success" | "warn") => void;
+
+  // manual sync
+  isSyncing: boolean;
+  lastSyncedAt: string | null;
+  syncNow: () => void;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -180,6 +185,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [currentUser]
   );
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+
+  const pullFromCloud = useCallback(async (opts?: { manual?: boolean }) => {
+    setIsSyncing(true);
+    try {
+      const [fsBalances, fsClients, fsBookings, fsDebtGroups, fsUsers] = await Promise.all([
+        fsLoad<Balance[]>("balances", "tdis_balances", []),
+        fsLoad<Client[]>("clients", "tdis_clients", []),
+        fsLoad<BookingUpdate[]>("bookingUpdates", "tdis_bookingUpdates", []),
+        fsLoad<DebtGroup[]>("debtGroups", "tdis_debtGroups", []),
+        fsLoad<AppUser[]>("users", "tdis_users", DEFAULT_USERS),
+      ]);
+      setBalances(ensureAllAirlines(fsBalances));
+      setClients(fsClients);
+      setBookingUpdates(
+        fsBookings.map((b) => ({ ...b, amountPaid: b.amountPaid != null ? b.amountPaid : b.status === "Paid" ? b.amount : 0 }))
+      );
+      setDebtGroups(fsDebtGroups);
+      if (fsUsers.length) setAllUsers(fsUsers);
+      setLastSyncedAt(new Date().toISOString());
+      if (opts?.manual) showToast("✓ Synced with the cloud", "success");
+    } catch {
+      if (opts?.manual) showToast("Sync failed — check your connection", "warn");
+    } finally {
+      setIsSyncing(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showToast]);
+
+  const syncNow = useCallback(() => pullFromCloud({ manual: true }), [pullFromCloud]);
+
   // ─── bootstrap: local data first (fast paint), then Firestore, then live listeners ───
   useEffect(() => {
     setBalances(ensureAllAirlines(readLS("tdis_balances", [])));
@@ -196,22 +233,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (savedSession) setCurrentUser(savedSession);
     setAuthReady(true);
 
-    (async () => {
-      const [fsBalances, fsClients, fsBookings, fsDebtGroups, fsUsers] = await Promise.all([
-        fsLoad<Balance[]>("balances", "tdis_balances", []),
-        fsLoad<Client[]>("clients", "tdis_clients", []),
-        fsLoad<BookingUpdate[]>("bookingUpdates", "tdis_bookingUpdates", []),
-        fsLoad<DebtGroup[]>("debtGroups", "tdis_debtGroups", []),
-        fsLoad<AppUser[]>("users", "tdis_users", DEFAULT_USERS),
-      ]);
-      setBalances(ensureAllAirlines(fsBalances));
-      setClients(fsClients);
-      setBookingUpdates(
-        fsBookings.map((b) => ({ ...b, amountPaid: b.amountPaid != null ? b.amountPaid : b.status === "Paid" ? b.amount : 0 }))
-      );
-      setDebtGroups(fsDebtGroups);
-      if (fsUsers.length) setAllUsers(fsUsers);
-    })();
+    pullFromCloud();
 
     const unsubs = [
       fsListen<Balance[]>("balances", (data) => {
@@ -740,6 +762,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       logActivity,
       toasts,
       showToast,
+      isSyncing,
+      lastSyncedAt,
+      syncNow,
     }),
     [
       currentUser,
@@ -781,6 +806,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       logActivity,
       toasts,
       showToast,
+      isSyncing,
+      lastSyncedAt,
+      syncNow,
     ]
   );
 
@@ -806,6 +834,14 @@ export function getGroupBalance(group: DebtGroup): number {
     if (t.status === "paid") return sum;
     return t.type === "charge" ? sum + t.amount : sum - t.amount;
   }, group.initialBill);
+}
+
+// Shared by the Dashboard's Daily/Weekly Sales tiles and the Goals section.
+export function revenueInWindow(bookingUpdates: BookingUpdate[], days: number): number {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return bookingUpdates
+    .filter((b) => b.status !== "Cancelled" && new Date(b.createdAt).getTime() >= cutoff)
+    .reduce((s, b) => s + b.amount, 0);
 }
 
 // Exported so modal components can generate today's date/time defaults.

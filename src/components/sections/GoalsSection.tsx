@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { useApp } from "@/lib/store";
+import { useApp, revenueInWindow } from "@/lib/store";
 import { formatNaira } from "@/lib/utils";
 import type { SalesGoals } from "@/lib/types";
 
@@ -16,16 +16,6 @@ export default function GoalsSection() {
   const { salesGoals, setGoal, bookingUpdates } = useApp();
   const [inputs, setInputs] = useState<Record<string, string>>({});
 
-  const revenueInWindow = useMemo(() => {
-    const now = Date.now();
-    return (days: number) => {
-      const cutoff = now - days * 24 * 60 * 60 * 1000;
-      return bookingUpdates
-        .filter((b) => b.status !== "Cancelled" && new Date(b.createdAt).getTime() >= cutoff)
-        .reduce((s, b) => s + b.amount, 0);
-    };
-  }, [bookingUpdates]);
-
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
       <div className="section-title">Goals &amp; Targets</div>
@@ -33,7 +23,7 @@ export default function GoalsSection() {
       <div className="goals-period-grid">
         {PERIODS.map((p) => {
           const target = salesGoals[p.key] || 0;
-          const achieved = revenueInWindow(p.days);
+          const achieved = revenueInWindow(bookingUpdates, p.days);
           const pct = target > 0 ? Math.min(100, Math.round((achieved / target) * 100)) : 0;
           const isAchieved = target > 0 && achieved >= target;
 

@@ -147,6 +147,9 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   spendingLimits: {},
 };
 
+// Icon values are lucide-react icon names (see src/components/layout/Sidebar.tsx
+// and src/lib/icon-map.tsx for the key -> component mapping). Using string keys
+// here keeps this file framework-agnostic and easy to scan.
 export const SIDEBAR_SECTIONS: {
   label: string;
   items: { id: string; icon: string; label: string; requiresAdmin?: boolean; permission?: string }[];
@@ -154,29 +157,37 @@ export const SIDEBAR_SECTIONS: {
   {
     label: "Overview",
     items: [
-      { id: "dashboard", icon: "📊", label: "Dashboard" },
-      { id: "goals", icon: "🎯", label: "Goals & Targets" },
+      { id: "dashboard", icon: "layout-dashboard", label: "Dashboard" },
+      { id: "goals", icon: "target", label: "Goals & Targets" },
     ],
   },
   {
     label: "Operations",
     items: [
-      { id: "airlines", icon: "🏢", label: "Airlines" },
-      { id: "balances", icon: "💳", label: "Airline Deposits" },
-      { id: "updateBookings", icon: "🧾", label: "Update Bookings", permission: "update_bookings" },
-      { id: "clients", icon: "👤", label: "Clients", permission: "view_clients" },
+      { id: "airlines", icon: "building-2", label: "Airlines" },
+      { id: "balances", icon: "wallet", label: "Airline Deposits" },
+      { id: "availableTkt", icon: "ticket", label: "Available TKT to Issue", permission: "update_bookings" },
+      { id: "clients", icon: "users", label: "Clients", permission: "view_clients" },
     ],
   },
   {
-    label: "Team",
+    label: "Client Accounts",
     items: [
-      { id: "staff", icon: "👥", label: "Staff Directory" },
-      { id: "clientDebt", icon: "📒", label: "Client Debt Tracker" },
-      { id: "debtDashboard", icon: "📈", label: "Debt Dashboard" },
+      { id: "clientDebt", icon: "book-open", label: "Client Debt Tracker" },
+      { id: "debtDashboard", icon: "line-chart", label: "Debt Dashboard" },
     ],
   },
   {
     label: "System",
-    items: [{ id: "admin", icon: "⚙️", label: "Admin Dashboard", requiresAdmin: true }],
+    items: [{ id: "admin", icon: "settings", label: "Admin Dashboard", requiresAdmin: true }],
   },
 ];
+
+// NOTE: "Team Management" (Staff Directory) is intentionally removed from
+// navigation for this phase — see StaffSection.tsx, which is kept in the
+// codebase untouched so it can be re-added to SIDEBAR_SECTIONS and the
+// page.tsx section router later without rebuilding it.
+
+export const SECTION_LABELS: Record<string, string> = Object.fromEntries(
+  SIDEBAR_SECTIONS.flatMap((s) => s.items.map((i) => [i.id, i.label]))
+);

@@ -2,40 +2,46 @@
 
 import { useMemo } from "react";
 import { motion } from "framer-motion";
-import { useApp, getClientAmountOwed } from "@/lib/store";
+import { useApp, getClientAmountOwed, revenueInWindow } from "@/lib/store";
 import { formatNaira } from "@/lib/utils";
+import { Icon } from "@/lib/icon-map";
+import type { SectionId } from "@/lib/types";
 
-export default function DashboardSection() {
-  const { balances, clients, bookingUpdates, settings } = useApp();
+const container = {
+  hidden: {},
+  show: { transition: { staggerChildren: 0.05 } },
+};
+const item = {
+  hidden: { opacity: 0, y: 10 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.25, ease: [0.22, 1, 0.36, 1] as const } },
+};
+
+export default function DashboardSection({ onNavigate }: { onNavigate: (id: SectionId) => void }) {
+  const { balances, clients, bookingUpdates, settings, isSyncing, lastSyncedAt, syncNow } = useApp();
 
   const stats = useMemo(() => {
     const totalBalance = balances.reduce((s, b) => s + b.balance, 0);
     const criticalAirlines = balances.filter((b) => b.balance < settings.thresholdCritical);
     const lowAirlines = balances.filter((b) => b.balance >= settings.thresholdCritical && b.balance < settings.thresholdLow);
+    const availableToIssue = bookingUpdates.filter((b) => b.bookingType === "On Hold" || b.status === "Pending").length;
     const pending = bookingUpdates.filter((b) => b.status === "Pending" || b.status === "Partial");
-    const totalOwed = pending.reduce((s, b) => {
-      const paid = b.amountPaid || 0;
-      return s + Math.max(0, b.amount - paid);
-    }, 0);
-    const totalRevenue = bookingUpdates.filter((b) => b.status !== "Cancelled").reduce((s, b) => s + b.amount, 0);
-    const uniqueClientsWithDebt = new Set(
-      clients.filter((c) => getClientAmountOwed(bookingUpdates, c.name) > 0).map((c) => c.id)
-    );
-
+    const totalOwed = pending.reduce((s, b) => s + Math.max(0, b.amount - (b.amountPaid || 0)), 0);
+    const dailySales = revenueInWindow(bookingUpdates, 1);
+    const weeklySales = revenueInWindow(bookingUpdates, 7);
     return {
       totalBalance,
       criticalAirlines,
       lowAirlines,
+      availableToIssue,
       pendingCount: pending.length,
       totalOwed,
-      totalRevenue,
       totalBookings: bookingUpdates.length,
       totalClients: clients.length,
-      clientsWithDebtCount: uniqueClientsWithDebt.size,
+      dailySales,
+      weeklySales,
     };
   }, [balances, clients, bookingUpdates, settings]);
 
-  // Simple last-7-record bar trend of booking amounts (bounded, no external chart lib needed)
   const recentBars = useMemo(() => {
     const last = bookingUpdates.slice(-7);
     const max = Math.max(1, ...last.map((b) => b.amount));
@@ -55,46 +61,106 @@ export default function DashboardSection() {
     [bookingUpdates]
   );
 
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-    >
-      <div className="section-title">Operations Dashboard</div>
+  const clientsWithDebt = useMemo(
+    () => clients.filter((c) => getClientAmountOwed(bookingUpdates, c.name) > 0).length,
+    [clients, bookingUpdates]
+  );
 
-      <div className="dash-kpi-grid">
-        <div className="dash-kpi-card">
-          <div className="dash-kpi-icon">💰</div>
-          <div className="dash-kpi-value">{formatNaira(stats.totalBalance)}</div>
-          <div className="dash-kpi-label">Total Airline Balance</div>
+  return (
+    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 6 }}>
+        <div className="section-title" style={{ marginBottom: 0 }}>
+          Operations Dashboard
         </div>
-        <div className={`dash-kpi-card ${stats.criticalAirlines.length ? "alert" : ""}`}>
-          <div className="dash-kpi-icon">🔴</div>
-          <div className="dash-kpi-value">{stats.criticalAirlines.length}</div>
-          <div className="dash-kpi-label">Critical Airlines</div>
-        </div>
-        <div className={`dash-kpi-card ${stats.lowAirlines.length ? "warn" : ""}`}>
-          <div className="dash-kpi-icon">🟡</div>
-          <div className="dash-kpi-value">{stats.lowAirlines.length}</div>
-          <div className="dash-kpi-label">Low Airlines</div>
-        </div>
-        <div className="dash-kpi-card">
-          <div className="dash-kpi-icon">👤</div>
-          <div className="dash-kpi-value">{stats.totalClients}</div>
-          <div className="dash-kpi-label">Total Clients</div>
-        </div>
-        <div className="dash-kpi-card">
-          <div className="dash-kpi-icon">🧾</div>
-          <div className="dash-kpi-value">{stats.totalBookings}</div>
-          <div className="dash-kpi-label">Total Bookings</div>
-        </div>
-        <div className={`dash-kpi-card ${stats.totalOwed ? "warn" : "success"}`}>
-          <div className="dash-kpi-icon">⏳</div>
-          <div className="dash-kpi-value">{formatNaira(stats.totalOwed)}</div>
-          <div className="dash-kpi-label">Outstanding Payments</div>
-        </div>
+        <button className="sync-btn" onClick={syncNow} disabled={isSyncing}>
+          <Icon name="refresh-cw" size={14} className={isSyncing ? "sync-spin" : ""} />
+          {isSyncing ? "Syncing…" : "Manual Sync"}
+        </button>
       </div>
+      {lastSyncedAt && (
+        <p style={{ fontSize: 11, color: "var(--gray-400)", marginTop: 0, marginBottom: 20 }}>
+          Last synced {new Date(lastSyncedAt).toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit" })}
+        </p>
+      )}
+
+      {/* ─── Priority quick-access grid ─── */}
+      <motion.div className="priority-grid" variants={container} initial="hidden" animate="show">
+        <motion.button variants={item} className="priority-tile" onClick={() => onNavigate("balances")}>
+          <div className="priority-tile-icon">
+            <Icon name="wallet" size={18} />
+          </div>
+          <div className="priority-tile-title">Airline Wallet Balances</div>
+          <div className="priority-tile-value">{formatNaira(stats.totalBalance)}</div>
+          <div className="priority-tile-sub">
+            {stats.criticalAirlines.length + stats.lowAirlines.length > 0
+              ? `${stats.criticalAirlines.length + stats.lowAirlines.length} need attention`
+              : "All balances healthy"}
+          </div>
+        </motion.button>
+
+        <motion.button variants={item} className="priority-tile" onClick={() => onNavigate("availableTkt")}>
+          <div className="priority-tile-icon">
+            <Icon name="ticket" size={18} />
+          </div>
+          <div className="priority-tile-title">Available TKT to Issue</div>
+          <div className="priority-tile-value">{stats.availableToIssue}</div>
+          <div className="priority-tile-sub">Tickets pending issuance</div>
+        </motion.button>
+
+        <motion.div variants={item} className="priority-tile disabled">
+          <span className="priority-tile-badge">Coming soon</span>
+          <div className="priority-tile-icon">
+            <Icon name="file-bar-chart" size={18} />
+          </div>
+          <div className="priority-tile-title">Report Generator</div>
+          <div className="priority-tile-sub">Generate custom operational reports</div>
+        </motion.div>
+
+        <motion.div variants={item} className="priority-tile disabled">
+          <span className="priority-tile-badge">Coming soon</span>
+          <div className="priority-tile-icon">
+            <Icon name="sparkles" size={18} />
+          </div>
+          <div className="priority-tile-title">AI Operations Assistant</div>
+          <div className="priority-tile-sub">Ask questions about your data</div>
+        </motion.div>
+
+        <motion.div variants={item} className="priority-tile">
+          <div className="priority-tile-icon">
+            <Icon name="calendar-days" size={18} />
+          </div>
+          <div className="priority-tile-title">Daily Sales</div>
+          <div className="priority-tile-value">{formatNaira(stats.dailySales)}</div>
+          <div className="priority-tile-sub">Last 24 hours</div>
+        </motion.div>
+
+        <motion.div variants={item} className="priority-tile">
+          <div className="priority-tile-icon">
+            <Icon name="calendar-range" size={18} />
+          </div>
+          <div className="priority-tile-title">Weekly Sales</div>
+          <div className="priority-tile-value">{formatNaira(stats.weeklySales)}</div>
+          <div className="priority-tile-sub">Last 7 days</div>
+        </motion.div>
+
+        <motion.div variants={item} className="priority-tile disabled">
+          <span className="priority-tile-badge">Coming soon</span>
+          <div className="priority-tile-icon">
+            <Icon name="clock" size={18} />
+          </div>
+          <div className="priority-tile-title">Recent Reports</div>
+          <div className="priority-tile-sub">Your last generated reports</div>
+        </motion.div>
+
+        <motion.button variants={item} className="priority-tile" onClick={() => onNavigate("clients")}>
+          <div className="priority-tile-icon">
+            <Icon name="users" size={18} />
+          </div>
+          <div className="priority-tile-title">Clients With Debt</div>
+          <div className="priority-tile-value">{clientsWithDebt}</div>
+          <div className="priority-tile-sub">{formatNaira(stats.totalOwed)} outstanding</div>
+        </motion.button>
+      </motion.div>
 
       <div className="dash-two-col">
         <div className="card">
@@ -104,7 +170,7 @@ export default function DashboardSection() {
           <div className="card-body">
             {recentBars.length === 0 ? (
               <div className="empty-state" style={{ padding: "24px 8px" }}>
-                <div className="empty-icon">📊</div>
+                <Icon name="inbox" size={32} className="empty-icon" />
                 <div className="empty-sub">No bookings recorded yet</div>
               </div>
             ) : (
@@ -127,7 +193,7 @@ export default function DashboardSection() {
           <div className="card-body">
             {topUnpaid.length === 0 ? (
               <div className="empty-state" style={{ padding: "24px 8px" }}>
-                <div className="empty-icon">✅</div>
+                <Icon name="check-circle" size={32} className="empty-icon" />
                 <div className="empty-sub">Everything is settled</div>
               </div>
             ) : (
@@ -152,7 +218,7 @@ export default function DashboardSection() {
         <div className="card-body">
           {stats.criticalAirlines.length === 0 && stats.lowAirlines.length === 0 ? (
             <div className="empty-state" style={{ padding: "24px 8px" }}>
-              <div className="empty-icon">✈️</div>
+              <Icon name="check-circle" size={32} className="empty-icon" />
               <div className="empty-sub">All airline balances are healthy</div>
             </div>
           ) : (
