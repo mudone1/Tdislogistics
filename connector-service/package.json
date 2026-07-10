@@ -2,6 +2,7 @@
   "name": "tdis-connector-service",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Standalone background service that runs Playwright-based airline connector syncs. Deployed separately from the Next.js app (VPS/Docker) — the app talks to this over its internal HTTP API, never runs Playwright itself.",
   "scripts": {
     "dev": "tsx watch src/server.ts",
