@@ -1,0 +1,31 @@
+# Standalone deploy for the connector-service ONLY — this image is not the
+# Next.js app. Build/run from the repo root so it can reach ../src and
+# ../prisma:
+#
+#   docker build -f connector-service/Dockerfile -t tdis-connector-service .
+#   docker run --env-file connector-service/.env -p 4100:4100 tdis-connector-service
+
+FROM mcr.microsoft.com/playwright:v1.49.1-jammy AS base
+# Official Playwright image — Chromium + all OS-level deps for headless
+# Chromium already installed, so we skip `playwright install` at runtime.
+
+WORKDIR /app
+
+# Copy just the two package.jsons first for better layer caching.
+COPY connector-service/package.json connector-service/package-lock.json* ./connector-service/
+COPY package.json ./package.json
+
+RUN cd connector-service && npm install
+
+# Now copy the actual source: the connector-service itself, the shared
+# framework module it imports via relative paths, and the Prisma schema.
+COPY connector-service ./connector-service
+COPY src/modules/airline-connectors ./src/modules/airline-connectors
+COPY prisma ./prisma
+
+RUN cd connector-service && npx prisma generate --schema=../prisma/schema.prisma
+RUN cd connector-service && npm run build
+
+WORKDIR /app/connector-service
+EXPOSE 4100
+CMD ["node", "dist/connector-service/src/server.js"]

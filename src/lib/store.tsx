@@ -30,7 +30,7 @@ import type {
   SystemLog,
   SystemSettings,
 } from "./types";
-import { formatDateTime, todayISO, nowTime, uid } from "./utils";
+import { formatDateTime, formatNaira, todayISO, nowTime, uid } from "./utils";
 
 // ─── local storage helpers ───
 function readLS<T>(key: string, fallback: T): T {
@@ -157,6 +157,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<SystemSettings>(DEFAULT_SETTINGS);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastCounter = useRef(0);
+  const balancesInitialized = useRef(false);
+  const balancesRef = useRef<Balance[]>([]);
 
   const showToast = useCallback((message: string, type: "success" | "warn" = "success") => {
     const id = ++toastCounter.current;
@@ -238,6 +240,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const unsubs = [
       fsListen<Balance[]>("balances", (data) => {
         const next = ensureAllAirlines(data);
+        // Fires a toast for any airline whose balance actually changed
+        // between snapshots — covers BOTH a manual "Set Balance" from
+        // another device and a connector sync landing via
+        // FirestoreMirrorService, since both write to this same document.
+        // Skipped on the very first snapshot (page load), which isn't a
+        // "change" from the user's point of view.
+        if (balancesInitialized.current) {
+          next.forEach((b) => {
+            const prevEntry = balancesRef.current.find((p) => p.airline === b.airline);
+            if (prevEntry && prevEntry.balance !== b.balance) {
+              showToast(`✓ ${b.airline} balance updated to ${formatNaira(b.balance)}`, "success");
+            }
+          });
+        }
+        balancesInitialized.current = true;
+        balancesRef.current = next;
         setBalances(next);
         writeLS("tdis_balances", next);
       }),
@@ -269,6 +287,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   // ─── clock-independent persistence helpers ───
   const persistBalances = useCallback((next: Balance[]) => {
+    balancesRef.current = next;
     setBalances(next);
     writeLS("tdis_balances", next);
     fsSave("balances", next);

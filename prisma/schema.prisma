@@ -1,0 +1,117 @@
+// Prisma schema for the Airline Connector Framework.
+//
+// This is intentionally a separate data store from the rest of the app
+// (which uses Firestore/localStorage — see src/lib/store.tsx). Wallet sync
+// data is structured, relational, and needs transactional history — a good
+// fit for Postgres. After a successful sync, SyncService also mirrors the
+// current balance into the existing Firestore `balances` document so the
+// Airlines/Balances UI updates without any client-side changes (see
+// src/modules/airline-connectors/services/SyncService.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AirlineKey {
+  AIRPEACE
+  AERO
+  ARIK
+  IBOM
+  NGEAGLE
+  // Category B — reserved for Phase 2, not implemented yet.
+  UNITED
+  RANO
+  ENUGU
+  XEJET
+}
+
+enum SyncStatus {
+  SUCCESS
+  FAILED
+  IN_PROGRESS
+  PENDING
+}
+
+enum SyncTrigger {
+  MANUAL
+  SCHEDULED
+}
+
+model AirlineWallet {
+  id             String     @id @default(cuid())
+  airline        AirlineKey @unique
+  currentBalance Decimal    @default(0) @db.Decimal(14, 2)
+  currency       String     @default("NGN")
+  lastSynced     DateTime?
+  lastStatus     SyncStatus @default(PENDING)
+  updatedAt      DateTime   @updatedAt
+  createdAt      DateTime   @default(now())
+
+  history AirlineBalanceHistory[]
+  settings AirlineConnectorSettings?
+
+  @@map("airline_wallets")
+}
+
+// Append-only. A sync NEVER overwrites a previous record — every run
+// (successful or failed) inserts a new row, so balance history and audit
+// trail are always intact.
+model AirlineBalanceHistory {
+  id          String     @id @default(cuid())
+  airline     AirlineKey
+  balance     Decimal    @db.Decimal(14, 2)
+  currency    String     @default("NGN")
+  retrievedAt DateTime   @default(now())
+  syncStatus  SyncStatus
+  connector   String // e.g. "AirPeaceConnector" — which connector produced this row
+  trigger     SyncTrigger @default(MANUAL)
+  errorMessage String?
+  createdAt   DateTime   @default(now())
+
+  wallet   AirlineWallet @relation(fields: [airline], references: [airline])
+
+  @@index([airline, retrievedAt])
+  @@map("airline_balance_history")
+}
+
+// Per-airline connector configuration, managed from Admin → Airline Connectors.
+// `encryptedUsername`/`encryptedPassword` are AES-256-GCM ciphertext (see
+// CredentialService) — plaintext credentials are never persisted or sent to
+// the frontend.
+model AirlineConnectorSettings {
+  id                 String      @id @default(cuid())
+  airline            AirlineKey  @unique
+  enabled            Boolean     @default(false)
+  encryptedUsername  String?
+  encryptedPassword  String?
+  syncIntervalMinutes Int?       // null = manual only. 120 = every 2 hours, 1440 = daily.
+  dailyRunAtUtc      String?     // "00:00" style, used when syncIntervalMinutes is null and a fixed daily time is wanted
+  connectionStatus   String      @default("NOT_CONFIGURED") // NOT_CONFIGURED | CONNECTED | ERROR
+  lastTestedAt       DateTime?
+  updatedAt          DateTime    @updatedAt
+  createdAt          DateTime    @default(now())
+
+  wallet AirlineWallet @relation(fields: [airline], references: [airline])
+
+  @@map("airline_connector_settings")
+}
+
+// Structured sync logs — Login Started, Login Success, Navigation, Balance
+// Retrieved, Balance Saved, Logout, Errors — one row per event, per run.
+model AirlineSyncLog {
+  id        String   @id @default(cuid())
+  airline   AirlineKey
+  runId     String // groups all log lines for a single sync attempt
+  step      String // e.g. LOGIN_STARTED, LOGIN_SUCCESS, NAVIGATION, BALANCE_RETRIEVED, BALANCE_SAVED, LOGOUT, ERROR
+  message   String
+  level     String   @default("info") // info | warn | error
+  createdAt DateTime @default(now())
+
+  @@index([airline, runId])
+  @@map("airline_sync_logs")
+}

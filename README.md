@@ -193,6 +193,129 @@ Assistant / Recent Reports since they weren't part of the original app or
 anything built so far — happy to scope and build any of them out as a next
 step once you confirm what each should actually do.
 
+## Airline Connector Framework
+
+A separate subsystem that automates logging into airline B2B agent portals
+(via Playwright) to read and record wallet balances. Phase 1 only — see
+scope below.
+
+### Architecture
+
+```
+Airline Portal (Crane platform)
+        │  Playwright
+        ▼
+Connector Service  ── standalone Node process, NOT part of this Next.js app
+        │
+        ▼
+PostgreSQL (source of truth)  ── prisma/schema.prisma
+        │
+        ▼
+Sync Service
+   ├── Firestore  ── mirrors the balance into the SAME document the
+   │                 existing dashboard already listens to in real time,
+   │                 so Airlines/Balances tabs update with zero client
+   │                 code changes, and a toast fires automatically
+   │                 (src/lib/store.tsx diffs the incoming snapshot)
+   └── (future) Analytics / Reports
+```
+
+**Why two separate deployables:** Playwright needs a real, persistent OS
+process with a browser binary — that doesn't run on Vercel/serverless. So:
+
+- **This Next.js app** → deploy anywhere (Vercel is fine). It reads
+  wallet/settings/history straight from Postgres (fast, no extra hop) and
+  proxies only the actual sync/test *actions* to the connector service.
+- **`connector-service/`** → deploy separately, anywhere that gives you a
+  persistent process (small VPS, Docker container, Railway/Render/Fly.io
+  worker). It's the only thing that ever launches a browser. Full details
+  in `connector-service/README.md`.
+
+They talk to each other over a small internal HTTP API, authenticated with
+a shared secret (`CONNECTOR_SERVICE_API_KEY`) — never exposed to the
+browser.
+
+### What's real vs. placeholder
+
+**Real and complete:**
+- Full framework — `IAirlineConnector` interface, `BaseConnector` (retry/
+  logging/lifecycle), `BaseCraneConnector` (shared login/nav/balance-read
+  logic), `ConnectorRegistry` (DI/factory — Open/Closed compliant), Prisma
+  schema (`AirlineWallet`, append-only `AirlineBalanceHistory`,
+  `AirlineConnectorSettings`, `AirlineSyncLog`).
+- AES-256-GCM credential encryption (`CredentialService.ts`) — plaintext
+  never touches Postgres or the frontend.
+- Retry with exponential backoff (3 attempts), structured step-by-step
+  logging (`LOGIN_STARTED` → `LOGIN_SUCCESS` → `NAVIGATION` →
+  `BALANCE_RETRIEVED` → `BALANCE_SAVED` → `LOGOUT`, or `ERROR`).
+- Scheduler (`connector-service/src/scheduler.ts`) — per-airline manual /
+  every-2-hours / daily-00:00, configurable from Admin without a restart.
+- Admin → Airline Connectors tab (enable, credentials, test, manual sync,
+  interval, live status) and the Firestore-mirror-triggered toast +
+  balance display under each Airlines tab tile.
+- All five API routes from the spec, under `/api/connectors/[airline]/*`.
+
+**Placeholder — needs your input before it'll actually work:**
+- **CSS selectors.** Every `usernameInput` / `loggedInMarker` /
+  `totalBalance` etc. in each airline's config file (e.g.
+  `src/modules/airline-connectors/connectors/airpeace/AirPeaceConnector.ts`)
+  is a structurally-reasonable guess, not a verified value — I have no
+  network access or valid agent credentials to inspect these live,
+  authenticated portals. Use `npx playwright codegen <login-url>` against
+  each real site to record working selectors, then paste them into that
+  airline's config object. Nothing else needs to change — that's the whole
+  point of the config-per-airline design.
+
+### Scope (Phase 1 — do not expand without confirming first)
+
+Implemented: Air Peace, Aero, Arik, Ibom, NG Eagle — all on the shared
+Crane platform, via `BaseCraneConnector`.
+
+**Not implemented, and not touched:** United, Rano, Enugu Air, XEJet
+(different platforms/workflows entirely) — see
+`src/modules/airline-connectors/connectors/README.md` for exactly how to
+add one later without modifying any existing connector.
+
+**Explicitly out of scope for this framework, by design:** flight search,
+ticket issuance, booking automation, refunds, rescheduling. This only ever
+reads a balance number and logs out.
+
+### Setup
+
+```bash
+# 1. Postgres + Prisma
+cp .env.local.example .env.local   # fill in DATABASE_URL at minimum
+npx prisma migrate dev --name init
+
+# 2. Generate an encryption key (put the same value in .env.local AND
+#    connector-service/.env)
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+
+# 3. Connector service (separate terminal / separate deploy target)
+cd connector-service
+npm install
+npx playwright install --with-deps chromium
+cp .env.example .env   # DATABASE_URL, CONNECTOR_ENCRYPTION_KEY (same as above),
+                         # CONNECTOR_SERVICE_API_KEY, FIREBASE_ADMIN_*
+npm run dev
+```
+
+Then in the main app's `.env.local`, set `CONNECTOR_SERVICE_URL` (e.g.
+`http://localhost:4100` for local dev) and the matching
+`CONNECTOR_SERVICE_API_KEY`.
+
+### Known gap — API route auth
+
+`/api/connectors/*` routes aren't gated to admin users at the server level
+— the existing app's auth is entirely client-side (local-credentials or
+Firebase Auth in the browser; see `src/lib/store.tsx`), so there's no
+server-side session to check yet. Same limitation the rest of the app
+already has, just worth calling out again here since these routes can
+trigger real automated logins with real credentials. Add proper
+server-side session verification before this handles production
+credentials.
+
+## Known limitations of this environment
 
 This was built without network/npm access, so `npm install` and a real
 build have **not** been run against this code. I've been careful with
