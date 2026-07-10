@@ -9,6 +9,9 @@ import type { AirlineKey } from "../../src/modules/airline-connectors/core/types
 
 const app = express();
 app.use(express.json());
+
+app.get("/internal/health", (_req, res) => res.json({ ok: true }));
+
 app.use(requireInternalApiKey);
 
 function assertKnownAirline(airline: string, res: express.Response): airline is AirlineKey {
@@ -71,7 +74,6 @@ app.get("/internal/connectors/:airline/history", async (req, res) => {
   res.json({ history });
 });
 
-app.get("/internal/health", (_req, res) => res.json({ ok: true }));
 
 const PORT = Number(process.env.PORT) || 4100;
 app.listen(PORT, () => {
