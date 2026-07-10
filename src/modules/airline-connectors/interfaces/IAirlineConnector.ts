@@ -1,5 +1,5 @@
 import type { Page, Browser } from "playwright";
-import type { AirlineKey, BalanceReading, DecryptedCredentials } from "../core/types";
+import type { AirlineKey, BalanceReading, DecryptedCredentials, SyncResult } from "../core/types";
 
 /**
  * Every airline connector — regardless of which booking platform it
@@ -12,6 +12,13 @@ import type { AirlineKey, BalanceReading, DecryptedCredentials } from "../core/t
 export interface IAirlineConnector {
   readonly airline: AirlineKey;
   readonly displayName: string;
+
+  /**
+   * Full run: connect → login → verify → syncBalance → logout → disconnect,
+   * wrapped in retry-with-backoff and structured logging. This is what
+   * SyncService calls.
+   */
+  runFullSync(credentials: DecryptedCredentials, runId: string): Promise<SyncResult>;
 
   /** Launch the browser and prepare a fresh page/context. */
   connect(): Promise<void>;
