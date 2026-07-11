@@ -1,4 +1,5 @@
 # dependencies
+node_modules/
 /node_modules
 
 # next.js
@@ -7,10 +8,12 @@
 
 # production
 /build
+connector-service/dist/
 
 # env
 .env*.local
 .env
+connector-service/.env
 
 # misc
 .DS_Store

@@ -1,5 +1,4 @@
-import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import * as admin from "firebase-admin";
 import type { AirlineKey } from "../core/types";
 import { airlineKeyToDisplayName } from "../core/airlineNameMap";
 
@@ -14,14 +13,22 @@ import { airlineKeyToDisplayName } from "../core/airlineNameMap";
  * Document shape MUST exactly match what the client writes via fsSave():
  *   tdis_data/balances -> { data: JSON.stringify(Balance[]) }
  * where Balance = { airline: string; balance: number; updated: string }.
+ *
+ * NOTE: deliberately uses firebase-admin's older top-level/namespaced API
+ * (`import admin from "firebase-admin"`, `admin.initializeApp(...)`,
+ * `adminApp.firestore()`) instead of the newer modular subpath imports
+ * (`firebase-admin/app`, `firebase-admin/firestore`). Both do the exact
+ * same thing at runtime, but the subpath style has had recurring
+ * TypeScript module-resolution issues across firebase-admin versions —
+ * the top-level import is the more stable choice for this codebase.
  */
 
-let app: App | null = null;
+let app: admin.app.App | null = null;
 
-function getAdminApp(): App | null {
+function getAdminApp(): admin.app.App | null {
   if (app) return app;
-  if (getApps().length) {
-    app = getApps()[0];
+  if (admin.apps.length) {
+    app = admin.apps[0] as admin.app.App;
     return app;
   }
 
@@ -39,7 +46,9 @@ function getAdminApp(): App | null {
     return null;
   }
 
-  app = initializeApp({ credential: cert({ projectId, clientEmail, privateKey }) });
+  app = admin.initializeApp({
+    credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
+  });
   return app;
 }
 
@@ -53,7 +62,7 @@ export async function mirrorBalanceToFirestore(airlineKey: AirlineKey, balance: 
   const adminApp = getAdminApp();
   if (!adminApp) return;
 
-  const db = getFirestore(adminApp);
+  const db = adminApp.firestore();
   const docRef = db.collection("tdis_data").doc("balances");
   const displayName = airlineKeyToDisplayName(airlineKey);
   const updatedLabel = new Date().toLocaleString("en-NG", {
@@ -64,7 +73,7 @@ export async function mirrorBalanceToFirestore(airlineKey: AirlineKey, balance: 
     minute: "2-digit",
   });
 
-  await db.runTransaction(async (tx) => {
+  await db.runTransaction(async (tx: FirebaseFirestore.Transaction) => {
     const snap = await tx.get(docRef);
     let current: MirroredBalance[] = [];
     if (snap.exists) {
