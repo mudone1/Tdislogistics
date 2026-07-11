@@ -16,6 +16,13 @@ COPY connector-service/package.json connector-service/package-lock.json* ./conne
 COPY package.json ./package.json
 
 RUN cd connector-service && npm install
+# npm's tarball extraction doesn't always preserve the executable bit on
+# installed CLI binaries inside Docker's build environment — this is the
+# actual cause of "prisma: Permission denied" (exit 126), separate from
+# the node_modules-in-git issue fixed earlier. Restoring it explicitly here
+# also covers `tsc` (used two steps down in `npm run build`), which would
+# otherwise hit the exact same error right after this one gets fixed.
+RUN chmod -R +x connector-service/node_modules/.bin
 
 # Now copy the actual source: the connector-service itself, the shared
 # framework module it imports via relative paths, and the Prisma schema.
