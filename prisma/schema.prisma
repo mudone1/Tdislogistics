@@ -13,8 +13,14 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  // Migrations need a direct (non-pooled) connection — PgBouncer/Neon's
+  // pooler doesn't support the session-level operations `prisma migrate`
+  // needs. The app's actual runtime queries keep using the pooled
+  // DATABASE_URL above (better for serverless), this is only used by the
+  // Prisma CLI for migrate/introspect.
+  directUrl = env("DIRECT_URL")
 }
 
 enum AirlineKey {
