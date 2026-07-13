@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { connectorServiceClient } from "@/lib/connectorServiceClient";
 import { ConnectorRegistry } from "@/modules/airline-connectors/services/ConnectorRegistry";
 
+// Playwright launching a browser + navigating a real login page routinely
+// takes 15-30+ seconds — well past Vercel's 10s default function timeout
+// on the Hobby plan. Without this, the request gets killed before
+// connector-service ever sends back its real response.
+export const maxDuration = 60;
+
 // NOTE ON AUTH: this route (and the rest of /api/connectors/*) should be
 // gated to admin users only. The existing app's auth is entirely
 // client-side (local-credentials or Firebase Auth in the browser — see
