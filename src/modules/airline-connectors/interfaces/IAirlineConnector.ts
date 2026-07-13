@@ -1,5 +1,6 @@
 import type { Page, Browser } from "playwright";
-import type { AirlineKey, BalanceReading, DecryptedCredentials } from "../core/types";
+import type { AirlineKey, BalanceReading, DecryptedCredentials, SyncResult } from "../core/types";
+
 /**
  * Every airline connector — regardless of which booking platform it
  * automates — implements this interface. The framework (scheduler,
@@ -32,6 +33,14 @@ export interface IAirlineConnector {
 
   /** Tear down the browser/context. Always called, even after failure. */
   disconnect(): Promise<void>;
+
+  /**
+   * Orchestrates the full connect -> login -> verify -> syncBalance ->
+   * logout -> disconnect flow, with retry/backoff and structured logging.
+   * This is what SyncService actually calls — implemented once on
+   * BaseConnector, not per-connector.
+   */
+  runFullSync(credentials: DecryptedCredentials, runId: string): Promise<SyncResult>;
 }
 
 /** Internal handle a BaseConnector keeps to its live browser session. */
