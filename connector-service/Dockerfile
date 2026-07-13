@@ -24,6 +24,18 @@ RUN cd connector-service && npm install
 # otherwise hit the exact same error right after this one gets fixed.
 RUN chmod -R +x connector-service/node_modules/.bin
 
+# THE ACTUAL FIX for "Cannot find module 'firebase-admin'/'@prisma/client'":
+# packages only get installed into /app/connector-service/node_modules (npm
+# install ran inside that folder), but the shared framework module lives at
+# /app/src/modules/airline-connectors — a SIBLING of connector-service, not
+# a descendant. Node's module resolution only walks UPWARD from the
+# importing file's own directory looking for a node_modules folder, so it
+# can never find connector-service's node_modules from a file under
+# /app/src/... no matter what tsconfig moduleResolution setting is used.
+# Symlinking /app/node_modules -> connector-service's makes every installed
+# package visible from anywhere under /app, including the shared module.
+RUN ln -s /app/connector-service/node_modules /app/node_modules
+
 # Now copy the actual source: the connector-service itself, the shared
 # framework module it imports via relative paths, and the Prisma schema.
 COPY connector-service ./connector-service
