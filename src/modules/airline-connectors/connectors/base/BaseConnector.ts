@@ -23,7 +23,16 @@ export abstract class BaseConnector implements IAirlineConnector {
     // headless: true is required for server/CI environments; flip to false
     // locally only when actively debugging a selector with Playwright's
     // inspector (`PWDEBUG=1 npm run …`).
-    this.browser = await chromium.launch({ headless: true });
+    // --no-sandbox is required in most container hosting environments
+    // (Railway, Render, Fly.io, etc.) — Chromium's sandbox needs
+    // unprivileged user namespaces that these platforms' containers
+    // typically don't expose, and without this flag the browser fails to
+    // launch immediately (not after a timeout), which is indistinguishable
+    // from other early failures without checking logs directly.
+    this.browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
     const context = await this.browser.newContext();
     this.page = await context.newPage();
   }
