@@ -10,6 +10,9 @@ import type { AirlineKey } from "../../src/modules/airline-connectors/core/types
 const app = express();
 app.use(express.json());
 
+// Health check must NOT require the internal API key — Railway/Render/Fly
+// etc. hit this with their own health-check probe, which doesn't (and
+// shouldn't) know the shared secret.
 app.get("/internal/health", (_req, res) => res.json({ ok: true }));
 
 app.use(requireInternalApiKey);
@@ -30,11 +33,14 @@ app.post("/internal/connectors/:airline/sync", async (req, res) => {
   if (!assertKnownAirline(airline, res)) return;
 
   const trigger = req.body?.trigger === "SCHEDULED" ? "SCHEDULED" : "MANUAL";
+  console.log(`[sync] starting ${trigger} sync for ${airline}`);
   try {
     const result = await runSync(airline, trigger);
+    console.log(`[sync] result for ${airline}:`, JSON.stringify(result));
     const statusCode = result.status === "SUCCESS" ? 200 : 502;
     res.status(statusCode).json(result);
   } catch (err) {
+    console.error(`[sync] uncaught error for ${airline}:`, err);
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
@@ -44,10 +50,13 @@ app.post("/internal/connectors/:airline/test", async (req, res) => {
   const airline = req.params.airline.toUpperCase();
   if (!assertKnownAirline(airline, res)) return;
 
+  console.log(`[test] starting connection test for ${airline}`);
   try {
     const result = await testConnection(airline);
+    console.log(`[test] result for ${airline}:`, JSON.stringify(result));
     res.status(result.success ? 200 : 502).json(result);
   } catch (err) {
+    console.error(`[test] uncaught error for ${airline}:`, err);
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
@@ -73,7 +82,6 @@ app.get("/internal/connectors/:airline/history", async (req, res) => {
   const history = await AirlineWalletRepository.getHistory(airline, limit);
   res.json({ history });
 });
-
 
 const PORT = Number(process.env.PORT) || 4100;
 app.listen(PORT, () => {
