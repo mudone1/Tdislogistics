@@ -27,9 +27,13 @@ export class BaseCraneConnector extends BaseConnector {
   async login(credentials: DecryptedCredentials): Promise<void> {
     const page = this.getPage();
     const { selectors, loginUrl, postLoginUrl } = this.config;
+    const tag = `[${this.airline}:login]`;
 
+    console.log(`${tag} navigating to login page: ${loginUrl}`);
     await page.goto(loginUrl, { waitUntil: "domcontentloaded" });
+    console.log(`${tag} filling username`);
     await page.fill(selectors.usernameInput, credentials.username);
+    console.log(`${tag} filling password`);
     await page.fill(selectors.passwordInput, credentials.password);
 
     // Confirmed via Playwright codegen against the real Ibom Air login
@@ -41,23 +45,34 @@ export class BaseCraneConnector extends BaseConnector {
     // to use a popup, this just resolves to null after the timeout and
     // falls through to using the original page as before.
     const popupPromise = page.waitForEvent("popup", { timeout: 15_000 }).catch(() => null);
+    console.log(`${tag} clicking login button`);
     await page.click(selectors.loginButton);
     const popup = await popupPromise;
+    console.log(`${tag} popup ${popup ? "opened: " + popup.url() : "did NOT open within 15s"}`);
     if (popup) {
       await popup.waitForLoadState("domcontentloaded").catch(() => {});
       this.page = popup;
+      console.log(`${tag} popup finished loading, url now: ${this.page.url()}`);
     }
 
     // Some airlines' popup opens to a blank/intermediate page rather than
     // the real dashboard — an explicit navigation is needed first.
     if (postLoginUrl) {
-      await this.getPage().goto(postLoginUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
+      console.log(`${tag} navigating to postLoginUrl: ${postLoginUrl}`);
+      await this.getPage()
+        .goto(postLoginUrl, { waitUntil: "domcontentloaded" })
+        .then(() => console.log(`${tag} postLoginUrl navigation succeeded`))
+        .catch((err) => console.log(`${tag} postLoginUrl navigation FAILED (continuing anyway):`, err instanceof Error ? err.message : err));
     }
 
     // Crane portals are typical server-rendered dashboards — wait for the
     // post-login marker rather than a fixed timeout, so slow logins don't
     // false-fail and fast ones don't waste time.
-    await this.getPage().waitForSelector(selectors.loggedInMarker, { timeout: 20_000 }).catch(() => {
+    console.log(`${tag} waiting up to 20s for loggedInMarker: ${selectors.loggedInMarker}`);
+    await this.getPage().waitForSelector(selectors.loggedInMarker, { timeout: 20_000 })
+      .then(() => console.log(`${tag} loggedInMarker FOUND`))
+      .catch(() => {
+        console.log(`${tag} loggedInMarker NOT found within 20s — current url: ${this.getPage().url()}`);
       // isLoggedIn() below does the real verification + throws a clear
       // ConnectorError; this catch just avoids an unhandled rejection here.
     });
