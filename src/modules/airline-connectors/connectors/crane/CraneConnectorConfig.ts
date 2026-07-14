@@ -26,6 +26,16 @@ export interface CraneConnectorConfig {
   displayName: string;
   loginUrl: string;
 
+  /**
+   * Some Crane-platform airlines open the post-login popup to a blank/
+   * intermediate page rather than the real dashboard — confirmed via
+   * codegen against Ibom Air, where an explicit navigation to this URL is
+   * required right after the popup opens, before anything else works.
+   * Leave unset for airlines where the popup lands on the dashboard on
+   * its own.
+   */
+  postLoginUrl?: string;
+
   selectors: {
     usernameInput: string; // TODO: verify
     passwordInput: string; // TODO: verify

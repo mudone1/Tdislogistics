@@ -18,11 +18,18 @@ const config: CraneConnectorConfig = {
   airline: "IBOM",
   displayName: "Ibom Air",
   loginUrl: "https://book-ibomair.crane.aero/",
+  // Confirmed via codegen: the popup doesn't land on the dashboard on its
+  // own — this explicit navigation is required right after it opens.
+  postLoginUrl: "https://book-ibomair.crane.aero/JSF/RezvEntry.xhtml?faces-redirect=true#!",
   selectors: {
     usernameInput: 'role=textbox[name="User Name:"]',
     passwordInput: 'role=textbox[name="Password:"]',
     loginButton: 'text="Login"',
-    loggedInMarker: 'role=link[name="Reports"]',
+    // Codegen's recorded accessible name had a leading space (" Reports",
+    // likely from an icon before the text) — matching on a substring
+    // instead of an exact name sidesteps any doubt about whitespace
+    // normalization differences between matching APIs.
+    loggedInMarker: 'role=link[name=/Reports/]',
     logoutButton: 'a[href*="logout"], button:has-text("Logout")',
     totalBalance: 'role=gridcell[name=/^[\\d,]+\\.\\d{2}$/]',
     currency: '',
