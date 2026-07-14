@@ -5,7 +5,7 @@
 #   docker build -f connector-service/Dockerfile -t tdis-connector-service .
 #   docker run --env-file connector-service/.env -p 4100:4100 tdis-connector-service
 
-FROM mcr.microsoft.com/playwright:v1.49.1-jammy AS base
+FROM mcr.microsoft.com/playwright:v1.61.1-jammy AS base
 # Official Playwright image — Chromium + all OS-level deps for headless
 # Chromium already installed, so we skip `playwright install` at runtime.
 
