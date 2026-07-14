@@ -1,15 +1,20 @@
 import { BaseCraneConnector } from "../crane/BaseCraneConnector";
 import type { CraneConnectorConfig } from "../crane/CraneConnectorConfig";
 
-// TODO: verify every selector — see AirPeaceConnector.ts for the full note.
+// VERIFIED via `npx playwright codegen` against the real login page
+// (username, password, login button — confirmed working). Everything
+// else below (loggedInMarker, logout, balance page fields) is still an
+// unverified placeholder — needs the same codegen treatment on the
+// post-login dashboard and the Reports -> Invoice Management page.
 const config: CraneConnectorConfig = {
   airline: "IBOM",
   displayName: "Ibom Air",
   loginUrl: "https://book-ibomair.crane.aero/",
   selectors: {
-    usernameInput: 'input[name="username"]',
-    passwordInput: 'input[name="password"]',
-    loginButton: 'button[type="submit"]',
+    usernameInput: 'role=textbox[name="User Name:"]',
+    passwordInput: 'role=textbox[name="Password:"]',
+    loginButton: 'text="Login"',
+    // TODO: verify — capture once logged in via popup (see BaseCraneConnector.login())
     loggedInMarker: '[data-testid="dashboard-header"], .dashboard-welcome',
     logoutButton: 'a[href*="logout"], button:has-text("Logout")',
     totalBalance: '[data-testid="total-balance"], .invoice-total-balance',

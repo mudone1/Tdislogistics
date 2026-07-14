@@ -31,12 +31,27 @@ export class BaseCraneConnector extends BaseConnector {
     await page.goto(loginUrl, { waitUntil: "domcontentloaded" });
     await page.fill(selectors.usernameInput, credentials.username);
     await page.fill(selectors.passwordInput, credentials.password);
+
+    // Confirmed via Playwright codegen against the real Ibom Air login
+    // page: clicking Login opens a NEW POPUP WINDOW with the authenticated
+    // dashboard, rather than navigating the same page. Since every Crane
+    // connector shares this login flow, capture that popup here (once) so
+    // isLoggedIn()/syncBalance() downstream automatically operate on the
+    // right page for all five airlines. If a given airline turns out NOT
+    // to use a popup, this just resolves to null after the timeout and
+    // falls through to using the original page as before.
+    const popupPromise = page.waitForEvent("popup", { timeout: 15_000 }).catch(() => null);
     await page.click(selectors.loginButton);
+    const popup = await popupPromise;
+    if (popup) {
+      await popup.waitForLoadState("domcontentloaded").catch(() => {});
+      this.page = popup;
+    }
 
     // Crane portals are typical server-rendered dashboards — wait for the
     // post-login marker rather than a fixed timeout, so slow logins don't
     // false-fail and fast ones don't waste time.
-    await page.waitForSelector(selectors.loggedInMarker, { timeout: 20_000 }).catch(() => {
+    await this.getPage().waitForSelector(selectors.loggedInMarker, { timeout: 20_000 }).catch(() => {
       // isLoggedIn() below does the real verification + throws a clear
       // ConnectorError; this catch just avoids an unhandled rejection here.
     });
