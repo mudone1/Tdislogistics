@@ -68,9 +68,12 @@ export class BaseCraneConnector extends BaseConnector {
     const { selectors, menuLabels } = this.config;
 
     try {
-      // Reports → Invoice Management, as specified.
-      await page.getByText(menuLabels.reportsMenu, { exact: false }).first().click();
-      await page.getByText(menuLabels.invoiceManagementItem, { exact: false }).first().click();
+      // Reports → Invoice Management. Confirmed via codegen against the
+      // real Ibom Air portal that these are actual <a role="link"> nav
+      // items (a JSF/PrimeFaces-style app), not plain text — role-based
+      // matching is more precise than a generic text search here.
+      await page.getByRole("link", { name: menuLabels.reportsMenu }).first().click();
+      await page.getByRole("link", { name: menuLabels.invoiceManagementItem }).first().click();
       await page.waitForSelector(selectors.totalBalance, { timeout: 15_000 });
     } catch (err) {
       throw new ConnectorError(
