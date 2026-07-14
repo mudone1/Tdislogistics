@@ -34,15 +34,25 @@ app.post("/internal/connectors/:airline/sync", async (req, res) => {
 
   const trigger = req.body?.trigger === "SCHEDULED" ? "SCHEDULED" : "MANUAL";
   console.log(`[sync] starting ${trigger} sync for ${airline}`);
-  try {
-    const result = await runSync(airline, trigger);
-    console.log(`[sync] result for ${airline}:`, JSON.stringify(result));
-    const statusCode = result.status === "SUCCESS" ? 200 : 502;
-    res.status(statusCode).json(result);
-  } catch (err) {
-    console.error(`[sync] uncaught error for ${airline}:`, err);
-    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
-  }
+
+  // Fire-and-forget: a full sync (login + multi-page navigation + waiting
+  // for the balance to render) can legitimately take well over a minute —
+  // longer than Vercel's function timeout AND longer than Railway's own
+  // edge/proxy timeout. Rather than keep chasing a bigger timeout ceiling,
+  // respond immediately and let the actual work happen in the background.
+  // The result still reaches the user: SyncService mirrors a successful
+  // balance into Firestore, and the existing realtime listener in
+  // src/lib/store.tsx fires a toast the moment that write lands — no
+  // request needs to stay open waiting for it.
+  res.status(202).json({ accepted: true, airline, trigger, message: "Sync started" });
+
+  runSync(airline, trigger)
+    .then((result) => {
+      console.log(`[sync] result for ${airline}:`, JSON.stringify(result));
+    })
+    .catch((err) => {
+      console.error(`[sync] uncaught error for ${airline}:`, err);
+    });
 });
 
 // POST /internal/connectors/:airline/test

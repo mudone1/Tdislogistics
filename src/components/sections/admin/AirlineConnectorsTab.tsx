@@ -84,17 +84,42 @@ export default function AirlineConnectorsTab() {
     try {
       const res = await fetch(`/api/connectors/${airline}/sync`, { method: "POST" });
       const data = await res.json();
-      if (res.ok && data.status === "SUCCESS") {
-        showToast(`✓ ${data.airline} sync complete — balance updated`, "success");
+      if (res.ok && data.accepted) {
+        // The connector-service runs the actual sync in the background
+        // (it can take well over a minute) — this response just confirms
+        // it started. The real result shows up as a toast automatically
+        // once the balance lands in Firestore (see src/lib/store.tsx),
+        // and we poll a few times below to refresh this card's status
+        // without requiring a manual page reload.
+        showToast(`Sync started for ${airline} — this can take up to a minute`, "success");
+        pollForCompletion(airline);
       } else {
-        showToast(`Sync failed: ${data.error || "unknown error"}`, "warn");
+        showToast(`Could not start sync: ${data.error || "unknown error"}`, "warn");
+        setBusy((b) => ({ ...b, [airline]: undefined }));
       }
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Sync failed", "warn");
-    } finally {
+      showToast(err instanceof Error ? err.message : "Could not start sync", "warn");
       setBusy((b) => ({ ...b, [airline]: undefined }));
-      await load();
     }
+  }
+
+  function pollForCompletion(airline: string) {
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts += 1;
+      await load();
+      // Stop after ~2 minutes (24 x 5s) regardless — the toast from the
+      // Firestore listener is the real source of truth for completion;
+      // this polling loop only exists to refresh the card's status badge
+      // and last-synced time without the user needing to reload.
+      if (attempts >= 24) {
+        clearInterval(interval);
+        setBusy((b) => ({ ...b, [airline]: undefined }));
+      }
+    }, 5000);
+    // Also clear the busy state after a reasonable ceiling so the button
+    // doesn't look stuck forever if something goes wrong silently.
+    setTimeout(() => setBusy((b) => ({ ...b, [airline]: undefined })), 90_000);
   }
 
   if (connectors === null) {
