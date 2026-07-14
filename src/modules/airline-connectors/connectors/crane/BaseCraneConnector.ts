@@ -87,16 +87,22 @@ export class BaseCraneConnector extends BaseConnector {
   async syncBalance(): Promise<BalanceReading> {
     const page = this.getPage();
     const { selectors, menuLabels } = this.config;
+    const tag = `[${this.airline}:syncBalance]`;
 
     try {
       // Reports → Invoice Management. Confirmed via codegen against the
       // real Ibom Air portal that these are actual <a role="link"> nav
       // items (a JSF/PrimeFaces-style app), not plain text — role-based
       // matching is more precise than a generic text search here.
+      console.log(`${tag} clicking ${menuLabels.reportsMenu} link, current url: ${page.url()}`);
       await page.getByRole("link", { name: menuLabels.reportsMenu }).first().click();
+      console.log(`${tag} clicking ${menuLabels.invoiceManagementItem} link, current url: ${page.url()}`);
       await page.getByRole("link", { name: menuLabels.invoiceManagementItem }).first().click();
+      console.log(`${tag} waiting up to 15s for totalBalance: ${selectors.totalBalance}, current url: ${page.url()}`);
       await page.waitForSelector(selectors.totalBalance, { timeout: 15_000 });
+      console.log(`${tag} totalBalance FOUND`);
     } catch (err) {
+      console.log(`${tag} FAILED at current url: ${page.url()} —`, err instanceof Error ? err.message : err);
       throw new ConnectorError(
         `Failed to navigate to ${menuLabels.reportsMenu} \u2192 ${menuLabels.invoiceManagementItem}`,
         SYNC_STEPS.NAVIGATION,
