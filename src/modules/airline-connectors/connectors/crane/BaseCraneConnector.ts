@@ -26,7 +26,7 @@ export class BaseCraneConnector extends BaseConnector {
 
   async login(credentials: DecryptedCredentials): Promise<void> {
     const page = this.getPage();
-    const { selectors, loginUrl } = this.config;
+    const { selectors, loginUrl, postLoginUrl } = this.config;
 
     await page.goto(loginUrl, { waitUntil: "domcontentloaded" });
     await page.fill(selectors.usernameInput, credentials.username);
@@ -46,6 +46,12 @@ export class BaseCraneConnector extends BaseConnector {
     if (popup) {
       await popup.waitForLoadState("domcontentloaded").catch(() => {});
       this.page = popup;
+    }
+
+    // Some airlines' popup opens to a blank/intermediate page rather than
+    // the real dashboard — an explicit navigation is needed first.
+    if (postLoginUrl) {
+      await this.getPage().goto(postLoginUrl, { waitUntil: "domcontentloaded" }).catch(() => {});
     }
 
     // Crane portals are typical server-rendered dashboards — wait for the
