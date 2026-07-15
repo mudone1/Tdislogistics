@@ -81,11 +81,17 @@ export class BaseCraneConnector extends BaseConnector {
         const diagPage = this.getPage();
         const linkCount = await diagPage.locator("a").count().catch(() => -1);
         const reportCount = await diagPage.locator("text=/report/i").count().catch(() => -1);
-        const html = await diagPage.content().catch(() => "<failed to get content>");
+        const bodyHtml = await diagPage.locator("body").innerHTML().catch(() => "<failed to get body>");
         console.log(`${tag} DIAGNOSTIC: total <a> links on page: ${linkCount}`);
         console.log(`${tag} DIAGNOSTIC: elements containing "report" (any case, any visibility): ${reportCount}`);
-        console.log(`${tag} DIAGNOSTIC: HTML length: ${html.length} chars`);
-        console.log(`${tag} DIAGNOSTIC: HTML snippet (first 3000 chars):\n${html.slice(0, 3000)}`);
+        console.log(`${tag} DIAGNOSTIC: body HTML length: ${bodyHtml.length} chars`);
+        // Look specifically for anything that looks like a sidebar/menu
+        // toggle — common PrimeFaces class names for exactly this widget.
+        for (const kw of ["menu", "sidebar", "toggle", "hamburger", "layout-menu", "collapse"]) {
+          const count = await diagPage.locator(`[class*="${kw}" i]`).count().catch(() => -1);
+          if (count > 0) console.log(`${tag} DIAGNOSTIC: ${count} element(s) with class containing "${kw}"`);
+        }
+        console.log(`${tag} DIAGNOSTIC: body HTML (first 6000 chars):\n${bodyHtml.slice(0, 6000)}`);
       // isLoggedIn() below does the real verification + throws a clear
       // ConnectorError; this catch just avoids an unhandled rejection here.
     });
