@@ -34,6 +34,19 @@ export abstract class BaseConnector implements IAirlineConnector {
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
     const context = await this.browser.newContext();
+
+    // Confirmed via codegen that at least one Crane airline (Ibom) shows a
+    // native browser dialog somewhere in the post-login flow (likely tied
+    // to the "you have an item in your queue" style notification banners
+    // visible on these portals). Registered at the CONTEXT level so it
+    // covers both the original page and any popup window opened during
+    // login — an unhandled dialog can otherwise silently block all further
+    // interaction on that page.
+    context.on("dialog", (dialog) => {
+      this.logger?.log("DIALOG", `Auto-dismissing dialog: "${dialog.message()}"`, "info");
+      dialog.dismiss().catch(() => {});
+    });
+
     this.page = await context.newPage();
   }
 

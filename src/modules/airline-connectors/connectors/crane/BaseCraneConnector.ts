@@ -33,6 +33,7 @@ export class BaseCraneConnector extends BaseConnector {
     await page.goto(loginUrl, { waitUntil: "domcontentloaded" });
     console.log(`${tag} filling username`);
     await page.fill(selectors.usernameInput, credentials.username);
+    await page.locator(selectors.usernameInput).press("Tab").catch(() => {});
     console.log(`${tag} filling password`);
     await page.fill(selectors.passwordInput, credentials.password);
 
