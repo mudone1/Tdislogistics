@@ -18,9 +18,12 @@ const config: CraneConnectorConfig = {
   airline: "IBOM",
   displayName: "Ibom Air",
   loginUrl: "https://book-ibomair.crane.aero/",
-  // Confirmed via codegen: the popup doesn't land on the dashboard on its
-  // own — this explicit navigation is required right after it opens.
-  postLoginUrl: "https://book-ibomair.crane.aero/JSF/RezvEntry.xhtml?faces-redirect=true#!",
+  // REMOVED postLoginUrl: forcing this navigation was confirmed (via the
+  // body-HTML diagnostic) to land on the site's own "Unexpected Error(s)
+  // occurred" page instead of the real dashboard — this is a JSF app,
+  // which manages server-side view state tied to how a page is reached;
+  // a raw navigation likely breaks that continuity rather than helping.
+  // Letting the popup settle naturally instead (see BaseCraneConnector).
   selectors: {
     usernameInput: 'role=textbox[name="User Name:"]',
     passwordInput: 'role=textbox[name="Password:"]',

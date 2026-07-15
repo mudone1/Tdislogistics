@@ -54,6 +54,12 @@ export class BaseCraneConnector extends BaseConnector {
       await popup.waitForLoadState("domcontentloaded").catch(() => {});
       this.page = popup;
       console.log(`${tag} popup finished loading, url now: ${this.page.url()}`);
+      // Give the app's own JS time to drive any redirect it wants to do
+      // on its own — the previous approach of forcing a navigation
+      // ourselves turned out to break the app's server-side view state.
+      await this.page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+      await this.page.waitForTimeout(3000);
+      console.log(`${tag} popup settled naturally, url now: ${this.page.url()}`);
     }
 
     // Some airlines' popup opens to a blank/intermediate page rather than
