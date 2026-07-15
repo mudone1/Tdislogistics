@@ -29,14 +29,16 @@ const config: CraneConnectorConfig = {
     // likely from an icon before the text) — matching on a substring
     // instead of an exact name sidesteps any doubt about whitespace
     // normalization differences between matching APIs.
-    // Switched from role=link[name=/Reports/] — the granular login logs
-    // confirmed we DO reach the correct authenticated URL every time, but
-    // that selector never matched anything, meaning the regex-inside-a-
-    // role-selector-string syntax likely isn't valid Playwright syntax
-    // (as opposed to the real page missing "Reports"). Plain text= is
-    // simple, well-documented substring/case-insensitive matching with no
-    // such ambiguity.
-    loggedInMarker: 'text=Reports',
+    // CORRECTED: the sidebar nav is collapsed to icons-only until
+    // expanded, so there's no VISIBLE "Reports" text for a text= selector
+    // to find (confirmed by direct observation of the live site) — that's
+    // why the previous text= attempt failed. Icon-only nav items still
+    // need an accessible name (aria-label/title) for screen readers, and
+    // that's exactly what the original codegen recording matched via
+    // getByRole(..., {name: 'Reports'}) — which is why THAT worked live.
+    // Going back to role-based matching, just without the unverified
+    // regex this time (a plain string here, unlike last round).
+    loggedInMarker: 'role=link[name="Reports"]',
     logoutButton: 'a[href*="logout"], button:has-text("Logout")',
     // Same fix as loggedInMarker above — role=gridcell[name=/regex/] is
     // the same unconfirmed syntax, so switching preemptively to the
