@@ -72,8 +72,20 @@ export class BaseCraneConnector extends BaseConnector {
     console.log(`${tag} waiting up to 20s for loggedInMarker: ${selectors.loggedInMarker}`);
     await this.getPage().waitForSelector(selectors.loggedInMarker, { timeout: 20_000 })
       .then(() => console.log(`${tag} loggedInMarker FOUND`))
-      .catch(() => {
+      .catch(async () => {
         console.log(`${tag} loggedInMarker NOT found within 20s — current url: ${this.getPage().url()}`);
+        // Stop guessing, get real evidence: how many links exist at all,
+        // how many elements contain "report" anywhere (case-insensitive,
+        // regardless of visibility), and a raw HTML snippet so the actual
+        // DOM structure can be read directly instead of inferred.
+        const diagPage = this.getPage();
+        const linkCount = await diagPage.locator("a").count().catch(() => -1);
+        const reportCount = await diagPage.locator("text=/report/i").count().catch(() => -1);
+        const html = await diagPage.content().catch(() => "<failed to get content>");
+        console.log(`${tag} DIAGNOSTIC: total <a> links on page: ${linkCount}`);
+        console.log(`${tag} DIAGNOSTIC: elements containing "report" (any case, any visibility): ${reportCount}`);
+        console.log(`${tag} DIAGNOSTIC: HTML length: ${html.length} chars`);
+        console.log(`${tag} DIAGNOSTIC: HTML snippet (first 3000 chars):\n${html.slice(0, 3000)}`);
       // isLoggedIn() below does the real verification + throws a clear
       // ConnectorError; this catch just avoids an unhandled rejection here.
     });
