@@ -33,7 +33,7 @@ export abstract class BaseConnector implements IAirlineConnector {
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
-    const context = await this.browser.newContext();
+    const context = await this.browser.newContext({ viewport: { width: 1600, height: 900 } });
 
     // Confirmed via codegen that at least one Crane airline (Ibom) shows a
     // native browser dialog somewhere in the post-login flow (likely tied
