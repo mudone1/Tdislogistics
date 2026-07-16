@@ -32,10 +32,21 @@ export class BaseCraneConnector extends BaseConnector {
     console.log(`${tag} navigating to login page: ${loginUrl}`);
     await page.goto(loginUrl, { waitUntil: "domcontentloaded" });
     console.log(`${tag} filling username`);
+    // Matching the exact recorded sequence: explicit click to focus first,
+    // then fill — some legacy login forms initialize hidden session state
+    // on focus, which a direct .fill() (which auto-focuses too, but
+    // without necessarily firing the same event sequence) can skip.
+    await page.locator(selectors.usernameInput).click();
+    await page.waitForTimeout(300);
     await page.fill(selectors.usernameInput, credentials.username);
+    await page.waitForTimeout(400);
     await page.locator(selectors.usernameInput).press("Tab").catch(() => {});
+    await page.waitForTimeout(300);
     console.log(`${tag} filling password`);
+    await page.locator(selectors.passwordInput).click();
+    await page.waitForTimeout(300);
     await page.fill(selectors.passwordInput, credentials.password);
+    await page.waitForTimeout(500);
 
     // Confirmed via Playwright codegen against the real Ibom Air login
     // page: clicking Login opens a NEW POPUP WINDOW with the authenticated
