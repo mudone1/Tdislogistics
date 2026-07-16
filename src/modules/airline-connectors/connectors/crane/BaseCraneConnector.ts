@@ -71,6 +71,12 @@ export class BaseCraneConnector extends BaseConnector {
       await this.page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
       await this.page.waitForTimeout(3000);
       console.log(`${tag} popup settled naturally, url now: ${this.page.url()}`);
+      // Read the actual VISIBLE TEXT of wherever we land — if this is an
+      // error page, the real displayed message (access denied, location
+      // restriction, session issue, etc.) will show up here directly,
+      // instead of us continuing to guess from raw HTML/CSS noise.
+      const visibleText = await this.page.locator("body").innerText().catch(() => "<failed to read text>");
+      console.log(`${tag} VISIBLE PAGE TEXT (first 2000 chars):\n${visibleText.slice(0, 2000)}`);
     }
 
     // Some airlines' popup opens to a blank/intermediate page rather than
