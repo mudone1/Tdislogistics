@@ -29,10 +29,32 @@ export abstract class BaseConnector implements IAirlineConnector {
     // typically don't expose, and without this flag the browser fails to
     // launch immediately (not after a timeout), which is indistinguishable
     // from other early failures without checking logs directly.
+    // Optional proxy — some airline portals (confirmed via testing: Ibom
+    // Air returns USER_AUTHENTICATION_ERROR when logins originate from
+    // Railway's US-based servers, but the exact same credentials work
+    // fine from a Nigerian residential connection) appear to geo-restrict
+    // login attempts. Set PROXY_SERVER (+ optionally PROXY_USERNAME /
+    // PROXY_PASSWORD) to route browser traffic through a proxy —
+    // completely inert if these aren't set.
+    const proxyServer = process.env.PROXY_SERVER;
+    const proxyConfig = proxyServer
+      ? {
+          server: proxyServer,
+          username: process.env.PROXY_USERNAME,
+          password: process.env.PROXY_PASSWORD,
+        }
+      : undefined;
+
     this.browser = await chromium.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      proxy: proxyConfig,
     });
+    // Explicit wide viewport: this portal's sidebar appears to collapse to
+    // icon-only at narrower widths (a responsive breakpoint), which codegen
+    // never triggers because it opens a full-size window sized to the
+    // screen it's run on. Without this, headless runs may render a
+    // meaningfully different, narrower layout than what was recorded.
     const context = await this.browser.newContext({ viewport: { width: 1600, height: 900 } });
 
     // Confirmed via codegen that at least one Crane airline (Ibom) shows a
