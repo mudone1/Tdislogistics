@@ -15,6 +15,20 @@ app.use(express.json());
 // shouldn't) know the shared secret.
 app.get("/internal/health", (_req, res) => res.json({ ok: true }));
 
+// Reveals the actual outbound IP this server's traffic comes from — needed
+// to give the airline a specific IP to allowlist, as a free alternative to
+// a paid proxy. Behind the API key like everything else below, since
+// there's no reason to expose this publicly.
+app.get("/internal/whatismyip", requireInternalApiKey, async (_req, res) => {
+  try {
+    const r = await fetch("https://api.ipify.org?format=json");
+    const data = await r.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 app.use(requireInternalApiKey);
 
 function assertKnownAirline(airline: string, res: express.Response): airline is AirlineKey {
