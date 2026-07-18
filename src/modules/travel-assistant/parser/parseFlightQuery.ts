@@ -7,7 +7,7 @@ const MONTHS = {
 
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
-export function parseFlightQuery(rawText) {
+export function parseFlightQuery(rawText: string) {
   const text = rawText.toLowerCase().replace(/\s+/g, " ").trim();
 
   const { origin, destination, confidence } = extractRoute(text);
@@ -16,7 +16,7 @@ export function parseFlightQuery(rawText) {
   return { origin, destination, date, confidence };
 }
 
-function extractRoute(text) {
+function extractRoute(text: string) {
   const fromToMatch = text.match(/from\s+([a-z\s-]+?)\s+to\s+([a-z\s-]+?)(?:\s|$|\d|,|\.)/);
   if (fromToMatch) {
     const origin = matchAirport(fromToMatch[1]);
@@ -43,11 +43,11 @@ function extractRoute(text) {
     const regex = new RegExp(`\\b${name.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "g");
     let m;
     while ((m = regex.exec(text)) !== null) {
-      matches.push({ index: m.index, code: AIRPORT_ALIASES[name] });
+      matches.push({ index: m.index, code: AIRPORT_ALIASES[name as keyof typeof AIRPORT_ALIASES] });
     }
   }
   matches.sort((a, b) => a.index - b.index);
-  const deduped = [];
+  const deduped: { index: number; code: string }[] = [];
   for (const m of matches) {
     if (!deduped.some((d) => Math.abs(d.index - m.index) < 2)) deduped.push(m);
   }
@@ -61,7 +61,7 @@ function extractRoute(text) {
   return { origin: null, destination: null, confidence: "low" };
 }
 
-function matchAirport(fragment) {
+function matchAirport(fragment: string) {
   const cleaned = fragment.trim();
   if (!cleaned) return null;
 
@@ -72,14 +72,14 @@ function matchAirport(fragment) {
     const before = cleaned[idx - 1];
     const after = cleaned[idx + name.length];
     const boundaryOk = (before === undefined || /\s/.test(before)) && (after === undefined || /\s/.test(after));
-    if (boundaryOk) found.push({ index: idx, code: AIRPORT_ALIASES[name] });
+    if (boundaryOk) found.push({ index: idx, code: AIRPORT_ALIASES[name as keyof typeof AIRPORT_ALIASES] });
   }
   if (found.length === 0) return null;
   found.sort((a, b) => a.index - b.index);
   return found[found.length - 1].code;
 }
 
-function extractDate(text) {
+function extractDate(text: string) {
   const now = new Date();
 
   if (/\btoday\b/.test(text)) {
@@ -96,14 +96,14 @@ function extractDate(text) {
   );
   if (dateWordMatch) {
     const day = parseInt(dateWordMatch[1], 10);
-    const month = MONTHS[dateWordMatch[2]];
+    const month = MONTHS[dateWordMatch[2] as keyof typeof MONTHS];
     return resolveDayMonth(day, month, now);
   }
   const monthFirstMatch = text.match(
     /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})\b/
   );
   if (monthFirstMatch) {
-    const month = MONTHS[monthFirstMatch[1]];
+    const month = MONTHS[monthFirstMatch[1] as keyof typeof MONTHS];
     const day = parseInt(monthFirstMatch[2], 10);
     return resolveDayMonth(day, month, now);
   }
@@ -126,7 +126,7 @@ function extractDate(text) {
   return null;
 }
 
-function resolveDayMonth(day, month, now) {
+function resolveDayMonth(day: number, month: number, now: Date) {
   let year = now.getFullYear();
   const candidate = new Date(year, month, day);
   if (candidate < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
@@ -135,14 +135,14 @@ function resolveDayMonth(day, month, now) {
   return toISO(new Date(year, month, day));
 }
 
-function nextWeekday(from, targetDay) {
+function nextWeekday(from: Date, targetDay: number) {
   const d = new Date(from);
   const diff = (targetDay - d.getDay() + 7) % 7;
   d.setDate(d.getDate() + (diff === 0 ? 7 : diff));
   return d;
 }
 
-function toISO(d) {
+function toISO(d: Date) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");

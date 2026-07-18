@@ -24,7 +24,7 @@ import DebtDashboardSection from "@/components/sections/DebtDashboardSection";
 
 export default function Home() {
   const { currentUser, authReady, hasPermission } = useApp();
-  const [active, setActive] = useState("airlines");
+  const [active, setActive] = useState<SectionId>("airlines");
 
   if (!authReady) {
     return <DashboardSkeleton />;
@@ -41,7 +41,7 @@ export default function Home() {
 
   const isAdmin = isAdminRole(currentUser.role);
 
-  function renderSection(id) {
+  function renderSection(id: SectionId) {
     switch (id) {
       case "dashboard":
         return <DashboardSection onNavigate={setActive} />;
