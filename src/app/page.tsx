@@ -9,6 +9,7 @@ import LoginScreen from "@/components/layout/LoginScreen";
 import Header from "@/components/layout/Header";
 import Sidebar from "@/components/layout/Sidebar";
 import ToastArea from "@/components/layout/ToastArea";
+import ChatBubble from "@/components/layout/ChatBubble";
 import DashboardSkeleton from "@/components/layout/DashboardSkeleton";
 import Breadcrumb from "@/components/layout/Breadcrumb";
 import DashboardSection from "@/components/sections/DashboardSection";
@@ -21,13 +22,9 @@ import AdminSection from "@/components/sections/admin/AdminSection";
 import ClientDebtSection from "@/components/sections/ClientDebtSection";
 import DebtDashboardSection from "@/components/sections/DebtDashboardSection";
 
-// NOTE: "Team Management" (Staff Directory) is deliberately not routed here
-// for this phase — see src/components/sections/StaffSection.tsx and
-// src/lib/constants.ts for how to bring it back later.
-
 export default function Home() {
   const { currentUser, authReady, hasPermission } = useApp();
-  const [active, setActive] = useState<SectionId>("dashboard");
+  const [active, setActive] = useState("airlines");
 
   if (!authReady) {
     return <DashboardSkeleton />;
@@ -44,7 +41,7 @@ export default function Home() {
 
   const isAdmin = isAdminRole(currentUser.role);
 
-  function renderSection(id: SectionId) {
+  function renderSection(id) {
     switch (id) {
       case "dashboard":
         return <DashboardSection onNavigate={setActive} />;
@@ -84,6 +81,7 @@ export default function Home() {
         </div>
       </div>
       <ToastArea />
+      <ChatBubble />
     </>
   );
 }
@@ -93,7 +91,7 @@ function NoAccess() {
     <div className="empty-state">
       <div className="empty-icon">🔒</div>
       <div className="empty-title">Restricted Access</div>
-      <div className="empty-sub">You don&apos;t have permission to view this section.</div>
+      <div className="empty-sub">You don't have permission to view this section.</div>
     </div>
   );
 }
