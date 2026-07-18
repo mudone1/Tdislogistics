@@ -7,7 +7,7 @@ const BASE_URL = process.env.CONNECTOR_SERVICE_URL;
 const API_KEY = process.env.CONNECTOR_SERVICE_API_KEY;
 
 export async function POST(req: NextRequest) {
-  const { message } = (await req.json().catch(() => ({})));
+    const { message } = (await req.json().catch(() => ({})));
   if (!message || !message.trim()) {
     return NextResponse.json({ reply: 'Send me a route and a date, e.g. "Enugu ABV-LOS today".' });
   }
@@ -66,7 +66,7 @@ function formatQuoteReply(result: any) {
   }
 
   const airline = result.options[0].airline;
-  const lines = result.options.map((o) => {
+  const lines = result.options.map((o: any) => {
     const priceLabel = o.fare != null ? o.fare.toLocaleString() : o.seatStatus || "unavailable";
     return `${o.departureTime}@${priceLabel}`;
   });
