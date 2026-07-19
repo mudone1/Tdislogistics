@@ -76,6 +76,10 @@ async function runRoundTrip(origin: string, destination: string, outboundDate: s
   if (check) return check;
 
   try {
+    // Sequential, not Promise.all — running two full Chromium instances at
+    // once appears to exceed Railway's available memory, causing one to
+    // get killed mid-search ("Target page, context or browser has been
+    // closed"). Slower, but reliable.
     const outbound = await callSearch(origin, destination, outboundDate);
     const back = await callSearch(destination, origin, returnDate);
 
