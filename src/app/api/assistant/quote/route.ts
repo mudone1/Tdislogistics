@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { parseFlightQuery } from "@/modules/travel-assistant/parser/parseFlightQuery";
+import { handleAssistantMessage } from "@/modules/travel-assistant/ai/ConversationOrchestrator";
 import type { FlightSearchResult, FlightOption } from "@/modules/travel-assistant/core/types";
 
 export const maxDuration = 60;
@@ -14,10 +15,34 @@ interface PendingRoundTrip {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json().catch(() => ({}))) as { message?: string; pending?: PendingRoundTrip };
+  const body = (await req.json().catch(() => ({}))) as {
+    message?: string;
+    pending?: PendingRoundTrip;
+    sessionKey?: string;
+    displayName?: string | null;
+    isAuthenticated?: boolean;
+  };
   const message = body.message;
   if (!message || !message.trim()) {
     return NextResponse.json({ reply: 'Send me a route and a date, e.g. "Enugu ABV-LOS today".' });
+  }
+
+  // LLM-backed conversational path — used whenever GROQ_API_KEY is
+  // configured and the caller identifies its session. Falls through to the
+  // original deterministic parser below otherwise, so nothing breaks for
+  // callers that predate this or when the key isn't set.
+  if (process.env.GROQ_API_KEY && body.sessionKey) {
+    try {
+      const result = await handleAssistantMessage({
+        sessionKey: body.sessionKey,
+        displayName: body.displayName ?? null,
+        isAuthenticated: body.isAuthenticated ?? false,
+        message,
+      });
+      return NextResponse.json(result);
+    } catch (err) {
+      console.error("[assistant] orchestrator failed, falling back to legacy parser:", err);
+    }
   }
 
   if (body.pending) {

@@ -33,3 +33,49 @@ export interface FlightSearchResult {
   options: FlightOption[];
   searchedAt: string;
 }
+
+export type ChatIntent =
+  | "GREETING"
+  | "SMALL_TALK"
+  | "FLIGHT_SEARCH_ONE_WAY"
+  | "FLIGHT_SEARCH_ROUND_TRIP"
+  | "BOOKING_ASSISTANCE"
+  | "TICKET_AVAILABILITY"
+  | "AIRLINE_INFO"
+  | "GENERAL_QUESTION"
+  | "UNKNOWN";
+
+// Short-term memory the orchestrator fills in turn by turn. Anything the
+// user has already told the assistant stays here so we only ask about
+// what's still missing.
+export interface ConversationSlots {
+  origin: string | null;
+  destination: string | null;
+  date: string | null;
+  returnDate: string | null;
+  isRoundTrip: boolean;
+  adults: number | null;
+  children: number | null;
+  infants: number | null;
+  airline: string | null;
+  cabinClass: string | null;
+}
+
+export interface ChatEntities {
+  origin: string | null;
+  destination: string | null;
+  date: string | null;
+  returnDate: string | null;
+  adults: number | null;
+  children: number | null;
+  infants: number | null;
+  airline: string | null;
+  cabinClass: string | null;
+}
+
+export interface AssistantTurn {
+  intent: ChatIntent;
+  entities: ChatEntities;
+  missingRequiredSlots: string[];
+  reply: string;
+}
