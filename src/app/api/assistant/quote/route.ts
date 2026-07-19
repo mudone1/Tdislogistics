@@ -126,7 +126,11 @@ function formatLeg(result: FlightSearchResult): string {
   const airline = result.options[0].airline;
   const lines = result.options.map((o: FlightOption) => {
     const priceLabel = o.fare != null ? o.fare.toLocaleString() : o.seatStatus ?? "unavailable";
-    return `${o.departureTime}@${priceLabel}`;
+    const classesLabel = o.fareClasses
+      .filter((c) => !c.soldOut && c.fare != null)
+      .map((c) => `${c.name} ${c.fare!.toLocaleString()}`)
+      .join(", ");
+    return `${o.departureTime}@${priceLabel}${classesLabel ? ` (${classesLabel})` : ""}`;
   });
 
   return `${airline}\n${lines.join("\n")}`;

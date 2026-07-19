@@ -1,8 +1,14 @@
-import { chromium, type Page, type FrameLocator } from "playwright";
-import type { FlightOption, FlightSearchQuery, FlightSearchResult } from "../../core/types";
+import { chromium, type Page } from "playwright";
+import type { FareClassOption, FlightOption, FlightSearchQuery, FlightSearchResult } from "../../core/types";
 
-const SEARCH_URL = "https://enuguairlines.com/";
-const OPEN_DATE_PICKER_SELECTOR = "span >> nth=3";
+const REQUIREMENTS_URL = "https://booking.enuguairlines.com/vars/public/CustomerPanels/requirementsBS.aspx";
+
+// The date strip only ever pages forward from "today" in ~4-7 day jumps, so this
+// is generous enough for any realistic search horizon without looping forever
+// if a date is unreachable (e.g. no schedule that far out).
+const MAX_DAY_FORWARD_CLICKS = 60;
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export async function searchEnuguAirFlights(query: FlightSearchQuery): Promise<FlightSearchResult> {
   const browser = await chromium.launch({
@@ -18,48 +24,43 @@ export async function searchEnuguAirFlights(query: FlightSearchQuery): Promise<F
     });
     const page = await context.newPage();
 
-    console.log("[enugu] navigating to search page");
-    await page.goto(SEARCH_URL, { waitUntil: "domcontentloaded" });
-    const frame = page.frameLocator("iframe").first();
+    console.log("[enugu] navigating to requirements form");
+    await page.goto(REQUIREMENTS_URL, { waitUntil: "domcontentloaded" });
 
     console.log(`[enugu] selecting origin: ${query.origin}`);
-    await frame.locator("#Origin").selectOption(query.origin);
-    console.log("[enugu] origin selected");
+    await page.locator("#Origin").selectOption(query.origin);
 
-    await frame.locator("#Destination").locator(`option[value="${query.destination}"]`).waitFor({ timeout: 25000 }).catch(() => {});
+    // Destination options are repopulated by the origin's change handler, so
+    // wait for the target option to actually exist before selecting it.
+    await page
+      .locator("#Destination")
+      .locator(`option[value="${query.destination}"]`)
+      .waitFor({ timeout: 15000 })
+      .catch(() => {});
     console.log(`[enugu] selecting destination: ${query.destination}`);
-    await frame.locator("#Destination").selectOption(query.destination);
-    console.log("[enugu] destination selected");
+    await page.locator("#Destination").selectOption(query.destination);
 
-    console.log("[enugu] clicking One Way");
-    await frame.getByText("One Way", { exact: true }).click();
-    console.log("[enugu] One Way clicked");
+    console.log("[enugu] forcing One Way mode");
+    // The "One Way" control is a Bootstrap .btn-check radio; clicking it via
+    // pixel/label coordinates was flaky, but forcing the underlying input's
+    // state and dispatching the events its handlers listen for works reliably.
+    await page.locator("#ReturnTrip2").evaluate((el) => {
+      const input = el as HTMLInputElement;
+      input.checked = true;
+      input.dispatchEvent(new Event("click", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
 
-    await selectDate(frame, query.date);
+    console.log("[enugu] submitting search");
+    await Promise.all([
+      page.waitForURL(/FlightCal\.aspx/i, { timeout: 20000 }),
+      page.locator("#submitButton").evaluate((el) => (el as HTMLButtonElement).click()),
+    ]);
+    console.log(`[enugu] landed on ${page.url()}`);
 
-    console.log(`[enugu] current page url before Continue click: ${page.url()}`);
-    const continueBtn = frame.getByRole("button", { name: "Continue" });
-    const continueVisible = await continueBtn.isVisible().catch(() => false);
-    console.log(`[enugu] Continue button visible: ${continueVisible}`);
+    await navigateToDate(page, query.date);
 
-    const popupPromise = context.waitForEvent("page", { timeout: 8000 }).catch(() => null);
-    await continueBtn.click();
-    console.log("[enugu] Continue clicked");
-
-    const popup = await popupPromise;
-    let activePage = page;
-    if (popup && popup !== page) {
-      console.log(`[enugu] a NEW PAGE/POPUP opened: ${popup.url()}`);
-      await popup.waitForLoadState("domcontentloaded").catch(() => {});
-      activePage = popup;
-    } else {
-      console.log("[enugu] no new page/popup opened - staying on original page");
-    }
-
-    await activePage.waitForTimeout(3000);
-    console.log(`[enugu] current page url after Continue click: ${activePage.url()}`);
-
-    const options = await extractFlightOptions(activePage, frame, query.date);
+    const options = await extractFlightOptions(page, query.date);
 
     await browser.close();
 
@@ -70,80 +71,128 @@ export async function searchEnuguAirFlights(query: FlightSearchQuery): Promise<F
   }
 }
 
-async function selectDate(frame: FrameLocator, targetDateISO: string) {
-  const target = new Date(targetDateISO + "T00:00:00");
-  const now = new Date();
-  const monthsAhead =
-    (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
+async function navigateToDate(page: Page, targetDateISO: string): Promise<void> {
+  const targetLabel = toDayTabLabel(targetDateISO);
 
-  console.log("[enugu] opening date picker");
-  await frame.locator(OPEN_DATE_PICKER_SELECTOR).click();
-  console.log("[enugu] date picker opened (assumed)");
+  for (let i = 0; i < MAX_DAY_FORWARD_CLICKS; i++) {
+    const tab = page.locator(`a.dayTab[data-newday="${targetLabel}"]`);
+    if ((await tab.count().catch(() => 0)) > 0) {
+      console.log(`[enugu] found date tab for ${targetLabel}, selecting`);
+      await tab.first().evaluate((el) => (el as HTMLElement).click());
+      await page.waitForTimeout(800);
+      return;
+    }
 
-  for (let i = 0; i < Math.max(0, monthsAhead); i++) {
-    await frame.getByTitle("Next").click();
+    console.log(`[enugu] "${targetLabel}" not visible yet, paging forward (attempt ${i + 1})`);
+    const forwardArrow = page.locator("button.dayForward:not(.hidden-lg)").first();
+    if ((await forwardArrow.count().catch(() => 0)) === 0) break;
+    await forwardArrow.evaluate((el) => (el as HTMLElement).click());
+    await page.waitForTimeout(800);
   }
 
-  const day = String(target.getDate());
-  console.log(`[enugu] clicking day: ${day}`);
-  const dayCount = await frame.getByRole("link", { name: day, exact: true }).count().catch(() => -1);
-  console.log(`[enugu] number of links matching day "${day}": ${dayCount}`);
-  await frame.getByRole("link", { name: day, exact: true }).first().click();
-  console.log("[enugu] day clicked");
+  console.log(
+    `[enugu] gave up looking for "${targetLabel}" after ${MAX_DAY_FORWARD_CLICKS} page attempts - using whatever date is currently selected`
+  );
 }
 
-async function extractFlightOptions(page: Page, frame: FrameLocator, requestedDate: string): Promise<FlightOption[]> {
-  const resultPattern = /\d{1,2}:\d{2}\s+\d{1,2}\s+[A-Za-z]{3}\s+.+\d+h\s*\d+m/;
-  const resultLinks = page.getByRole("link", { name: resultPattern });
-  const count = await resultLinks.count().catch(() => 0);
+function toDayTabLabel(dateISO: string): string {
+  const d = new Date(dateISO + "T00:00:00");
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+async function extractFlightOptions(page: Page, requestedDate: string): Promise<FlightOption[]> {
+  const panels = page.locator(".tab-pane.active .flt-panel");
+  const count = await panels.count().catch(() => 0);
 
   if (count === 0) {
     const bodyText = await page.locator("body").innerText().catch(() => "<failed to read>");
-    console.log("DIAGNOSTIC: no result links matched. Visible page text (first 2000 chars):");
+    console.log("DIAGNOSTIC: no flight panels found. Visible page text (first 2000 chars):");
     console.log(bodyText.slice(0, 2000));
+    return [];
   }
 
   const options: FlightOption[] = [];
 
   for (let i = 0; i < count; i++) {
-    const link = resultLinks.nth(i);
-    const raw = (await link.textContent().catch(() => "")) ?? "";
-    options.push(parseResultRow(raw, requestedDate));
+    const panel = panels.nth(i);
+    const parsed = await panel.evaluate((panelEl) => {
+      const el = panelEl as HTMLElement;
+      const text = (sel: string): string | null => el.querySelector(sel)?.textContent?.trim() ?? null;
+
+      const departureTime = text(".cal-Depart-time .time");
+      const arrivalTime = text(".cal-Arrive-time .time");
+      const durationText = text(".flightDuration");
+      const flightNumber = text(".flightnumber");
+
+      const durationMatch = durationText ? durationText.match(/(\d+)h\s*(\d+)m/) : null;
+      const durationMinutes = durationMatch
+        ? parseInt(durationMatch[1], 10) * 60 + parseInt(durationMatch[2], 10)
+        : null;
+
+      const classCards = Array.from(el.querySelectorAll('[class*="classband-panel"]'));
+      const fareClasses = classCards.map((card) => {
+        const name = card.getAttribute("data-classband") ?? card.querySelector(".class-band-name")?.textContent?.trim() ?? "Unknown";
+
+        const priceEl = card.querySelector("[data-original-amount]");
+        const rawAmount = priceEl?.getAttribute("data-original-amount") ?? null;
+        const fare = rawAmount ? parseFloat(rawAmount) : null;
+        const currency = (priceEl?.getAttribute("data-original-currency") || "ngn").toUpperCase();
+
+        const cardText = card.textContent ?? "";
+        const soldOut = !!card.querySelector(".seats-none") || /sold out/i.test(cardText);
+        const seatsMatch = card.querySelector(".seats-count")?.textContent?.match(/(\d+)/) ?? null;
+        const seatsLeft = seatsMatch ? parseInt(seatsMatch[1], 10) : null;
+
+        const popoverHtml = card.querySelector(".help-tip")?.getAttribute("data-content") ?? "";
+        const tmp = document.createElement("div");
+        tmp.innerHTML = popoverHtml;
+        const policyItems = Array.from(tmp.querySelectorAll("li")).map((li) => li.textContent?.trim() ?? "");
+        const refundPolicy = policyItems.find((t) => /refund/i.test(t)) ?? null;
+        const baggage = policyItems.find((t) => /baggage/i.test(t)) ?? null;
+
+        return {
+          name,
+          fare: fare != null && !Number.isNaN(fare) ? fare : null,
+          currency,
+          soldOut,
+          seatsLeft,
+          refundPolicy,
+          baggage,
+        };
+      });
+
+      const availableFares = fareClasses.filter((f) => !f.soldOut && f.fare != null).map((f) => f.fare as number);
+      const cheapestFare = availableFares.length > 0 ? Math.min(...availableFares) : null;
+
+      const raw = el.textContent?.replace(/\s+/g, " ").trim().slice(0, 500) ?? "";
+
+      return {
+        flightNumber,
+        departureTime,
+        arrivalTime,
+        durationMinutes,
+        cheapestFare,
+        fareClasses,
+        raw,
+      };
+    });
+
+    const fareClasses: FareClassOption[] = parsed.fareClasses;
+
+    options.push({
+      airline: "Enugu Air",
+      flightNumber: parsed.flightNumber,
+      departureTime: parsed.departureTime ?? "",
+      arrivalTime: parsed.arrivalTime,
+      date: requestedDate,
+      durationMinutes: parsed.durationMinutes,
+      fare: parsed.cheapestFare,
+      currency: "NGN",
+      seatStatus: parsed.cheapestFare == null ? "Sold out" : null,
+      fareClasses,
+      raw: parsed.raw,
+    });
   }
 
   return options;
-}
-
-function parseResultRow(raw: string, requestedDate: string): FlightOption {
-  const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
-  const allTimes = [...raw.matchAll(/\d{1,2}:\d{2}/g)].map((m) => m[0]);
-  const durationMatch = raw.match(/(\d+)h\s*(\d+)m/);
-  const flightNumberMatch = raw.match(/\b([A-Z]{2}\d{3,4})\b/);
-
-  const fromIndex = lines.findIndex((l) => l.toLowerCase() === "from");
-  const fareLine = fromIndex >= 0 ? lines[fromIndex + 1] : undefined;
-
-  let fare = null;
-  let seatStatus = null;
-  if (fareLine) {
-    const priceMatch = fareLine.match(/([\d,]+)\s*NGN/);
-    if (priceMatch) {
-      fare = parseFloat(priceMatch[1].replace(/,/g, ""));
-    } else {
-      seatStatus = fareLine;
-    }
-  }
-
-  return {
-    airline: "Enugu Air",
-    flightNumber: flightNumberMatch ? flightNumberMatch[1] : null,
-    departureTime: allTimes[0] || "",
-    arrivalTime: allTimes[1] || null,
-    date: requestedDate,
-    durationMinutes: durationMatch ? parseInt(durationMatch[1], 10) * 60 + parseInt(durationMatch[2], 10) : null,
-    fare,
-    currency: "NGN",
-    seatStatus,
-    raw: raw.trim(),
-  };
 }
