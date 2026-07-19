@@ -11,7 +11,7 @@ import { searchEnuguAirFlights } from "../../src/modules/travel-assistant/search
 const app = express();
 app.use(express.json());
 
-app.get("/internal/health", (_req, res) => res.json({ ok: true }));
+app.get("/internal/health", (_req, res) => res.json({ ok: true, build: "travel-assistant-v1" }));
 
 app.get("/internal/whatismyip", requireInternalApiKey, async (_req, res) => {
   try {

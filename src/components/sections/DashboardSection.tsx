@@ -116,13 +116,12 @@ export default function DashboardSection({ onNavigate }: { onNavigate: (id: Sect
           <div className="priority-tile-sub">Generate custom operational reports</div>
         </motion.div>
 
-        <motion.div variants={item} className="priority-tile disabled">
-          <span className="priority-tile-badge">Coming soon</span>
+        <motion.div variants={item} className="priority-tile">
           <div className="priority-tile-icon">
             <Icon name="sparkles" size={18} />
           </div>
           <div className="priority-tile-title">AI Operations Assistant</div>
-          <div className="priority-tile-sub">Ask questions about your data</div>
+          <div className="priority-tile-sub">Use the chat bubble, bottom-right →</div>
         </motion.div>
 
         <motion.div variants={item} className="priority-tile">
