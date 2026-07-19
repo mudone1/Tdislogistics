@@ -1,35 +1,47 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon } from "@/lib/icon-map";
+
+interface ChatMessage {
+  id: number;
+  role: "user" | "assistant";
+  text: string;
+}
+
+interface PendingRoundTrip {
+  origin: string;
+  destination: string;
+  date: string;
+}
 
 let idCounter = 0;
 
 export default function ChatBubble() {
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState([
+  const [open, setOpen] = useState<boolean>(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: idCounter++,
       role: "assistant",
-      text: 'Ask me for a flight quote - e.g. "Enugu ABV-LOS today" or "from Lagos to Enugu tomorrow". Currently only Enugu Air is supported.',
+      text: 'Ask me for a flight quote — e.g. "Enugu ABV-LOS today" or "ABV to LOS 12th july to return 23rd". Currently only Enugu Air is supported.',
     },
   ]);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
+  const [input, setInput] = useState<string>("");
+  const [sending, setSending] = useState<boolean>(false);
+  const [pending, setPending] = useState<PendingRoundTrip | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-    }
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, open]);
 
-  async function send() {
+  async function send(): Promise<void> {
     const text = input.trim();
     if (!text || sending) return;
 
-    setMessages((m) => [...m, { id: idCounter++, role: "user", text }]);
+    setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
     setInput("");
     setSending(true);
 
@@ -37,12 +49,20 @@ export default function ChatBubble() {
       const res = await fetch("/api/assistant/quote", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify(pending ? { message: text, pending } : { message: text }),
       });
       const data = await res.json();
-      setMessages((m) => [...m, { id: idCounter++, role: "assistant", text: data.reply || "No response." }]);
+      setMessages((m: ChatMessage[]) => [
+        ...m,
+        { id: idCounter++, role: "assistant", text: data.reply || "No response." },
+      ]);
+      setPending(data.pending ?? null);
     } catch {
-      setMessages((m) => [...m, { id: idCounter++, role: "assistant", text: "Something went wrong - try again." }]);
+      setMessages((m: ChatMessage[]) => [
+        ...m,
+        { id: idCounter++, role: "assistant", text: "Something went wrong — try again." },
+      ]);
+      setPending(null);
     } finally {
       setSending(false);
     }
@@ -50,7 +70,11 @@ export default function ChatBubble() {
 
   return (
     <>
-      <button className="chat-bubble-fab" onClick={() => setOpen((o) => !o)} aria-label="AI Operations Assistant">
+      <button
+        className="chat-bubble-fab"
+        onClick={() => setOpen((o: boolean) => !o)}
+        aria-label="AI Operations Assistant"
+      >
         <Icon name="sparkles" size={22} />
       </button>
 
@@ -68,26 +92,26 @@ export default function ChatBubble() {
                 <Icon name="sparkles" size={14} /> AI Operations Assistant
               </span>
               <button onClick={() => setOpen(false)} aria-label="Close">
-                x
+                ✕
               </button>
             </div>
 
             <div className="chat-bubble-messages" ref={scrollRef}>
-              {messages.map((m) => (
+              {messages.map((m: ChatMessage) => (
                 <div key={m.id} className={`chat-bubble-msg ${m.role}`}>
                   {m.text}
                 </div>
               ))}
-              {sending && <div className="chat-bubble-msg assistant chat-bubble-typing">Searching...</div>}
+              {sending && <div className="chat-bubble-msg assistant chat-bubble-typing">Searching…</div>}
             </div>
 
             <div className="chat-bubble-input-row">
               <input
                 type="text"
-                placeholder="Type a route and date..."
+                placeholder={pending ? "Return date…" : "Type a route and date…"}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && send()}
+                onChange={(e: ChangeEvent<HTMLInputElement>) => setInput(e.target.value)}
+                onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && send()}
                 disabled={sending}
               />
               <button onClick={send} disabled={sending || !input.trim()}>
