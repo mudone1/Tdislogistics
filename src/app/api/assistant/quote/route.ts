@@ -76,10 +76,6 @@ async function runRoundTrip(origin: string, destination: string, outboundDate: s
   if (check) return check;
 
   try {
-    // Sequential, not Promise.all — running two full Chromium instances at
-    // once appears to exceed Railway's available memory, causing one to
-    // get killed mid-search ("Target page, context or browser has been
-    // closed"). Slower, but reliable.
     const outbound = await callSearch(origin, destination, outboundDate);
     const back = await callSearch(destination, origin, returnDate);
 
@@ -123,9 +119,6 @@ function formatLeg(result: FlightSearchResult): string {
     return `No flights found ${result.query.origin}\u2192${result.query.destination} on ${result.query.date}.`;
   }
 
-  // Only Enugu Air is implemented right now — every result currently comes
-  // from that one airline. Once other Group B airlines get their own
-  // search connector, this can group by result.options[i].airline instead.
   const airline = result.options[0].airline;
   const lines = result.options.map((o: FlightOption) => {
     const priceLabel = o.fare != null ? o.fare.toLocaleString() : o.seatStatus ?? "unavailable";
