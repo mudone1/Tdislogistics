@@ -974,6 +974,37 @@ input:focus, select:focus { box-shadow: 0 0 0 3px rgba(24,79,115,0.10); }
 }
 .chat-bubble-typing { opacity: 0.6; font-style: italic; }
 
+.chat-bubble-msg-wrap {
+  display: flex;
+  flex-direction: column;
+  max-width: 85%;
+}
+.chat-bubble-msg-wrap.user { align-self: flex-end; align-items: flex-end; }
+.chat-bubble-msg-wrap.assistant { align-self: flex-start; align-items: flex-start; }
+.chat-bubble-msg-wrap .chat-bubble-msg { max-width: 100%; }
+
+.chat-bubble-msg-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.chat-bubble-msg-actions button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--gray-200);
+  background: white;
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.chat-bubble-msg-actions button:hover { background: var(--off-white); border-color: var(--gray-400); }
+.chat-bubble-msg-actions button.copied { color: #16a34a; border-color: #16a34a; }
+
 .chat-bubble-input-row {
   display: flex;
   gap: 8px;

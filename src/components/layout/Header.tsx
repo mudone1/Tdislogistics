@@ -21,7 +21,7 @@ export default function Header() {
     <header className="app-header">
       <div className="header-brand">
         <div className="logo-box">
-          <Image src="/images/Tdis_logo.svg" alt="TDIS Logistics" width={50} height={50} style={{ height: 50, width: "auto", objectFit: "contain" }} priority />
+          <Image src="/images/Tdis_logo.jpeg" alt="TDIS Logistics" width={97} height={50} style={{ height: 50, width: "auto", objectFit: "contain" }} priority />
         </div>
         <span className="iata-badge">✈ IATA ACCREDITED</span>
       </div>

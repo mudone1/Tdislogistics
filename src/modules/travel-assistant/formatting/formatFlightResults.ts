@@ -1,10 +1,13 @@
-import type { FlightOption, FlightSearchResult } from "../core/types";
+import type { FlightOption, FareClassOption, FlightSearchResult } from "../core/types";
 
 const NAIRA = "₦";
+const SEPARATOR = "-----------------------";
 
 // Shared by both the LLM-backed orchestrator and the legacy deterministic
 // fallback, so quote formatting stays identical regardless of which path
-// answered the request.
+// answered the request. Deliberately compact/WhatsApp-friendly — most
+// responses get copied straight into a WhatsApp chat, so this omits flight
+// numbers, durations, and fare-class detail beyond a short cabin label.
 export function formatLeg(result: FlightSearchResult): string {
   if (result.options.length === 0) {
     return `No flights found ${result.query.origin} → ${result.query.destination} on ${result.query.date}.`;
@@ -24,20 +27,18 @@ export function formatLeg(result: FlightSearchResult): string {
     .map(([airline, opts]) => {
       const sorted = [...opts].sort((a, b) => a.departureTime.localeCompare(b.departureTime));
       const cheapest = cheapestOf(sorted);
-      const header = cheapest === Infinity ? airline : `${airline} (from ${formatNaira(cheapest)})`;
+      const header = cheapest === Infinity ? airline : `${airline}\nFrom ${formatNaira(cheapest)}`;
 
       const lines = sorted.map((o) => {
-        const timeRange = o.arrivalTime ? `${o.departureTime}–${o.arrivalTime}` : o.departureTime;
-        const duration = o.durationMinutes != null ? formatDuration(o.durationMinutes) : null;
-        const flightNo = o.flightNumber ? `flight ${o.flightNumber}` : null;
-        const price = o.fare != null ? formatNaira(o.fare) : (o.seatStatus ?? "unavailable");
-        const middle = [duration, flightNo].filter(Boolean).join(" · ");
-        return `  ${timeRange}${middle ? ` · ${middle}` : ""} · ${price}`;
+        const time = formatTime12h(o.departureTime);
+        if (o.fare == null) return `${time} @ ${o.seatStatus ?? "unavailable"}`;
+        const cabin = shortCabinClass(cheapestFareClassName(o));
+        return `${time} @ ${formatNaira(o.fare)} - ${cabin}`;
       });
 
-      return `${header}\n${lines.join("\n")}`;
+      return `${header}\n\n${lines.join("\n")}`;
     })
-    .join("\n\n");
+    .join(`\n\n${SEPARATOR}\n\n`);
 }
 
 export function formatRouteHeader(origin: string, destination: string, date: string): string {
@@ -49,12 +50,35 @@ function cheapestOf(options: FlightOption[]): number {
   return fares.length > 0 ? Math.min(...fares) : Infinity;
 }
 
-function formatNaira(amount: number): string {
-  return `${NAIRA}${amount.toLocaleString()}`;
+function cheapestFareClassName(option: FlightOption): string | null {
+  const available = option.fareClasses.filter((c: FareClassOption) => !c.soldOut && c.fare != null);
+  if (available.length === 0) return null;
+  const cheapest = available.reduce((min, c) => ((c.fare as number) < (min.fare as number) ? c : min));
+  return cheapest.name;
 }
 
-function formatDuration(minutes: number): string {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return m > 0 ? `${h}h${m}m` : `${h}h`;
+// Fare class names vary a lot in the raw data ("Economy Promo", "Economy
+// Saver", "Premium Economy Flex", "Business Flex", ...) — collapse to the
+// three short labels the default view is allowed to show.
+function shortCabinClass(rawName: string | null): string {
+  if (!rawName) return "Economy";
+  const n = rawName.toLowerCase();
+  if (n.includes("business")) return "Business";
+  if (n.includes("premium")) return "Premium Eco";
+  return "Economy";
+}
+
+function formatTime12h(time24: string): string {
+  const match = time24.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return time24;
+  let hours = parseInt(match[1], 10);
+  const minutes = match[2];
+  const period = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  return `${hours}:${minutes} ${period}`;
+}
+
+function formatNaira(amount: number): string {
+  return `${NAIRA}${amount.toLocaleString()}`;
 }

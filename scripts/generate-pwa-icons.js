@@ -1,5 +1,5 @@
-// One-off script to generate PWA icons from the existing TDIS wordmark logo
-// (public/images/Tdis_logo.svg), composited onto a square navy background
+// One-off script to generate PWA icons from the official TDIS logo
+// (public/images/Tdis_logo.jpeg), composited onto a square white background
 // since the source logo is a wide horizontal lockup, not a square mark.
 // Run: node scripts/generate-pwa-icons.js
 const sharp = require("sharp");
@@ -7,7 +7,7 @@ const path = require("path");
 const fs = require("fs");
 
 const WHITE = "#ffffff";
-const SRC = path.join(__dirname, "..", "public", "images", "Tdis_logo.svg");
+const SRC = path.join(__dirname, "..", "public", "images", "Tdis_logo.jpeg");
 const OUT_DIR = path.join(__dirname, "..", "public", "icons");
 
 const SIZES = [

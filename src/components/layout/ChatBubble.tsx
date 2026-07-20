@@ -10,6 +10,7 @@ interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   text: string;
+  hasResults?: boolean;
 }
 
 interface PendingRoundTrip {
@@ -51,6 +52,7 @@ export default function ChatBubble() {
   const [sending, setSending] = useState<boolean>(false);
   const [pending, setPending] = useState<PendingRoundTrip | null>(null);
   const [identity, setIdentity] = useState<ChatIdentity | null>(null);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const greeted = useRef(false);
 
@@ -111,9 +113,10 @@ export default function ChatBubble() {
       }
 
       const data = await res.json();
+      const hasResults = !!(data.result || data.outbound || data.return);
       setMessages((m: ChatMessage[]) => [
         ...m,
-        { id: idCounter++, role: "assistant", text: data.reply || "No response." },
+        { id: idCounter++, role: "assistant", text: data.reply || "No response.", hasResults },
       ]);
       setPending(data.pending ?? null);
     } catch (err) {
@@ -130,6 +133,20 @@ export default function ChatBubble() {
     } finally {
       setSending(false);
     }
+  }
+
+  async function copyMessage(m: ChatMessage): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(m.text);
+      setCopiedId(m.id);
+      setTimeout(() => setCopiedId((id) => (id === m.id ? null : id)), 1500);
+    } catch (err) {
+      console.error("[assistant] copy failed:", err);
+    }
+  }
+
+  function shareToWhatsApp(text: string): void {
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
   }
 
   function describeHttpError(status: number): string {
@@ -172,11 +189,21 @@ export default function ChatBubble() {
 
             <div className="chat-bubble-messages" ref={scrollRef}>
               {messages.map((m: ChatMessage) => (
-                <div key={m.id} className={`chat-bubble-msg ${m.role}`}>
-                  {m.text}
+                <div key={m.id} className={`chat-bubble-msg-wrap ${m.role}`}>
+                  <div className={`chat-bubble-msg ${m.role}`}>{m.text}</div>
+                  {m.hasResults && (
+                    <div className="chat-bubble-msg-actions">
+                      <button onClick={() => copyMessage(m)}>
+                        {copiedId === m.id ? "✓ Copied" : "📋 Copy"}
+                      </button>
+                      <button onClick={() => shareToWhatsApp(m.text)}>Share to WhatsApp</button>
+                    </div>
+                  )}
                 </div>
               ))}
-              {sending && <div className="chat-bubble-msg assistant chat-bubble-typing">Searching…</div>}
+              {sending && (
+                <div className="chat-bubble-msg assistant chat-bubble-typing">🔍 Searching available flights…</div>
+              )}
             </div>
 
             <div className="chat-bubble-input-row">
