@@ -1,6 +1,4 @@
 import { ImageResponse } from "next/og";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import type { NextRequest } from "next/server";
 
 const NAVY = "#184F73";
@@ -38,19 +36,15 @@ function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" });
 }
 
-let logoDataUri: string | null = null;
-async function getLogoDataUri(): Promise<string> {
-  if (logoDataUri) return logoDataUri;
-  const bytes = await readFile(path.join(process.cwd(), "public", "images", "Tdis_logo.jpeg"));
-  logoDataUri = `data:image/jpeg;base64,${bytes.toString("base64")}`;
-  return logoDataUri;
-}
-
 export async function POST(req: NextRequest): Promise<Response> {
   const body = (await req.json()) as QuoteImagePayload;
   const legs = body.legs ?? [];
   const generatedAt = body.generatedAt || new Date().toISOString();
-  const logo = await getLogoDataUri();
+  // Fetched over HTTP (same origin) rather than read from the filesystem —
+  // `public/` isn't reliably included in the serverless function's file
+  // trace for a dynamically-joined path, which was causing this route to
+  // 500 on Vercel (readFile silently failing at runtime).
+  const logo = `${req.nextUrl.origin}/images/Tdis_logo.jpeg`;
 
   const estimatedHeight = 230 + legs.reduce((sum, leg) => sum + 80 + leg.rows.length * 110, 0) + 80;
   const height = Math.max(700, Math.min(2400, estimatedHeight));
