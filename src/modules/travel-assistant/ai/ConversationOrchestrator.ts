@@ -156,7 +156,7 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
 
       if (outbound.failedAirlines.length + back.failedAirlines.length > 0) {
         console.warn(
-          `[travel-assistant] partial airline failures — outbound: [${outbound.failedAirlines.join(", ")}], return: [${back.failedAirlines.join(", ")}]`
+          `[travel-assistant] partial airline failures — outbound: [${outbound.failedAirlines.map((f) => f.airline).join(", ")}], return: [${back.failedAirlines.map((f) => f.airline).join(", ")}]`
         );
       }
 
@@ -189,7 +189,7 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     logSearchTiming("one-way", airlines, searchStartedAt, [data]);
 
     if (data.failedAirlines.length > 0) {
-      console.warn(`[travel-assistant] partial airline failures: [${data.failedAirlines.join(", ")}]`);
+      console.warn(`[travel-assistant] partial airline failures: [${data.failedAirlines.map((f) => f.airline).join(", ")}]`);
     }
 
     if (data.options.length === 0) {
@@ -212,11 +212,28 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
   }
 }
 
-function describeAllFailed(failedAirlines: string[]): string {
+interface FailedAirline {
+  airline: string;
+  error: string;
+}
+
+function describeAllFailed(failedAirlines: FailedAirline[]): string {
   if (failedAirlines.length === 0) {
     return "I couldn't find any flights for that search — try a different date or route?";
   }
-  return `I couldn't reach any airline for that search just now (tried ${failedAirlines.join(", ")}) — mind trying again in a moment?`;
+
+  // "doesn't fly from/to X" is a permanent routing fact, not a transient
+  // reachability problem — telling the user to "try again in a moment"
+  // for a route that will never exist is actively misleading. Distinguish
+  // it from real connector/network failures.
+  const routeIssues = failedAirlines.filter((f) => /doesn'?t fly/i.test(f.error));
+  if (routeIssues.length === failedAirlines.length) {
+    const names = failedAirlines.map((f) => f.airline).join(", ");
+    return `${names} ${failedAirlines.length === 1 ? "doesn't" : "don't"} fly that route — want me to try a different airline or route?`;
+  }
+
+  const names = failedAirlines.map((f) => f.airline).join(", ");
+  return `I couldn't reach any airline for that search just now (tried ${names}) — mind trying again in a moment?`;
 }
 
 const FAILURE_CLAIM_PATTERNS = [/couldn'?t find/i, /couldn'?t reach/i, /no flights/i, /search failed/i, /didn'?t find/i];
@@ -247,11 +264,11 @@ function logSearchTiming(
   kind: string,
   airlines: readonly string[],
   startedAt: number,
-  results: Array<FlightSearchResult & { failedAirlines: string[] }>
+  results: Array<FlightSearchResult & { failedAirlines: FailedAirline[] }>
 ): void {
   const totalMs = Date.now() - startedAt;
   const totalOptions = results.reduce((sum, r) => sum + r.options.length, 0);
-  const failed = [...new Set(results.flatMap((r) => r.failedAirlines))];
+  const failed = [...new Set(results.flatMap((r) => r.failedAirlines.map((f) => f.airline)))];
   console.log(
     `[travel-assistant] TIMING kind=${kind} airlines=[${airlines.join(",")}] totalMs=${totalMs} options=${totalOptions} failed=[${failed.join(",")}]`
   );
@@ -360,24 +377,25 @@ async function searchAllAirlines(
   origin: string,
   destination: string,
   date: string
-): Promise<FlightSearchResult & { failedAirlines: string[] }> {
+): Promise<FlightSearchResult & { failedAirlines: FailedAirline[] }> {
   const settled = await Promise.allSettled(
     airlines.map((airline) => callSearch(airline, origin, destination, date))
   );
 
   const options: FlightOption[] = [];
-  const failedAirlines: string[] = [];
+  const failedAirlines: FailedAirline[] = [];
 
   settled.forEach((outcome, i) => {
     const airline = airlines[i];
     if (outcome.status === "rejected") {
+      const error = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
       console.error(`[travel-assistant] ${airline} search threw:`, outcome.reason);
-      failedAirlines.push(airline);
+      failedAirlines.push({ airline, error });
       return;
     }
     if (outcome.value.error) {
       console.error(`[travel-assistant] ${airline} search failed:`, outcome.value.error);
-      failedAirlines.push(airline);
+      failedAirlines.push({ airline, error: outcome.value.error });
       return;
     }
     options.push(...outcome.value.options);
