@@ -37,6 +37,18 @@ function formatDateTime(iso: string): string {
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
+  try {
+    return await renderQuoteImage(req);
+  } catch (err) {
+    console.error("[assistant/quote-image] failed:", err);
+    return new Response(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    });
+  }
+}
+
+async function renderQuoteImage(req: NextRequest): Promise<Response> {
   const body = (await req.json()) as QuoteImagePayload;
   const legs = body.legs ?? [];
   const generatedAt = body.generatedAt || new Date().toISOString();
