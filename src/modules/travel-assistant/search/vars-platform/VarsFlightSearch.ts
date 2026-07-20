@@ -95,6 +95,27 @@ export async function searchVarsPlatformFlights(
     mark("navigateToForm");
 
     console.log(`[${logTag}] selecting origin: ${query.origin}`);
+    // Same fail-fast reasoning as the destination check below: calling
+    // selectOption() directly on a value the <select> never offers makes
+    // Playwright's actionability retry blindly burn its full ~30s timeout
+    // (confirmed on real traffic: XeJet only flies LOS<->ABV, so a KAN
+    // origin request hung for 31s before failing with an opaque timeout).
+    const originFound = await page
+      .locator("#Origin")
+      .locator(`option[value="${query.origin}"]`)
+      .waitFor({ state: "attached", timeout: 8000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!originFound) {
+      const availableOrigins = await page
+        .locator("#Origin option")
+        .evaluateAll((opts) => opts.map((o) => (o as HTMLOptionElement).value).filter(Boolean));
+      throw new Error(
+        `${airlineLabel} doesn't fly from ${query.origin} (origins offered: ${availableOrigins.join(", ") || "none"})`
+      );
+    }
+
     await page.locator("#Origin").selectOption(query.origin);
 
     // Destination options are repopulated by the origin's change handler, so
