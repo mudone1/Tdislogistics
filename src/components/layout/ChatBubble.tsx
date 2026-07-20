@@ -23,6 +23,7 @@ interface ChatMessage {
   hasResults?: boolean;
   legs?: FlightLeg[];
   showCards?: boolean;
+  imageBlob?: Blob;
 }
 
 interface PendingRoundTrip {
@@ -60,6 +61,31 @@ function getAnonSessionKey(): string {
 }
 
 let idCounter = 0;
+
+function buildQuoteImagePayload(legs: FlightLeg[]) {
+  const generatedAt = legs[0]?.result.searchedAt ?? new Date().toISOString();
+  return {
+    generatedAt,
+    legs: legs.map((leg) => ({
+      label: leg.label,
+      origin: leg.result.query.origin,
+      destination: leg.result.query.destination,
+      date: leg.result.query.date,
+      rows: cheapestPerAirline(leg.result.options).map((option) => {
+        const fareClass = cheapestFareClass(option);
+        return {
+          airline: option.airline,
+          fare: option.fare,
+          seatStatus: option.seatStatus,
+          cabin: shortCabinClass(cheapestFareClassName(option)),
+          baggage: fareClass?.baggage ?? null,
+          refundPolicy: fareClass?.refundPolicy ?? null,
+          seatsLeft: fareClass?.seatsLeft ?? null,
+        };
+      }),
+    })),
+  };
+}
 
 export default function ChatBubble() {
   const [open, setOpen] = useState<boolean>(false);
@@ -103,6 +129,28 @@ export default function ChatBubble() {
     if (identity) setSessionKey(identity.sessionKey);
   }, [identity, setSessionKey]);
 
+  // Fired as soon as results arrive (not waiting for the user to click
+  // Share) so the image is already sitting in memory by the time they do.
+  // The Web Share API only allows navigator.share() to be called
+  // synchronously off a real user gesture — an await'd fetch right before
+  // that call breaks "user activation" on most mobile browsers, which
+  // silently fails and falls back to plain-text sharing instead of the
+  // image. Pre-generating removes that fetch from the click path entirely.
+  const prefetchQuoteImage = useCallback(async (id: number, legs: FlightLeg[]): Promise<void> => {
+    try {
+      const res = await fetch("/api/assistant/quote-image", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(buildQuoteImagePayload(legs)),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      setMessages((m: ChatMessage[]) => m.map((msg) => (msg.id === id ? { ...msg, imageBlob: blob } : msg)));
+    } catch (err) {
+      console.error("[assistant] quote image prefetch failed:", err);
+    }
+  }, []);
+
   const sendMessage = useCallback(
     async (text: string): Promise<void> => {
       if (!text || sending) return;
@@ -131,16 +179,20 @@ export default function ChatBubble() {
         if (data.result) legs.push({ label: "", result: data.result });
         const hasResults = legs.some((l) => l.result.options.length > 0);
 
+        const newId = idCounter++;
         setMessages((m: ChatMessage[]) => [
           ...m,
-          { id: idCounter++, role: "assistant", text: data.reply || "No response.", hasResults, legs },
+          { id: newId, role: "assistant", text: data.reply || "No response.", hasResults, legs },
         ]);
         setPending(data.pending ?? null);
 
         // The notification itself is created server-side (durable, survives
         // reload); eagerly re-poll here just so the bell updates within a
         // second instead of waiting out the regular poll interval.
-        if (hasResults) refresh();
+        if (hasResults) {
+          refresh();
+          prefetchQuoteImage(newId, legs);
+        }
       } catch (err) {
         console.error("[assistant] request threw:", err);
         setMessages((m: ChatMessage[]) => [
@@ -156,7 +208,7 @@ export default function ChatBubble() {
         setSending(false);
       }
     },
-    [sending, pending, identity, refresh]
+    [sending, pending, identity, refresh, prefetchQuoteImage]
   );
 
   function send(): void {
@@ -211,60 +263,60 @@ export default function ChatBubble() {
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
   }
 
+  async function shareImageBlob(blob: Blob): Promise<void> {
+    const file = new File([blob], "tdis-flight-quote.png", { type: "image/png" });
+
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: "TDIS Flight Quote" });
+        return;
+      } catch (err) {
+        // AbortError just means the user dismissed the share sheet — not a
+        // failure worth falling back for.
+        if (err instanceof Error && err.name === "AbortError") return;
+        console.error("[assistant] navigator.share failed:", err);
+      }
+    }
+
+    // Desktop browsers mostly can't share files this way, and there's no
+    // URL-scheme way to pre-attach an image to wa.me — download the image
+    // and open WhatsApp Web so the user can attach it manually.
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "tdis-flight-quote.png";
+    a.click();
+    URL.revokeObjectURL(url);
+    window.open("https://wa.me/", "_blank", "noopener,noreferrer");
+  }
+
   async function shareToWhatsApp(m: ChatMessage): Promise<void> {
     if (!m.legs || m.legs.length === 0) {
       shareTextToWhatsApp(m.text);
       return;
     }
 
-    try {
-      const generatedAt = m.legs[0]?.result.searchedAt ?? new Date().toISOString();
-      const payload = {
-        generatedAt,
-        legs: m.legs.map((leg) => ({
-          label: leg.label,
-          origin: leg.result.query.origin,
-          destination: leg.result.query.destination,
-          date: leg.result.query.date,
-          rows: cheapestPerAirline(leg.result.options).map((option) => {
-            const fareClass = cheapestFareClass(option);
-            return {
-              airline: option.airline,
-              fare: option.fare,
-              seatStatus: option.seatStatus,
-              cabin: shortCabinClass(cheapestFareClassName(option)),
-              baggage: fareClass?.baggage ?? null,
-              refundPolicy: fareClass?.refundPolicy ?? null,
-              seatsLeft: fareClass?.seatsLeft ?? null,
-            };
-          }),
-        })),
-      };
+    // The image is normally already prefetched (see prefetchQuoteImage) by
+    // the time the user gets around to clicking Share, so this call is
+    // synchronous from the click and navigator.share() still counts as
+    // user-activated. Only fall back to fetching here if prefetch hasn't
+    // finished yet (e.g. clicked immediately) or failed — that path may
+    // not preserve the share gesture on strict mobile browsers, but it's
+    // the best available fallback.
+    if (m.imageBlob) {
+      await shareImageBlob(m.imageBlob);
+      return;
+    }
 
+    try {
       const res = await fetch("/api/assistant/quote-image", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(buildQuoteImagePayload(m.legs)),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
-      const file = new File([blob], "tdis-flight-quote.png", { type: "image/png" });
-
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: "TDIS Flight Quote" });
-        return;
-      }
-
-      // Desktop browsers mostly can't share files this way, and there's no
-      // URL-scheme way to pre-attach an image to wa.me — download the
-      // image and open WhatsApp Web so the user can attach it manually.
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "tdis-flight-quote.png";
-      a.click();
-      URL.revokeObjectURL(url);
-      window.open("https://wa.me/", "_blank", "noopener,noreferrer");
+      await shareImageBlob(blob);
     } catch (err) {
       console.error("[assistant] WhatsApp image share failed:", err);
       shareTextToWhatsApp(m.text);
@@ -297,11 +349,13 @@ export default function ChatBubble() {
   function reopenSearch(entry: HistoryEntry): void {
     const legs: FlightLeg[] = [{ label: "", result: entry.result }];
     const text = `${entry.referenceId} — ${formatRouteHeader(entry.origin, entry.destination, entry.date)}\n${formatLeg(entry.result)}`;
+    const newId = idCounter++;
     setMessages((m: ChatMessage[]) => [
       ...m,
-      { id: idCounter++, role: "assistant", text, hasResults: true, legs },
+      { id: newId, role: "assistant", text, hasResults: true, legs },
     ]);
     setHistoryOpen(false);
+    prefetchQuoteImage(newId, legs);
   }
 
   function describeHttpError(status: number): string {
