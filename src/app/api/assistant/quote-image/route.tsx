@@ -1,6 +1,8 @@
 import { ImageResponse } from "next/og";
 import type { NextRequest } from "next/server";
 
+export const runtime = "edge";
+
 const NAVY = "#184F73";
 const GRAY = "#8A98A6";
 const BG = "#F8FAFC";
