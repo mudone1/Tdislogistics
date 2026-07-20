@@ -54,13 +54,6 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
   const body = (await req.json()) as QuoteImagePayload;
   const legs = body.legs ?? [];
   const generatedAt = body.generatedAt || new Date().toISOString();
-  // Fetched over HTTP (same origin) rather than read from the filesystem —
-  // `public/` isn't reliably included in the serverless function's file
-  // trace for a dynamically-joined path, which was causing this route to
-  // 500 on Vercel (readFile silently failing at runtime). PNG (the PWA
-  // icon), not the JPEG logo — satori's image decoder produced an empty
-  // stream on the JPEG source, PNG renders correctly.
-  const logo = `${req.nextUrl.origin}/icons/icon-192.png`;
 
   const estimatedHeight = 230 + legs.reduce((sum, leg) => sum + 80 + leg.rows.length * 110, 0) + 80;
   const height = Math.max(700, Math.min(2400, estimatedHeight));
@@ -88,8 +81,22 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
             marginBottom: 32,
           }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={logo} alt="TDIS Logistics" width={64} height={64} style={{ objectFit: "contain", borderRadius: 12 }} />
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 64,
+              height: 64,
+              borderRadius: 14,
+              background: NAVY,
+              color: "#ffffff",
+              fontSize: 22,
+              fontWeight: 800,
+            }}
+          >
+            TL
+          </div>
           <div style={{ display: "flex", flexDirection: "column" }}>
             <div style={{ fontSize: 32, fontWeight: 800, color: NAVY }}>TDIS Flight Quote</div>
             <div style={{ fontSize: 18, color: GRAY }}>Generated {formatDateTime(generatedAt)}</div>
