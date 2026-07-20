@@ -8,11 +8,15 @@ import { ConnectorRegistry } from "../../src/modules/airline-connectors/services
 import type { AirlineKey } from "../../src/modules/airline-connectors/core/types";
 import { searchEnuguAirFlights } from "../../src/modules/travel-assistant/search/enugu/EnuguAirSearch";
 import { searchUnitedNigeriaFlights } from "../../src/modules/travel-assistant/search/united/UnitedNigeriaSearch";
+import { searchXeJetFlights } from "../../src/modules/travel-assistant/search/xejet/XeJetSearch";
+import { searchRanoAirFlights } from "../../src/modules/travel-assistant/search/rano/RanoAirSearch";
 import type { FlightSearchQuery, FlightSearchResult } from "../../src/modules/travel-assistant/core/types";
 
 const TRAVEL_ASSISTANT_SEARCHERS: Record<string, (query: FlightSearchQuery) => Promise<FlightSearchResult>> = {
   ENUGU: searchEnuguAirFlights,
   UNITED: searchUnitedNigeriaFlights,
+  XEJET: searchXeJetFlights,
+  RANO: searchRanoAirFlights,
 };
 
 const app = express();

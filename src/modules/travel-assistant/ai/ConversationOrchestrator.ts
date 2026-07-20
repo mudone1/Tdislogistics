@@ -1,6 +1,7 @@
 import { groqJsonCompletion, type GroqMessage } from "./groqClient";
 import { SYSTEM_PROMPT } from "./systemPrompt";
 import { ChatMemoryRepository } from "../storage/ChatMemoryRepository";
+import { formatLeg, formatRouteHeader } from "../formatting/formatFlightResults";
 import type {
   AssistantTurn,
   ConversationSlots,
@@ -42,17 +43,36 @@ const REQUIRED_SEARCH_SLOTS = ["origin", "destination", "date"] as const;
 
 const SEARCH_INTENTS = new Set(["FLIGHT_SEARCH_ONE_WAY", "FLIGHT_SEARCH_ROUND_TRIP", "TICKET_AVAILABILITY"]);
 
-const ALL_AIRLINES = ["ENUGU", "UNITED"] as const;
+const ALL_AIRLINES = ["ENUGU", "UNITED", "XEJET", "RANO"] as const;
+
+// Round-trip searches run every airline sequentially for BOTH legs (see
+// the Railway memory note below) — with all 4 carriers that's 8 Playwright
+// runs in one request, well past what fits in a 60s serverless timeout.
+// So an unqualified round-trip search only auto-checks the two
+// longest-proven carriers; XeJet and Rano Air are still fully searchable
+// round-trip, just by naming them explicitly (which narrows to 1 airline,
+// i.e. 2 sequential runs — the same safe shape as before).
+const ROUND_TRIP_DEFAULT_AIRLINES = ["ENUGU", "UNITED"] as const;
+
+const AIRLINE_NAME_MATCHERS: Record<string, string> = {
+  united: "UNITED",
+  enugu: "ENUGU",
+  xejet: "XEJET",
+  "xe jet": "XEJET",
+  rano: "RANO",
+};
 
 // If the user named a specific airline, narrow to just that one instead of
 // querying every implemented carrier. Unrecognized names fall back to
-// searching all of them rather than silently dropping the request.
-function airlinesToQuery(preference: string | null): readonly string[] {
-  if (!preference) return ALL_AIRLINES;
+// searching the default set rather than silently dropping the request.
+function airlinesToQuery(preference: string | null, isRoundTrip: boolean): readonly string[] {
+  const defaults = isRoundTrip ? ROUND_TRIP_DEFAULT_AIRLINES : ALL_AIRLINES;
+  if (!preference) return defaults;
   const p = preference.toLowerCase();
-  if (p.includes("united")) return ["UNITED"];
-  if (p.includes("enugu")) return ["ENUGU"];
-  return ALL_AIRLINES;
+  for (const [name, key] of Object.entries(AIRLINE_NAME_MATCHERS)) {
+    if (p.includes(name)) return [key];
+  }
+  return defaults;
 }
 
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
@@ -92,7 +112,7 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     return { reply };
   }
 
-  const airlines = airlinesToQuery(slots.airline);
+  const airlines = airlinesToQuery(slots.airline, slots.isRoundTrip);
 
   try {
     if (slots.isRoundTrip) {
@@ -112,8 +132,8 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
 
       const reply =
         `${turn.reply}\n\n` +
-        `Outbound (${slots.origin}→${slots.destination}, ${slots.date}):\n${formatLeg(outbound)}\n\n` +
-        `Return (${slots.destination}→${slots.origin}, ${slots.returnDate}):\n${formatLeg(back)}`;
+        `Outbound — ${formatRouteHeader(slots.origin!, slots.destination!, slots.date!)}\n${formatLeg(outbound)}\n\n` +
+        `Return — ${formatRouteHeader(slots.destination!, slots.origin!, slots.returnDate!)}\n${formatLeg(back)}`;
 
       resetRouteSlots(slots);
       await ChatMemoryRepository.updateSlots(session.id, slots);
@@ -128,7 +148,7 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
       return { reply };
     }
 
-    const reply = `${turn.reply}\n\n${formatLeg(data)}`;
+    const reply = `${turn.reply}\n\n${formatRouteHeader(slots.origin!, slots.destination!, slots.date!)}\n${formatLeg(data)}`;
     resetRouteSlots(slots);
     await ChatMemoryRepository.updateSlots(session.id, slots);
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
@@ -258,30 +278,4 @@ async function callSearch(
   const data = (await res.json()) as FlightSearchResult & { error?: string };
   if (!res.ok && !data.error) return { ...data, error: `HTTP ${res.status}` };
   return data;
-}
-
-function formatLeg(result: FlightSearchResult): string {
-  if (result.options.length === 0) {
-    return `No flights found ${result.query.origin}→${result.query.destination} on ${result.query.date}.`;
-  }
-
-  const byAirline = new Map<string, FlightOption[]>();
-  for (const o of result.options) {
-    if (!byAirline.has(o.airline)) byAirline.set(o.airline, []);
-    byAirline.get(o.airline)!.push(o);
-  }
-
-  return Array.from(byAirline.entries())
-    .map(([airline, opts]) => {
-      const lines = opts.map((o) => {
-        const priceLabel = o.fare != null ? o.fare.toLocaleString() : o.seatStatus ?? "unavailable";
-        const classesLabel = o.fareClasses
-          .filter((c) => !c.soldOut && c.fare != null)
-          .map((c) => `${c.name} ${c.fare!.toLocaleString()}`)
-          .join(", ");
-        return `${o.departureTime}@${priceLabel}${classesLabel ? ` (${classesLabel})` : ""}`;
-      });
-      return `${airline}\n${lines.join("\n")}`;
-    })
-    .join("\n\n");
 }

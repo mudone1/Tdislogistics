@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { parseFlightQuery } from "@/modules/travel-assistant/parser/parseFlightQuery";
 import { handleAssistantMessage } from "@/modules/travel-assistant/ai/ConversationOrchestrator";
-import type { FlightSearchResult, FlightOption } from "@/modules/travel-assistant/core/types";
+import { formatLeg, formatRouteHeader } from "@/modules/travel-assistant/formatting/formatFlightResults";
+import type { FlightSearchResult } from "@/modules/travel-assistant/core/types";
 
 export const maxDuration = 60;
 
@@ -90,7 +91,7 @@ async function runOneWay(origin: string, destination: string, date: string) {
   try {
     const data = await callSearch(origin, destination, date);
     if (data.error) return NextResponse.json({ reply: `Search failed: ${data.error}` });
-    return NextResponse.json({ reply: formatLeg(data), result: data });
+    return NextResponse.json({ reply: `${formatRouteHeader(origin, destination, date)}\n${formatLeg(data)}`, result: data });
   } catch (err) {
     return NextResponse.json({ reply: `Search failed: ${err instanceof Error ? err.message : String(err)}` });
   }
@@ -113,8 +114,8 @@ async function runRoundTrip(origin: string, destination: string, outboundDate: s
     }
 
     const reply =
-      `Outbound (${origin}\u2192${destination}, ${outboundDate}):\n${formatLeg(outbound)}\n\n` +
-      `Return (${destination}\u2192${origin}, ${returnDate}):\n${formatLeg(back)}`;
+      `Outbound \u2014 ${formatRouteHeader(origin, destination, outboundDate)}\n${formatLeg(outbound)}\n\n` +
+      `Return \u2014 ${formatRouteHeader(destination, origin, returnDate)}\n${formatLeg(back)}`;
 
     return NextResponse.json({ reply, outbound, return: back });
   } catch (err) {
@@ -141,22 +142,4 @@ async function callSearch(origin: string, destination: string, date: string): Pr
     return { ...data, error: `HTTP ${res.status}` };
   }
   return data;
-}
-
-function formatLeg(result: FlightSearchResult): string {
-  if (result.options.length === 0) {
-    return `No flights found ${result.query.origin}\u2192${result.query.destination} on ${result.query.date}.`;
-  }
-
-  const airline = result.options[0].airline;
-  const lines = result.options.map((o: FlightOption) => {
-    const priceLabel = o.fare != null ? o.fare.toLocaleString() : o.seatStatus ?? "unavailable";
-    const classesLabel = o.fareClasses
-      .filter((c) => !c.soldOut && c.fare != null)
-      .map((c) => `${c.name} ${c.fare!.toLocaleString()}`)
-      .join(", ");
-    return `${o.departureTime}@${priceLabel}${classesLabel ? ` (${classesLabel})` : ""}`;
-  });
-
-  return `${airline}\n${lines.join("\n")}`;
 }

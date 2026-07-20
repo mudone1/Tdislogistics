@@ -36,6 +36,15 @@ export const AIRPORT_ALIASES: Record<string, string> = {
   jos: "JOS",
   minna: "MXJ",
   warri: "QRW",
+
+  asaba: "ABB",
+  bauchi: "BCU",
+  gombe: "GMO",
+  katsina: "DKA",
+  yenagoa: "BIA",
+  ekiti: "EKK",
+  anambra: "ANA",
+  accra: "ACC",
 };
 
 export const AIRPORT_NAMES_BY_LENGTH = Object.keys(AIRPORT_ALIASES).sort((a, b) => b.length - a.length);
