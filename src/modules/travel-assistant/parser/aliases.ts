@@ -1,4 +1,4 @@
-export const AIRPORT_ALIASES = {
+export const AIRPORT_ALIASES: Record<string, string> = {
   enugu: "ENU",
   enugn: "ENU",
   enu: "ENU",
