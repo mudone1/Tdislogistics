@@ -72,7 +72,18 @@ export async function bookEnuguAirOnHold(
     await page.goto(REQUIREMENTS_URL, { waitUntil: "domcontentloaded" });
     await page.locator("#Origin").selectOption(request.origin);
     await page.locator("#Destination").selectOption(request.destination);
-    await page.locator(request.returnDate ? "#ReturnTrip1" : "#ReturnTrip2").click();
+    // The Return/One Way control is a Bootstrap .btn-check radio — its
+    // <label> sits visually on top and intercepts pointer events, so a
+    // plain click() fails Playwright's actionability check (confirmed via
+    // a real run: "label ... intercepts pointer events"). Same fix already
+    // proven for this exact control in VarsFlightSearch.ts's "One Way"
+    // button: set checked + dispatch the events its handlers listen for.
+    await page.locator(request.returnDate ? "#ReturnTrip1" : "#ReturnTrip2").evaluate((el) => {
+      const input = el as HTMLInputElement;
+      input.checked = true;
+      input.dispatchEvent(new Event("click", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    });
 
     await page.evaluate(
       ({ dep, ret }) => {
@@ -86,7 +97,11 @@ export async function bookEnuguAirOnHold(
       }
     );
 
-    await page.locator('button[type="submit"]').first().click();
+    await page
+      .locator('button, a, input[type="submit"], input[type="button"]')
+      .filter({ hasText: /^continue$/i })
+      .first()
+      .click();
     await page.waitForURL(/FlightCal\.aspx/i, { timeout: 20000 }).catch(() => {
       /* some VARS deployments don't change the URL for this step — proceed and let the panel wait below fail loudly if it truly didn't navigate */
     });
