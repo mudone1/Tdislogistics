@@ -188,22 +188,29 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
   };
 
   console.log(`[book-hold] starting ${airline} ${origin}->${destination} ${departureDate}${returnDate ? ` / return ${returnDate}` : ""}`);
-  try {
-    const result = await handler(credentials, {
-      origin,
-      destination,
-      departureDate,
-      returnDate,
-      fareClassPreference: fareClassPreference ?? ["Economy Promo", "Economy Saver"],
-      passenger,
+
+  // Fire-and-forget, same reasoning as /internal/connectors/:airline/sync:
+  // login + search + fare selection + passenger form + submission is a
+  // multi-minute Playwright flow, well past what most HTTP clients/proxies
+  // hold a connection open for. Respond immediately and log the outcome
+  // instead of making the caller hold a long-lived connection.
+  res.status(202).json({ accepted: true, airline });
+
+  handler(credentials, {
+    origin,
+    destination,
+    departureDate,
+    returnDate,
+    fareClassPreference: fareClassPreference ?? ["Economy Promo", "Economy Saver"],
+    passenger,
+  })
+    .then((result) => {
+      console.log(`[book-hold] ${airline} result: ${JSON.stringify(result)}`);
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[book-hold] ${airline} FAILED:`, message);
     });
-    console.log(`[book-hold] ${airline} result: pnr=${result.pnr} holdExpiresAt=${result.holdExpiresAt}`);
-    res.json(result);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[book-hold] ${airline} FAILED:`, message);
-    res.status(502).json({ error: message });
-  }
 });
 
 const PORT = Number(process.env.PORT) || 4100;
