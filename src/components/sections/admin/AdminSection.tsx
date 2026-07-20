@@ -6,8 +6,9 @@ import { useApp } from "@/lib/store";
 import { formatNaira } from "@/lib/utils";
 import { AIRLINES, ALL_PERMISSIONS, getRoleLabel } from "@/lib/constants";
 import AirlineConnectorsTab from "./AirlineConnectorsTab";
+import SalesReportsTab from "./SalesReportsTab";
 
-type AdminTab = "data" | "staff-ctrl" | "system" | "audit" | "finance" | "users" | "connectors";
+type AdminTab = "data" | "staff-ctrl" | "system" | "audit" | "finance" | "users" | "connectors" | "sales-reports";
 
 const TABS: { id: AdminTab; label: string }[] = [
   { id: "data", label: "Data Management" },
@@ -17,6 +18,7 @@ const TABS: { id: AdminTab; label: string }[] = [
   { id: "finance", label: "Financial Controls" },
   { id: "users", label: "Users & Permissions" },
   { id: "connectors", label: "Airline Connectors" },
+  { id: "sales-reports", label: "Sales Reports" },
 ];
 
 function downloadCSV(filename: string, rows: (string | number)[][]) {
@@ -664,6 +666,7 @@ export default function AdminSection() {
       )}
 
       {tab === "connectors" && <AirlineConnectorsTab />}
+      {tab === "sales-reports" && <SalesReportsTab />}
     </motion.div>
   );
 }
