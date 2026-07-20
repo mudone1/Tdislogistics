@@ -45,12 +45,24 @@ export function formatRouteHeader(origin: string, destination: string, date: str
   return `Flights ${origin} → ${destination} on ${date}`;
 }
 
-function cheapestOf(options: FlightOption[]): number {
+// One flight's worth of the same compact style, for the card view's
+// per-card Copy button — a single flight quote rather than the whole
+// result set.
+export function formatSingleFlight(option: FlightOption, origin: string, destination: string, date: string): string {
+  const time = formatTime12h(option.departureTime);
+  const priceLine =
+    option.fare != null
+      ? `${time} @ ${formatNaira(option.fare)} - ${shortCabinClass(cheapestFareClassName(option))}`
+      : `${time} @ ${option.seatStatus ?? "unavailable"}`;
+  return `${option.airline}\n${priceLine}\n${origin} → ${destination}, ${date}`;
+}
+
+export function cheapestOf(options: FlightOption[]): number {
   const fares = options.filter((o) => o.fare != null).map((o) => o.fare as number);
   return fares.length > 0 ? Math.min(...fares) : Infinity;
 }
 
-function cheapestFareClassName(option: FlightOption): string | null {
+export function cheapestFareClassName(option: FlightOption): string | null {
   const available = option.fareClasses.filter((c: FareClassOption) => !c.soldOut && c.fare != null);
   if (available.length === 0) return null;
   const cheapest = available.reduce((min, c) => ((c.fare as number) < (min.fare as number) ? c : min));
@@ -60,7 +72,7 @@ function cheapestFareClassName(option: FlightOption): string | null {
 // Fare class names vary a lot in the raw data ("Economy Promo", "Economy
 // Saver", "Premium Economy Flex", "Business Flex", ...) — collapse to the
 // three short labels the default view is allowed to show.
-function shortCabinClass(rawName: string | null): string {
+export function shortCabinClass(rawName: string | null): string {
   if (!rawName) return "Economy";
   const n = rawName.toLowerCase();
   if (n.includes("business")) return "Business";
@@ -68,7 +80,7 @@ function shortCabinClass(rawName: string | null): string {
   return "Economy";
 }
 
-function formatTime12h(time24: string): string {
+export function formatTime12h(time24: string): string {
   const match = time24.match(/^(\d{1,2}):(\d{2})$/);
   if (!match) return time24;
   let hours = parseInt(match[1], 10);
@@ -79,6 +91,6 @@ function formatTime12h(time24: string): string {
   return `${hours}:${minutes} ${period}`;
 }
 
-function formatNaira(amount: number): string {
+export function formatNaira(amount: number): string {
   return `${NAIRA}${amount.toLocaleString()}`;
 }

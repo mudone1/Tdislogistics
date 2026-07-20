@@ -5,12 +5,15 @@ import type { ChangeEvent, KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon } from "@/lib/icon-map";
 import { authHelper } from "@/lib/firebase";
+import FlightCards, { type FlightLeg } from "./FlightCards";
 
 interface ChatMessage {
   id: number;
   role: "user" | "assistant";
   text: string;
   hasResults?: boolean;
+  legs?: FlightLeg[];
+  showCards?: boolean;
 }
 
 interface PendingRoundTrip {
@@ -113,10 +116,15 @@ export default function ChatBubble() {
       }
 
       const data = await res.json();
-      const hasResults = !!(data.result || data.outbound || data.return);
+      const legs: FlightLeg[] = [];
+      if (data.outbound) legs.push({ label: "Outbound", result: data.outbound });
+      if (data.return) legs.push({ label: "Return", result: data.return });
+      if (data.result) legs.push({ label: "", result: data.result });
+      const hasResults = legs.some((l) => l.result.options.length > 0);
+
       setMessages((m: ChatMessage[]) => [
         ...m,
-        { id: idCounter++, role: "assistant", text: data.reply || "No response.", hasResults },
+        { id: idCounter++, role: "assistant", text: data.reply || "No response.", hasResults, legs },
       ]);
       setPending(data.pending ?? null);
     } catch (err) {
@@ -147,6 +155,10 @@ export default function ChatBubble() {
 
   function shareToWhatsApp(text: string): void {
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+  }
+
+  function toggleCards(id: number): void {
+    setMessages((m: ChatMessage[]) => m.map((msg) => (msg.id === id ? { ...msg, showCards: !msg.showCards } : msg)));
   }
 
   function describeHttpError(status: number): string {
@@ -189,14 +201,19 @@ export default function ChatBubble() {
 
             <div className="chat-bubble-messages" ref={scrollRef}>
               {messages.map((m: ChatMessage) => (
-                <div key={m.id} className={`chat-bubble-msg-wrap ${m.role}`}>
-                  <div className={`chat-bubble-msg ${m.role}`}>{m.text}</div>
+                <div key={m.id} className={`chat-bubble-msg-wrap ${m.role} ${m.showCards ? "wide" : ""}`}>
+                  {m.showCards && m.legs ? (
+                    <FlightCards legs={m.legs} />
+                  ) : (
+                    <div className={`chat-bubble-msg ${m.role}`}>{m.text}</div>
+                  )}
                   {m.hasResults && (
                     <div className="chat-bubble-msg-actions">
                       <button onClick={() => copyMessage(m)}>
                         {copiedId === m.id ? "✓ Copied" : "📋 Copy"}
                       </button>
                       <button onClick={() => shareToWhatsApp(m.text)}>Share to WhatsApp</button>
+                      <button onClick={() => toggleCards(m.id)}>{m.showCards ? "View Text" : "View Cards"}</button>
                     </div>
                   )}
                 </div>
