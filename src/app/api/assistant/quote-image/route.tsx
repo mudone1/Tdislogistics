@@ -30,12 +30,21 @@ interface QuoteImagePayload {
   generatedAt: string;
 }
 
+// "NGN", not the ₦ glyph — satori's default font used by ImageResponse
+// doesn't include the Naira currency character, rendering it as a
+// missing-glyph box. Real browsers render ₦ fine, so the in-app card
+// (FlightCards.tsx) keeps the symbol; this is only for the exported image.
 function formatNaira(amount: number): string {
-  return `₦${amount.toLocaleString()}`;
+  return `NGN ${amount.toLocaleString()}`;
 }
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function availabilityText(row: QuoteRow): string {
+  if (row.seatsLeft != null) return `${row.seatsLeft} seat${row.seatsLeft === 1 ? "" : "s"} left`;
+  return row.fare != null ? "Available" : "Sold out";
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -54,10 +63,15 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
   const body = (await req.json()) as QuoteImagePayload;
   const legs = body.legs ?? [];
   const generatedAt = body.generatedAt || new Date().toISOString();
+  const logo = `${req.nextUrl.origin}/icons/icon-192.png`;
 
   const estimatedHeight = 230 + legs.reduce((sum, leg) => sum + 80 + leg.rows.length * 110, 0) + 80;
   const height = Math.max(700, Math.min(2400, estimatedHeight));
 
+  // Every <div> below sets an explicit `display` — satori (the renderer
+  // behind next/og's ImageResponse) throws if a multi-child <div> lacks
+  // one, and it's simplest to just always declare it rather than track
+  // which nodes happen to have more than one child.
   return new ImageResponse(
     (
       <div
@@ -81,25 +95,11 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
             marginBottom: 32,
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 64,
-              height: 64,
-              borderRadius: 14,
-              background: NAVY,
-              color: "#ffffff",
-              fontSize: 22,
-              fontWeight: 800,
-            }}
-          >
-            TL
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={logo} alt="TDIS Logistics" width={64} height={64} style={{ objectFit: "contain", borderRadius: 12 }} />
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: 32, fontWeight: 800, color: NAVY }}>TDIS Flight Quote</div>
-            <div style={{ fontSize: 18, color: GRAY }}>Generated {formatDateTime(generatedAt)}</div>
+            <div style={{ display: "flex", fontSize: 32, fontWeight: 800, color: NAVY }}>TDIS Flight Quote</div>
+            <div style={{ display: "flex", fontSize: 18, color: GRAY }}>{`Generated ${formatDateTime(generatedAt)}`}</div>
           </div>
         </div>
 
@@ -109,6 +109,7 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
               {leg.label ? (
                 <div
                   style={{
+                    display: "flex",
                     fontSize: 16,
                     fontWeight: 700,
                     color: "#ffffff",
@@ -120,10 +121,10 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
                   {leg.label}
                 </div>
               ) : null}
-              <div style={{ fontSize: 26, fontWeight: 700, color: NAVY }}>
-                {leg.origin} → {leg.destination}
+              <div style={{ display: "flex", fontSize: 26, fontWeight: 700, color: NAVY }}>
+                {`${leg.origin} → ${leg.destination}`}
               </div>
-              <div style={{ fontSize: 18, color: GRAY }}>{leg.date}</div>
+              <div style={{ display: "flex", fontSize: 18, color: GRAY }}>{leg.date}</div>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -140,10 +141,11 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
                   }}
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div style={{ fontSize: 22, fontWeight: 700, color: NAVY }}>{row.airline}</div>
+                    <div style={{ display: "flex", fontSize: 22, fontWeight: 700, color: NAVY }}>{row.airline}</div>
                     <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                       <div
                         style={{
+                          display: "flex",
                           fontSize: 14,
                           fontWeight: 600,
                           color: NAVY,
@@ -154,21 +156,15 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
                       >
                         {row.cabin}
                       </div>
-                      <div style={{ fontSize: 26, fontWeight: 800, color: NAVY }}>
+                      <div style={{ display: "flex", fontSize: 26, fontWeight: 800, color: NAVY }}>
                         {row.fare != null ? formatNaira(row.fare) : row.seatStatus ?? "Unavailable"}
                       </div>
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 28, marginTop: 12, fontSize: 15, color: GRAY }}>
-                    <div>{row.baggage ?? "Baggage info unavailable"}</div>
-                    <div>{row.refundPolicy ?? "Fare condition unavailable"}</div>
-                    <div>
-                      {row.seatsLeft != null
-                        ? `${row.seatsLeft} seat${row.seatsLeft === 1 ? "" : "s"} left`
-                        : row.fare != null
-                          ? "Available"
-                          : "Sold out"}
-                    </div>
+                    <div style={{ display: "flex" }}>{row.baggage ?? "Baggage info unavailable"}</div>
+                    <div style={{ display: "flex" }}>{row.refundPolicy ?? "Fare condition unavailable"}</div>
+                    <div style={{ display: "flex" }}>{availabilityText(row)}</div>
                   </div>
                 </div>
               ))}
@@ -178,6 +174,7 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
 
         <div
           style={{
+            display: "flex",
             marginTop: "auto",
             fontSize: 15,
             color: GRAY,
