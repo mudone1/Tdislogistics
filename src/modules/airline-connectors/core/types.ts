@@ -2,13 +2,22 @@
 // Kept framework-agnostic of Prisma's generated types so `core`/`interfaces`
 // don't need to import the Prisma client — only `storage` does.
 
-export type AirlineKey = "AIRPEACE" | "AERO" | "ARIK" | "IBOM" | "NGEAGLE" | "ENUGU";
+export type AirlineKey =
+  | "AIRPEACE"
+  | "AERO"
+  | "ARIK"
+  | "IBOM"
+  | "NGEAGLE"
+  | "ENUGU"
+  | "UNITED"
+  | "RANO"
+  | "XEJET";
 
-// Category B airlines (United, Rano, XEJet) are still NOT part of
-// AirlineKey — see connectors/README.md. ENUGU is the first Category B
-// airline implemented (its own connector, extending BaseConnector
-// directly rather than BaseCraneConnector — a different platform
-// entirely: a VARS/Videcom ASP.NET WebForms agent portal, not Crane).
+// Category B airlines (Enugu, United, Rano, XeJet) all share one
+// platform — a VARS/Videcom ASP.NET WebForms agent portal, a different
+// system entirely from the Crane airlines above — and so share one
+// connector base (connectors/vars/BaseVarsConnector.ts) rather than
+// BaseCraneConnector. See connectors/README.md.
 
 export type SyncStatus = "SUCCESS" | "FAILED" | "IN_PROGRESS" | "PENDING";
 export type SyncTrigger = "MANUAL" | "SCHEDULED";

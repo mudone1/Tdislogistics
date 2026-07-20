@@ -29,8 +29,8 @@ enum AirlineKey {
   ARIK
   IBOM
   NGEAGLE
-  // Category B — still reserved for Phase 2, not implemented yet, except
-  // ENUGU below (see connectors/enugu/EnuguConnector.ts).
+  // Category B — all four now implemented on the shared VARS/Videcom
+  // connector base (see connectors/vars/BaseVarsConnector.ts).
   UNITED
   RANO
   ENUGU
