@@ -5,6 +5,7 @@ import type { ChangeEvent, KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon } from "@/lib/icon-map";
 import { authHelper } from "@/lib/firebase";
+import { useNotifications } from "@/lib/notifications";
 import FlightCards, { type FlightLeg } from "./FlightCards";
 
 interface ChatMessage {
@@ -56,12 +57,24 @@ export default function ChatBubble() {
   const [pending, setPending] = useState<PendingRoundTrip | null>(null);
   const [identity, setIdentity] = useState<ChatIdentity | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [scrollToId, setScrollToId] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const greeted = useRef(false);
+  const { addNotification } = useNotifications();
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, open]);
+
+  // Jump to a specific result when opened from a notification click — the
+  // target message needs to actually be in the DOM first, which only
+  // happens once `open` flips true and this panel mounts.
+  useEffect(() => {
+    if (!open || scrollToId == null) return;
+    const el = document.getElementById(`chat-msg-${scrollToId}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setScrollToId(null);
+  }, [open, scrollToId]);
 
   // Resolve who's chatting (logged-in Firebase user, or a stable anonymous
   // id) so the assistant can remember this session and greet accordingly.
@@ -122,11 +135,20 @@ export default function ChatBubble() {
       if (data.result) legs.push({ label: "", result: data.result });
       const hasResults = legs.some((l) => l.result.options.length > 0);
 
+      const newId = idCounter++;
       setMessages((m: ChatMessage[]) => [
         ...m,
-        { id: idCounter++, role: "assistant", text: data.reply || "No response.", hasResults, legs },
+        { id: newId, role: "assistant", text: data.reply || "No response.", hasResults, legs },
       ]);
       setPending(data.pending ?? null);
+
+      if (hasResults) {
+        const q = legs[0].result.query;
+        addNotification("Flight search completed", `${q.origin} → ${q.destination} results are ready`, () => {
+          setOpen(true);
+          setScrollToId(newId);
+        });
+      }
     } catch (err) {
       console.error("[assistant] request threw:", err);
       setMessages((m: ChatMessage[]) => [
@@ -201,7 +223,7 @@ export default function ChatBubble() {
 
             <div className="chat-bubble-messages" ref={scrollRef}>
               {messages.map((m: ChatMessage) => (
-                <div key={m.id} className={`chat-bubble-msg-wrap ${m.role} ${m.showCards ? "wide" : ""}`}>
+                <div id={`chat-msg-${m.id}`} key={m.id} className={`chat-bubble-msg-wrap ${m.role} ${m.showCards ? "wide" : ""}`}>
                   {m.showCards && m.legs ? (
                     <FlightCards legs={m.legs} />
                   ) : (

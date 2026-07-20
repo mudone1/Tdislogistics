@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter, Inter_Tight } from "next/font/google";
 import "./globals.css";
 import { AppProvider } from "@/lib/store";
+import { NotificationProvider } from "@/lib/notifications";
 import ServiceWorkerRegister from "@/components/layout/ServiceWorkerRegister";
 
 const inter = Inter({
@@ -55,7 +56,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${inter.variable} ${interTight.variable}`}>
       <body>
         <ServiceWorkerRegister />
-        <AppProvider>{children}</AppProvider>
+        <NotificationProvider>
+          <AppProvider>{children}</AppProvider>
+        </NotificationProvider>
       </body>
     </html>
   );

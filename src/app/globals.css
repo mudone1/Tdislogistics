@@ -157,6 +157,72 @@ header.app-header {
 }
 .clock { color: rgba(255,255,255,0.6); font-size: 13px; font-variant-numeric: tabular-nums; }
 
+.notif-bell-wrap { position: relative; }
+.notif-bell-btn {
+  position: relative;
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 50%;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.notif-bell-btn:hover { background: rgba(255,255,255,0.18); }
+.notif-badge {
+  position: absolute;
+  top: -3px; right: -3px;
+  min-width: 16px; height: 16px;
+  padding: 0 3px;
+  background: #c0392b;
+  color: white;
+  font-size: 9.5px;
+  font-weight: 700;
+  border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--navy-dark);
+}
+.notif-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 300px;
+  max-height: 380px;
+  overflow-y: auto;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+  z-index: 200;
+}
+.notif-dropdown-header {
+  padding: 12px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--navy);
+  border-bottom: 1px solid var(--gray-100);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.notif-empty { padding: 24px 14px; text-align: center; font-size: 12.5px; color: var(--gray-400); }
+.notif-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--gray-100);
+  background: white;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: var(--off-white); }
+.notif-item.unread { background: #eff6ff; }
+.notif-item-title { font-size: 12.5px; font-weight: 700; color: var(--gray-600); }
+.notif-item-body { font-size: 11.5px; color: var(--gray-400); margin-top: 2px; }
+.notif-item-time { font-size: 10px; color: var(--gray-400); margin-top: 4px; }
+
 /* ─── LOGIN PAGE ─── */
 .login-overlay {
   position: fixed; inset: 0;
