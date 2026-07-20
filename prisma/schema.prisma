@@ -121,3 +121,46 @@ model AirlineSyncLog {
   @@index([airline, runId])
   @@map("airline_sync_logs")
 }
+
+// ─── AI Travel Assistant (chat bubble) ───
+// One row per distinct chat session — keyed either by the Firebase auth
+// uid (logged-in users) or a browser-generated anonymous id persisted in
+// localStorage (guest/demo users). `slots` holds the short-term memory the
+// conversation orchestrator fills in turn by turn (origin, destination,
+// date, pax, etc.) so the assistant only asks for what's still missing.
+model ChatSession {
+  id           String   @id @default(cuid())
+  sessionKey   String   @unique
+  displayName  String?
+  isAuthenticated Boolean @default(false)
+  slots        Json?
+  firstSeenAt  DateTime @default(now())
+  lastSeenAt   DateTime @updatedAt
+
+  messages ChatMessage[]
+
+  @@map("chat_sessions")
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
+// Append-only turn log. `intent`/`entities` are populated only when the
+// LLM path ran (see ConversationOrchestrator) — null on the deterministic
+// fallback path used when GROQ_API_KEY isn't configured.
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      ChatRole
+  text      String
+  intent    String?
+  entities  Json?
+  createdAt DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId, createdAt])
+  @@map("chat_messages")
+}
