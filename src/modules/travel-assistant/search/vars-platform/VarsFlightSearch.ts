@@ -106,11 +106,28 @@ export async function searchVarsPlatformFlights(
     // eating the full 15s timeout on every single search, across every
     // airline sharing this module. Confirmed via real timing logs: this
     // one line was ~60% of total search time.
-    await page
+    const destinationFound = await page
       .locator("#Destination")
       .locator(`option[value="${query.destination}"]`)
-      .waitFor({ state: "attached", timeout: 15000 })
-      .catch(() => {});
+      .waitFor({ state: "attached", timeout: 8000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (!destinationFound) {
+      // Fail fast and clearly instead of calling selectOption() on a value
+      // that will never exist — Playwright's own internal actionability
+      // retry for that blindly burns its full default 30s timeout before
+      // giving up. Confirmed on real traffic: XeJet only flies LOS<->ABV,
+      // so a KAN destination request took 46s to fail with an opaque
+      // Playwright timeout instead of ~8s with a clear "not offered" error.
+      const availableDestinations = await page
+        .locator("#Destination option")
+        .evaluateAll((opts) => opts.map((o) => (o as HTMLOptionElement).value).filter(Boolean));
+      throw new Error(
+        `${airlineLabel} doesn't fly ${query.origin} to ${query.destination} (destinations offered from ${query.origin}: ${availableDestinations.join(", ") || "none"})`
+      );
+    }
+
     console.log(`[${logTag}] selecting destination: ${query.destination}`);
     await page.locator("#Destination").selectOption(query.destination);
 
