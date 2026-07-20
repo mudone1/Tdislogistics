@@ -57,8 +57,10 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
   // Fetched over HTTP (same origin) rather than read from the filesystem —
   // `public/` isn't reliably included in the serverless function's file
   // trace for a dynamically-joined path, which was causing this route to
-  // 500 on Vercel (readFile silently failing at runtime).
-  const logo = `${req.nextUrl.origin}/images/Tdis_logo.jpeg`;
+  // 500 on Vercel (readFile silently failing at runtime). PNG (the PWA
+  // icon), not the JPEG logo — satori's image decoder produced an empty
+  // stream on the JPEG source, PNG renders correctly.
+  const logo = `${req.nextUrl.origin}/icons/icon-192.png`;
 
   const estimatedHeight = 230 + legs.reduce((sum, leg) => sum + 80 + leg.rows.length * 110, 0) + 80;
   const height = Math.max(700, Math.min(2400, estimatedHeight));
@@ -87,7 +89,7 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={logo} alt="TDIS Logistics" width={110} height={57} style={{ objectFit: "contain" }} />
+          <img src={logo} alt="TDIS Logistics" width={64} height={64} style={{ objectFit: "contain", borderRadius: 12 }} />
           <div style={{ display: "flex", flexDirection: "column" }}>
             <div style={{ fontSize: 32, fontWeight: 800, color: NAVY }}>TDIS Flight Quote</div>
             <div style={{ fontSize: 18, color: GRAY }}>Generated {formatDateTime(generatedAt)}</div>
