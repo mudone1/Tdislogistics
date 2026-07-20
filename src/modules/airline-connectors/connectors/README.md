@@ -1,8 +1,11 @@
 # Adding a new connector (Phase 2 — Category B)
 
-Category B airlines (United, Rano, Enugu Air, XEJet) are **not implemented**
-in Phase 1 — they use different booking platforms with different login and
-navigation flows, so they don't fit `BaseCraneConnector`.
+Category B airlines (United, Rano, XEJet) are still **not implemented** —
+they use different booking platforms with different login and navigation
+flows, so they don't fit `BaseCraneConnector`. **Enugu Air is now
+implemented** (see `connectors/enugu/EnuguConnector.ts`) as the first
+Category B connector — a real, working example of the pattern below,
+built against a VARS/Videcom ASP.NET WebForms agent portal (not Crane).
 
 To add one later, **without changing any existing file**:
 
