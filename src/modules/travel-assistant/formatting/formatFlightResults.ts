@@ -69,6 +69,28 @@ export function cheapestFareClassName(option: FlightOption): string | null {
   return cheapest.name;
 }
 
+// Same selection as cheapestFareClassName, but returns the full fare-class
+// record — baggage/refund policy live there, not on FlightOption itself.
+export function cheapestFareClass(option: FlightOption): FareClassOption | null {
+  const available = option.fareClasses.filter((c) => !c.soldOut && c.fare != null);
+  if (available.length === 0) return null;
+  return available.reduce((min, c) => ((c.fare as number) < (min.fare as number) ? c : min));
+}
+
+// One row per airline — its cheapest available flight on the leg. Shared by
+// the in-chat comparison card and the shareable quote image so both show
+// the same set of flights.
+export function cheapestPerAirline(options: FlightOption[]): FlightOption[] {
+  const byAirline = new Map<string, FlightOption[]>();
+  for (const o of options) {
+    if (!byAirline.has(o.airline)) byAirline.set(o.airline, []);
+    byAirline.get(o.airline)!.push(o);
+  }
+  return Array.from(byAirline.values())
+    .map((opts) => [...opts].sort((a, b) => (a.fare ?? Infinity) - (b.fare ?? Infinity))[0])
+    .sort((a, b) => (a.fare ?? Infinity) - (b.fare ?? Infinity));
+}
+
 // Fare class names vary a lot in the raw data ("Economy Promo", "Economy
 // Saver", "Premium Economy Flex", "Business Flex", ...) — collapse to the
 // three short labels the default view is allowed to show.

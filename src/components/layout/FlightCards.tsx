@@ -1,15 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import Image from "next/image";
 import { AIRLINE_LOGO_MAP, AIRLINES } from "@/lib/constants";
 import {
   formatNaira,
   formatTime12h,
   shortCabinClass,
   cheapestFareClassName,
-  formatSingleFlight,
+  cheapestFareClass,
+  cheapestPerAirline,
 } from "@/modules/travel-assistant/formatting/formatFlightResults";
-import type { FlightOption, FlightSearchResult } from "@/modules/travel-assistant/core/types";
+import type { FlightSearchResult } from "@/modules/travel-assistant/core/types";
 
 export interface FlightLeg {
   label: string;
@@ -30,76 +31,101 @@ function logoFor(airlineName: string): string | null {
   return match ? AIRLINE_LOGO_MAP[match.code] ?? null : null;
 }
 
-export default function FlightCards({ legs }: { legs: FlightLeg[] }) {
-  return (
-    <div className="flight-cards">
-      {legs.map((leg, i) => (
-        <div key={i} className="flight-cards-leg">
-          {leg.label && <div className="flight-cards-leg-label">{leg.label}</div>}
-          <div className="flight-cards-grid">
-            {leg.result.options.map((option, j) => (
-              <FlightCard key={j} option={option} leg={leg} />
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+// Fares aren't held/guaranteed — flag the quote as time-bound rather than
+// implying it's a locked-in price.
+const VALIDITY_HOURS = 24;
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" });
 }
 
-function FlightCard({ option, leg }: { option: FlightOption; leg: FlightLeg }) {
-  const [copied, setCopied] = useState(false);
-  const logo = logoFor(option.airline);
-  const cabin = shortCabinClass(cheapestFareClassName(option));
+function formatValidUntil(searchedAt: string): string {
+  return formatDateTime(new Date(new Date(searchedAt).getTime() + VALIDITY_HOURS * 60 * 60 * 1000).toISOString());
+}
 
-  async function copyCard(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(
-        formatSingleFlight(option, leg.result.query.origin, leg.result.query.destination, leg.result.query.date)
-      );
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch (err) {
-      console.error("[assistant] card copy failed:", err);
-    }
-  }
-
-  function shareCard(): void {
-    const text = formatSingleFlight(option, leg.result.query.origin, leg.result.query.destination, leg.result.query.date);
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
-  }
+export default function FlightCards({ legs }: { legs: FlightLeg[] }) {
+  const generatedAt = legs[0]?.result.searchedAt ?? new Date().toISOString();
 
   return (
-    <div className="flight-card">
-      <div className="flight-card-header">
-        {logo ? (
-          // Airline logos are third-party brand marks — kept as plain <img>,
-          // matching AirlinesSection.tsx's convention (small static SVGs
-          // don't need next/image's optimizer).
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={logo} alt={option.airline} className="flight-card-logo" />
-        ) : (
-          <div className="flight-card-logo flight-card-logo-fallback">{option.airline.slice(0, 2).toUpperCase()}</div>
-        )}
-        <span className="flight-card-airline">{option.airline}</span>
+    <div className="quote-card">
+      <div className="quote-card-header">
+        <Image
+          src="/images/Tdis_logo.jpeg"
+          alt="TDIS Logistics"
+          width={72}
+          height={37}
+          className="quote-card-logo"
+        />
+        <div className="quote-card-header-text">
+          <div className="quote-card-title">Flight Quote</div>
+          <div className="quote-card-generated">Generated {formatDateTime(generatedAt)}</div>
+        </div>
       </div>
 
-      <div className="flight-card-route">
-        {leg.result.query.origin} → {leg.result.query.destination}
-      </div>
+      {legs.map((leg, i) => (
+        <div key={i} className="quote-card-leg">
+          <div className="quote-card-route-row">
+            {leg.label && <span className="quote-card-leg-label">{leg.label}</span>}
+            <span className="quote-card-route">
+              {leg.result.query.origin} → {leg.result.query.destination}
+            </span>
+            <span className="quote-card-date">{leg.result.query.date}</span>
+          </div>
 
-      <div className="flight-card-body">
-        <span className="flight-card-time">{formatTime12h(option.departureTime)}</span>
-        <span className="flight-card-cabin">{cabin}</span>
-      </div>
+          {leg.result.options.length === 0 ? (
+            <div className="quote-card-empty">No flights found for this leg</div>
+          ) : (
+            <div className="quote-card-rows">
+              {cheapestPerAirline(leg.result.options).map((option, j) => {
+                const logo = logoFor(option.airline);
+                const fareClass = cheapestFareClass(option);
+                return (
+                  <div key={j} className="quote-card-row">
+                    <div className="quote-card-row-airline">
+                      {logo ? (
+                        // Airline logos are third-party brand marks, kept as
+                        // plain <img> like AirlinesSection.tsx's convention.
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={logo} alt={option.airline} className="quote-card-row-logo" />
+                      ) : (
+                        <div className="quote-card-row-logo quote-card-row-logo-fallback">
+                          {option.airline.slice(0, 2).toUpperCase()}
+                        </div>
+                      )}
+                      <div>
+                        <div className="quote-card-row-airline-name">{option.airline}</div>
+                        <div className="quote-card-row-time">{formatTime12h(option.departureTime)}</div>
+                      </div>
+                    </div>
 
-      <div className="flight-card-price">
-        {option.fare != null ? formatNaira(option.fare) : option.seatStatus ?? "unavailable"}
-      </div>
+                    <div className="quote-card-row-fare">
+                      <span className="quote-card-row-price">
+                        {option.fare != null ? formatNaira(option.fare) : option.seatStatus ?? "Unavailable"}
+                      </span>
+                      <span className="quote-card-row-cabin">{shortCabinClass(cheapestFareClassName(option))}</span>
+                    </div>
 
-      <div className="flight-card-actions">
-        <button onClick={copyCard}>{copied ? "✓ Copied" : "📋 Copy"}</button>
-        <button onClick={shareCard}>Share to WhatsApp</button>
+                    <div className="quote-card-row-details">
+                      <span>{fareClass?.baggage ?? "Baggage info unavailable"}</span>
+                      <span>{fareClass?.refundPolicy ?? "Fare condition unavailable"}</span>
+                      <span>
+                        {fareClass?.seatsLeft != null
+                          ? `${fareClass.seatsLeft} seat${fareClass.seatsLeft === 1 ? "" : "s"} left`
+                          : option.fare != null
+                            ? "Available"
+                            : "Sold out"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ))}
+
+      <div className="quote-card-footer">
+        Quote valid until {formatValidUntil(generatedAt)} — fares subject to change without notice.
       </div>
     </div>
   );

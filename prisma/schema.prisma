@@ -137,8 +137,9 @@ model ChatSession {
   firstSeenAt  DateTime @default(now())
   lastSeenAt   DateTime @updatedAt
 
-  messages ChatMessage[]
-  searches FlightSearchRecord[]
+  messages      ChatMessage[]
+  searches      FlightSearchRecord[]
+  notifications AppNotification[]
 
   @@map("chat_sessions")
 }
@@ -188,4 +189,24 @@ model FlightSearchRecord {
 
   @@index([sessionId, createdAt])
   @@map("flight_search_records")
+}
+
+// In-app notification center. One row per event worth surfacing to the
+// user (quote generated, search saved, system alert). Persisted (not just
+// client-side state) so notifications survive reloads/new tabs and can be
+// polled from any device signed into the same session.
+model AppNotification {
+  id        String   @id @default(cuid())
+  sessionId String
+  kind      String // QUOTE_GENERATED | SYSTEM_ALERT
+  title     String
+  body      String
+  link      Json? // arbitrary click-through payload (e.g. { referenceId })
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId, createdAt])
+  @@map("app_notifications")
 }

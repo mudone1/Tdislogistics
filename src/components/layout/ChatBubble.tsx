@@ -1,12 +1,19 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { ChangeEvent, KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Icon } from "@/lib/icon-map";
 import { authHelper } from "@/lib/firebase";
-import { useNotifications } from "@/lib/notifications";
-import { formatLeg, formatRouteHeader } from "@/modules/travel-assistant/formatting/formatFlightResults";
+import { useNotifications, OPEN_REFERENCE_EVENT } from "@/lib/notifications";
+import {
+  formatLeg,
+  formatRouteHeader,
+  cheapestPerAirline,
+  cheapestFareClass,
+  cheapestFareClassName,
+  shortCabinClass,
+} from "@/modules/travel-assistant/formatting/formatFlightResults";
 import FlightCards, { type FlightLeg } from "./FlightCards";
 
 interface ChatMessage {
@@ -68,27 +75,16 @@ export default function ChatBubble() {
   const [pending, setPending] = useState<PendingRoundTrip | null>(null);
   const [identity, setIdentity] = useState<ChatIdentity | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
-  const [scrollToId, setScrollToId] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState<boolean>(false);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const greeted = useRef(false);
-  const { addNotification } = useNotifications();
+  const { setSessionKey, refresh } = useNotifications();
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, open]);
-
-  // Jump to a specific result when opened from a notification click — the
-  // target message needs to actually be in the DOM first, which only
-  // happens once `open` flips true and this panel mounts.
-  useEffect(() => {
-    if (!open || scrollToId == null) return;
-    const el = document.getElementById(`chat-msg-${scrollToId}`);
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
-    setScrollToId(null);
-  }, [open, scrollToId]);
 
   // Resolve who's chatting (logged-in Firebase user, or a stable anonymous
   // id) so the assistant can remember this session and greet accordingly.
@@ -102,6 +98,87 @@ export default function ChatBubble() {
     });
     return unsubscribe;
   }, []);
+
+  useEffect(() => {
+    if (identity) setSessionKey(identity.sessionKey);
+  }, [identity, setSessionKey]);
+
+  const sendMessage = useCallback(
+    async (text: string): Promise<void> => {
+      if (!text || sending) return;
+
+      setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
+      setSending(true);
+
+      try {
+        const res = await fetch("/api/assistant/quote", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message: text, pending, ...identity }),
+        });
+
+        if (!res.ok) {
+          console.error(`[assistant] request failed: HTTP ${res.status}`);
+          setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: describeHttpError(res.status) }]);
+          setPending(null);
+          return;
+        }
+
+        const data = await res.json();
+        const legs: FlightLeg[] = [];
+        if (data.outbound) legs.push({ label: "Outbound", result: data.outbound });
+        if (data.return) legs.push({ label: "Return", result: data.return });
+        if (data.result) legs.push({ label: "", result: data.result });
+        const hasResults = legs.some((l) => l.result.options.length > 0);
+
+        setMessages((m: ChatMessage[]) => [
+          ...m,
+          { id: idCounter++, role: "assistant", text: data.reply || "No response.", hasResults, legs },
+        ]);
+        setPending(data.pending ?? null);
+
+        // The notification itself is created server-side (durable, survives
+        // reload); eagerly re-poll here just so the bell updates within a
+        // second instead of waiting out the regular poll interval.
+        if (hasResults) refresh();
+      } catch (err) {
+        console.error("[assistant] request threw:", err);
+        setMessages((m: ChatMessage[]) => [
+          ...m,
+          {
+            id: idCounter++,
+            role: "assistant",
+            text: "Couldn't reach the search service — check your connection and try again.",
+          },
+        ]);
+        setPending(null);
+      } finally {
+        setSending(false);
+      }
+    },
+    [sending, pending, identity, refresh]
+  );
+
+  function send(): void {
+    const text = input.trim();
+    if (!text) return;
+    setInput("");
+    sendMessage(text);
+  }
+
+  // A notification bell click for a saved search dispatches this with the
+  // reference ID — reuse the existing bare-reference-ID lookup shortcut
+  // the orchestrator already supports rather than duplicating that logic.
+  useEffect(() => {
+    function onOpenReference(e: Event) {
+      const referenceId = (e as CustomEvent<string>).detail;
+      if (!referenceId) return;
+      setOpen(true);
+      sendMessage(referenceId);
+    }
+    window.addEventListener(OPEN_REFERENCE_EVENT, onOpenReference);
+    return () => window.removeEventListener(OPEN_REFERENCE_EVENT, onOpenReference);
+  }, [sendMessage]);
 
   useEffect(() => {
     if (!identity || greeted.current) return;
@@ -120,65 +197,6 @@ export default function ChatBubble() {
       });
   }, [identity]);
 
-  async function send(): Promise<void> {
-    const text = input.trim();
-    if (!text || sending) return;
-
-    setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
-    setInput("");
-    setSending(true);
-
-    try {
-      const res = await fetch("/api/assistant/quote", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: text, pending, ...identity }),
-      });
-
-      if (!res.ok) {
-        console.error(`[assistant] request failed: HTTP ${res.status}`);
-        setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: describeHttpError(res.status) }]);
-        setPending(null);
-        return;
-      }
-
-      const data = await res.json();
-      const legs: FlightLeg[] = [];
-      if (data.outbound) legs.push({ label: "Outbound", result: data.outbound });
-      if (data.return) legs.push({ label: "Return", result: data.return });
-      if (data.result) legs.push({ label: "", result: data.result });
-      const hasResults = legs.some((l) => l.result.options.length > 0);
-
-      const newId = idCounter++;
-      setMessages((m: ChatMessage[]) => [
-        ...m,
-        { id: newId, role: "assistant", text: data.reply || "No response.", hasResults, legs },
-      ]);
-      setPending(data.pending ?? null);
-
-      if (hasResults) {
-        const q = legs[0].result.query;
-        addNotification("Flight search completed", `${q.origin} → ${q.destination} results are ready`, () => {
-          setOpen(true);
-          setScrollToId(newId);
-        });
-      }
-    } catch (err) {
-      console.error("[assistant] request threw:", err);
-      setMessages((m: ChatMessage[]) => [
-        ...m,
-        {
-          id: idCounter++,
-          role: "assistant",
-          text: "Couldn't reach the search service — check your connection and try again.",
-        },
-      ]);
-      setPending(null);
-    } finally {
-      setSending(false);
-    }
-  }
-
   async function copyMessage(m: ChatMessage): Promise<void> {
     try {
       await navigator.clipboard.writeText(m.text);
@@ -189,8 +207,68 @@ export default function ChatBubble() {
     }
   }
 
-  function shareToWhatsApp(text: string): void {
+  function shareTextToWhatsApp(text: string): void {
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+  }
+
+  async function shareToWhatsApp(m: ChatMessage): Promise<void> {
+    if (!m.legs || m.legs.length === 0) {
+      shareTextToWhatsApp(m.text);
+      return;
+    }
+
+    try {
+      const generatedAt = m.legs[0]?.result.searchedAt ?? new Date().toISOString();
+      const payload = {
+        generatedAt,
+        legs: m.legs.map((leg) => ({
+          label: leg.label,
+          origin: leg.result.query.origin,
+          destination: leg.result.query.destination,
+          date: leg.result.query.date,
+          rows: cheapestPerAirline(leg.result.options).map((option) => {
+            const fareClass = cheapestFareClass(option);
+            return {
+              airline: option.airline,
+              fare: option.fare,
+              seatStatus: option.seatStatus,
+              cabin: shortCabinClass(cheapestFareClassName(option)),
+              baggage: fareClass?.baggage ?? null,
+              refundPolicy: fareClass?.refundPolicy ?? null,
+              seatsLeft: fareClass?.seatsLeft ?? null,
+            };
+          }),
+        })),
+      };
+
+      const res = await fetch("/api/assistant/quote-image", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const file = new File([blob], "tdis-flight-quote.png", { type: "image/png" });
+
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: "TDIS Flight Quote" });
+        return;
+      }
+
+      // Desktop browsers mostly can't share files this way, and there's no
+      // URL-scheme way to pre-attach an image to wa.me — download the
+      // image and open WhatsApp Web so the user can attach it manually.
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "tdis-flight-quote.png";
+      a.click();
+      URL.revokeObjectURL(url);
+      window.open("https://wa.me/", "_blank", "noopener,noreferrer");
+    } catch (err) {
+      console.error("[assistant] WhatsApp image share failed:", err);
+      shareTextToWhatsApp(m.text);
+    }
   }
 
   function toggleCards(id: number): void {
@@ -302,8 +380,8 @@ export default function ChatBubble() {
                       <button onClick={() => copyMessage(m)}>
                         {copiedId === m.id ? "✓ Copied" : "📋 Copy"}
                       </button>
-                      <button onClick={() => shareToWhatsApp(m.text)}>Share to WhatsApp</button>
-                      <button onClick={() => toggleCards(m.id)}>{m.showCards ? "View Text" : "View Cards"}</button>
+                      <button onClick={() => shareToWhatsApp(m)}>Share to WhatsApp</button>
+                      <button onClick={() => toggleCards(m.id)}>{m.showCards ? "View Text" : "View Quote"}</button>
                     </div>
                   )}
                 </div>

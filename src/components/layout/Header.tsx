@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useApp } from "@/lib/store";
-import { useNotifications, requestNotificationPermission } from "@/lib/notifications";
+import { useNotifications, requestNotificationPermission, OPEN_REFERENCE_EVENT } from "@/lib/notifications";
 import { getRoleLabel } from "@/lib/constants";
 import { initials } from "@/lib/utils";
 
@@ -79,7 +79,10 @@ export default function Header() {
                     onClick={() => {
                       markRead(n.id);
                       setBellOpen(false);
-                      n.onClick?.();
+                      const referenceId = n.link?.referenceId ?? n.link?.referenceIds?.[0];
+                      if (referenceId) {
+                        window.dispatchEvent(new CustomEvent(OPEN_REFERENCE_EVENT, { detail: referenceId }));
+                      }
                     }}
                   >
                     <div className="notif-item-title">{n.title}</div>

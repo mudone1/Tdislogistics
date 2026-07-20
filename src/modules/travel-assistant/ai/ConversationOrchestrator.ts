@@ -2,6 +2,7 @@ import { groqJsonCompletion, type GroqMessage } from "./groqClient";
 import { SYSTEM_PROMPT } from "./systemPrompt";
 import { ChatMemoryRepository } from "../storage/ChatMemoryRepository";
 import { FlightSearchHistoryRepository } from "../storage/FlightSearchHistoryRepository";
+import { NotificationRepository } from "../storage/NotificationRepository";
 import { formatLeg, formatRouteHeader } from "../formatting/formatFlightResults";
 import type {
   AssistantTurn,
@@ -137,6 +138,11 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
 
   const airlines = airlinesToQuery(slots.airline);
   const searchStartedAt = Date.now();
+  // Unscoped searches (no airline named, or an explicit "cheapest" ask)
+  // query every carrier and take longest — the LLM's own lead-in tends to
+  // be chattier than needed here, and per spec this exact request wants
+  // nothing more than a plain "still working" line until results land.
+  const leadIn = slots.airline ? turn.reply : "Let me check that for you.";
 
   try {
     if (slots.isRoundTrip) {
@@ -172,12 +178,20 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
       ]);
 
       const reply =
-        `${turn.reply}\n\n` +
+        `${leadIn}\n\n` +
         `Outbound — ${formatRouteHeader(slots.origin!, slots.destination!, slots.date!)}\n${formatLeg(outbound)}` +
         (outboundRecord ? `\nRef: ${outboundRecord.referenceId}` : "") +
         `\n\n` +
         `Return — ${formatRouteHeader(slots.destination!, slots.origin!, slots.returnDate!)}\n${formatLeg(back)}` +
         (backRecord ? `\nRef: ${backRecord.referenceId}` : "");
+
+      await NotificationRepository.create(
+        session.id,
+        "QUOTE_GENERATED",
+        "Flight quote ready",
+        `${slots.origin} ⇄ ${slots.destination} round-trip results are ready`,
+        { referenceIds: [outboundRecord?.referenceId, backRecord?.referenceId].filter(Boolean) }
+      );
 
       resetRouteSlots(slots);
       await ChatMemoryRepository.updateSlots(session.id, slots);
@@ -199,7 +213,14 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     }
 
     const record = await FlightSearchHistoryRepository.saveSearch(session.id, data, airlines);
-    const reply = `${turn.reply}\n\n${formatRouteHeader(slots.origin!, slots.destination!, slots.date!)}\n${formatLeg(data)}\nRef: ${record.referenceId}`;
+    const reply = `${leadIn}\n\n${formatRouteHeader(slots.origin!, slots.destination!, slots.date!)}\n${formatLeg(data)}\nRef: ${record.referenceId}`;
+    await NotificationRepository.create(
+      session.id,
+      "QUOTE_GENERATED",
+      "Flight quote ready",
+      `${slots.origin} → ${slots.destination} results are ready`,
+      { referenceId: record.referenceId }
+    );
     resetRouteSlots(slots);
     await ChatMemoryRepository.updateSlots(session.id, slots);
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
