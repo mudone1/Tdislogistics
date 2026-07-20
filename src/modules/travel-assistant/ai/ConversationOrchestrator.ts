@@ -109,7 +109,7 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     return { reply: turn.reply };
   }
 
-  mergeEntitiesIntoSlots(slots, turn);
+  mergeEntitiesIntoSlots(slots, turn, input.message);
   if (turn.intent === "FLIGHT_SEARCH_ROUND_TRIP") slots.isRoundTrip = true;
 
   const required = [...REQUIRED_SEARCH_SLOTS, ...(slots.isRoundTrip ? (["returnDate"] as const) : [])];
@@ -300,7 +300,7 @@ async function runIntentDetection(
   };
 }
 
-function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn): void {
+function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, rawMessage: string): void {
   const e = turn.entities;
   if (e.origin) slots.origin = e.origin.toUpperCase();
   if (e.destination) slots.destination = e.destination.toUpperCase();
@@ -312,17 +312,30 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn): 
   if (e.adults != null) slots.adults = e.adults;
   if (e.children != null) slots.children = e.children;
   if (e.infants != null) slots.infants = e.infants;
-  // Only let an airline preference stick if this turn is actually part of
-  // a search — either it names a route itself, or a route is already in
-  // progress. Reproduced bug: a bare "let me see xejet" with no route at
-  // all was silently narrowing every later, completely unrelated search
-  // to just that one airline for the rest of the session, since nothing
-  // ever cleared it. Also cleared in resetRouteSlots below so it doesn't
-  // outlive the search it was meant for.
-  if (e.airline && (e.origin || e.destination || slots.origin || slots.destination)) {
+  // Reproduced bug (two rounds): the LLM would re-extract an airline
+  // entity on a totally unrelated later turn just because that airline
+  // was mentioned earlier in conversation HISTORY, not because the
+  // current message names it — silently narrowing an unrelated search to
+  // one carrier. Prompt-tuning alone isn't reliable enough here (the
+  // model isn't perfectly deterministic), so this is checked directly
+  // against the raw current message text instead of trusting the LLM's
+  // entity extraction on faith.
+  if (e.airline && messageActuallyNamesAirline(rawMessage, e.airline)) {
     slots.airline = e.airline;
   }
   if (e.cabinClass) slots.cabinClass = e.cabinClass;
+}
+
+function messageActuallyNamesAirline(rawMessage: string, airline: string): boolean {
+  const m = rawMessage.toLowerCase();
+  // Direct substring match covers the common case (LLM echoes back
+  // roughly what the user typed, e.g. "xejet" -> "xejet"). If that
+  // doesn't match (LLM normalized/renamed it), fall back to checking
+  // whether the message mentions ANY known airline alias at all — if it
+  // mentions none, whatever the LLM put in entities.airline can only have
+  // come from conversation history, not this message, so it's rejected.
+  if (m.includes(airline.toLowerCase())) return true;
+  return Object.keys(AIRLINE_NAME_MATCHERS).some((alias) => m.includes(alias));
 }
 
 function resetRouteSlots(slots: ConversationSlots): void {
