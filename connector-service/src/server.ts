@@ -10,6 +10,8 @@ import { searchEnuguAirFlights } from "../../src/modules/travel-assistant/search
 import { searchUnitedNigeriaFlights } from "../../src/modules/travel-assistant/search/united/UnitedNigeriaSearch";
 import { searchXeJetFlights } from "../../src/modules/travel-assistant/search/xejet/XeJetSearch";
 import { searchRanoAirFlights } from "../../src/modules/travel-assistant/search/rano/RanoAirSearch";
+import { bookEnuguAirOnHold, type BookOnHoldRequest } from "../../src/modules/travel-assistant/booking/enugu/EnuguBookOnHold";
+import { decryptSecret } from "../../src/modules/airline-connectors/services/CredentialService";
 import type { FlightSearchQuery, FlightSearchResult } from "../../src/modules/travel-assistant/core/types";
 
 const TRAVEL_ASSISTANT_SEARCHERS: Record<string, (query: FlightSearchQuery) => Promise<FlightSearchResult>> = {
@@ -149,6 +151,58 @@ app.post("/internal/travel-assistant/search", async (req, res) => {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[travel-assistant] search FAILED ${key} after ${durationMs}ms:`, message);
     res.status(502).json({ error: message, stage: "PLAYWRIGHT_SEARCH", airline: airlineKey, durationMs });
+  }
+});
+
+const BOOK_ON_HOLD_HANDLERS: Record<string, typeof bookEnuguAirOnHold> = {
+  ENUGU: bookEnuguAirOnHold,
+};
+
+// Credentials are decrypted here, immediately before use, and never
+// logged or included in the response — same rule CredentialService
+// documents for SyncService. The caller (Next.js) never sees the
+// plaintext or the encrypted value; it only ever asks this service to
+// act, exactly like /internal/connectors/:airline/sync already does.
+app.post("/internal/travel-assistant/book-hold", async (req, res) => {
+  const airline = (req.body?.airline || "ENUGU").toUpperCase();
+  const handler = BOOK_ON_HOLD_HANDLERS[airline];
+  if (!handler) {
+    res.status(404).json({ error: `"${airline}" has no book-on-hold automation implemented` });
+    return;
+  }
+
+  const { origin, destination, departureDate, returnDate, fareClassPreference, passenger } = req.body || {};
+  if (!origin || !destination || !departureDate || !passenger?.firstName || !passenger?.lastName) {
+    res.status(400).json({ error: "origin, destination, departureDate, and passenger.firstName/lastName are required" });
+    return;
+  }
+
+  const settings = await AirlineWalletRepository.getSettings(airline);
+  if (!settings?.encryptedUsername || !settings.encryptedPassword) {
+    res.status(502).json({ error: `No credentials configured for ${airline}` });
+    return;
+  }
+  const credentials = {
+    username: decryptSecret(settings.encryptedUsername),
+    password: decryptSecret(settings.encryptedPassword),
+  };
+
+  console.log(`[book-hold] starting ${airline} ${origin}->${destination} ${departureDate}${returnDate ? ` / return ${returnDate}` : ""}`);
+  try {
+    const result = await handler(credentials, {
+      origin,
+      destination,
+      departureDate,
+      returnDate,
+      fareClassPreference: fareClassPreference ?? ["Economy Promo", "Economy Saver"],
+      passenger,
+    });
+    console.log(`[book-hold] ${airline} result: pnr=${result.pnr} holdExpiresAt=${result.holdExpiresAt}`);
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[book-hold] ${airline} FAILED:`, message);
+    res.status(502).json({ error: message });
   }
 });
 
