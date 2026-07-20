@@ -7,6 +7,13 @@ import { AirlineWalletRepository } from "../../src/modules/airline-connectors/st
 import { ConnectorRegistry } from "../../src/modules/airline-connectors/services/ConnectorRegistry";
 import type { AirlineKey } from "../../src/modules/airline-connectors/core/types";
 import { searchEnuguAirFlights } from "../../src/modules/travel-assistant/search/enugu/EnuguAirSearch";
+import { searchUnitedNigeriaFlights } from "../../src/modules/travel-assistant/search/united/UnitedNigeriaSearch";
+import type { FlightSearchQuery, FlightSearchResult } from "../../src/modules/travel-assistant/core/types";
+
+const TRAVEL_ASSISTANT_SEARCHERS: Record<string, (query: FlightSearchQuery) => Promise<FlightSearchResult>> = {
+  ENUGU: searchEnuguAirFlights,
+  UNITED: searchUnitedNigeriaFlights,
+};
 
 const app = express();
 app.use(express.json());
@@ -89,17 +96,24 @@ app.get("/internal/connectors/:airline/history", async (req, res) => {
 });
 
 app.post("/internal/travel-assistant/search", async (req, res) => {
-  const { origin, destination, date } = req.body || {};
+  const { origin, destination, date, airline } = req.body || {};
   if (!origin || !destination || !date) {
     res.status(400).json({ error: "origin, destination, and date are all required" });
     return;
   }
 
+  const airlineKey = (airline || "ENUGU").toUpperCase();
+  const search = TRAVEL_ASSISTANT_SEARCHERS[airlineKey];
+  if (!search) {
+    res.status(404).json({ error: `"${airlineKey}" has no travel-assistant search implemented` });
+    return;
+  }
+
   try {
-    const result = await searchEnuguAirFlights({ origin, destination, date });
+    const result = await search({ origin, destination, date });
     res.json(result);
   } catch (err) {
-    console.error("[travel-assistant] search failed:", err);
+    console.error(`[travel-assistant] search failed for ${airlineKey}:`, err);
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });

@@ -44,7 +44,7 @@ export default function ChatBubble() {
     {
       id: idCounter++,
       role: "assistant",
-      text: 'Ask me for a flight quote — e.g. "Enugu ABV-LOS today" or "ABV to LOS 12th july to return 23rd". Currently only Enugu Air is supported.',
+      text: 'Ask me for a flight quote — e.g. "Enugu ABV-LOS today" or "ABV to LOS 12th july to return 23rd". Searches Enugu Air and United Nigeria Airlines.',
     },
   ]);
   const [input, setInput] = useState<string>("");

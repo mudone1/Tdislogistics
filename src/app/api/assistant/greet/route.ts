@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ChatMemoryRepository } from "@/modules/travel-assistant/storage/ChatMemoryRepository";
 
 const FALLBACK_GREETING =
-  'Ask me for a flight quote — e.g. "Enugu ABV-LOS today" or "ABV to LOS 12th july to return 23rd". Currently only Enugu Air is supported.';
+  'Ask me for a flight quote — e.g. "Enugu ABV-LOS today" or "ABV to LOS 12th july to return 23rd". Searches Enugu Air and United Nigeria Airlines.';
 
 export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as {
