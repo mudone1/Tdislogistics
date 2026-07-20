@@ -5,6 +5,7 @@ import { AeroConnector } from "../connectors/aero/AeroConnector";
 import { ArikConnector } from "../connectors/arik/ArikConnector";
 import { IbomConnector } from "../connectors/ibom/IbomConnector";
 import { NGEagleConnector } from "../connectors/ngeagle/NGEagleConnector";
+import { EnuguConnector } from "../connectors/enugu/EnuguConnector";
 
 export interface ConnectorMeta {
   airline: AirlineKey;
@@ -23,6 +24,7 @@ const factories: Record<AirlineKey, () => IAirlineConnector> = {
   ARIK: () => new ArikConnector(),
   IBOM: () => new IbomConnector(),
   NGEAGLE: () => new NGEagleConnector(),
+  ENUGU: () => new EnuguConnector(),
 };
 
 export const ConnectorRegistry = {

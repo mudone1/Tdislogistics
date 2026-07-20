@@ -14,6 +14,7 @@ export const AIRLINE_KEY_TO_DISPLAY_NAME: Record<AirlineKey, string> = {
   ARIK: "Arik Air",
   IBOM: "Ibom Air",
   NGEAGLE: "NG Eagle",
+  ENUGU: "Enugu Air",
 };
 
 export function airlineKeyToDisplayName(key: AirlineKey): string {
