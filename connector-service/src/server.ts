@@ -19,6 +19,17 @@ const TRAVEL_ASSISTANT_SEARCHERS: Record<string, (query: FlightSearchQuery) => P
   RANO: searchRanoAirFlights,
 };
 
+// Short-lived, in-memory, single-process cache — fine for this workload
+// (one connector-service instance, no horizontal scaling) and cheap
+// insurance against the same route+date getting searched twice in close
+// succession (round-trip legs, a user re-asking, retries).
+const SEARCH_CACHE_TTL_MS = 3 * 60 * 1000;
+const searchCache = new Map<string, { result: FlightSearchResult; expiresAt: number }>();
+
+function cacheKey(airline: string, origin: string, destination: string, date: string): string {
+  return `${airline}:${origin}:${destination}:${date}`;
+}
+
 const app = express();
 app.use(express.json());
 
@@ -102,23 +113,42 @@ app.get("/internal/connectors/:airline/history", async (req, res) => {
 app.post("/internal/travel-assistant/search", async (req, res) => {
   const { origin, destination, date, airline } = req.body || {};
   if (!origin || !destination || !date) {
-    res.status(400).json({ error: "origin, destination, and date are all required" });
+    res.status(400).json({ error: "origin, destination, and date are all required", stage: "VALIDATION" });
     return;
   }
 
   const airlineKey = (airline || "ENUGU").toUpperCase();
   const search = TRAVEL_ASSISTANT_SEARCHERS[airlineKey];
   if (!search) {
-    res.status(404).json({ error: `"${airlineKey}" has no travel-assistant search implemented` });
+    res
+      .status(404)
+      .json({ error: `"${airlineKey}" has no travel-assistant search implemented`, stage: "VALIDATION" });
     return;
   }
 
+  const key = cacheKey(airlineKey, origin, destination, date);
+  const cached = searchCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    console.log(`[travel-assistant] cache HIT ${key}`);
+    res.json({ ...cached.result, cacheHit: true });
+    return;
+  }
+
+  const startedAt = Date.now();
+  console.log(`[travel-assistant] search START ${key}`);
+
   try {
     const result = await search({ origin, destination, date });
-    res.json(result);
+    const durationMs = Date.now() - startedAt;
+    console.log(`[travel-assistant] search OK ${key} in ${durationMs}ms, ${result.options.length} option(s)`);
+
+    searchCache.set(key, { result, expiresAt: Date.now() + SEARCH_CACHE_TTL_MS });
+    res.json({ ...result, durationMs });
   } catch (err) {
-    console.error(`[travel-assistant] search failed for ${airlineKey}:`, err);
-    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    const durationMs = Date.now() - startedAt;
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[travel-assistant] search FAILED ${key} after ${durationMs}ms:`, message);
+    res.status(502).json({ error: message, stage: "PLAYWRIGHT_SEARCH", airline: airlineKey, durationMs });
   }
 });
 

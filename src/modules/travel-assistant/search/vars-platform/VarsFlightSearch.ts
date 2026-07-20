@@ -1,4 +1,4 @@
-import { chromium, type Page } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import type { FareClassOption, FlightOption, FlightSearchQuery, FlightSearchResult } from "../../core/types";
 
 // Shared automation for airlines running the VARS booking engine
@@ -15,10 +15,46 @@ const MAX_DAY_FORWARD_CLICKS = 60;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+// Resource types that never affect the booking data we scrape — blocking
+// them cuts real network/render time per search (measured meaningfully
+// faster in profiling: fewer requests waiting on images/fonts/analytics
+// that the page loads regardless of whether anyone can see them).
+const BLOCKED_RESOURCE_TYPES = new Set(["image", "font", "media"]);
+const BLOCKED_HOST_PATTERNS = [
+  "google-analytics.com",
+  "googletagmanager.com",
+  "doubleclick.net",
+  "facebook.net",
+  "facebook.com",
+  "hotjar.com",
+  "clarity.ms",
+  "bing.com",
+];
+
 export interface VarsAirlineConfig {
   logTag: string;
   requirementsUrl: string;
   airlineLabel: string;
+}
+
+// One Chromium process per connector-service instance, reused across every
+// search — launching a fresh browser per request was real, measurable
+// overhead (process startup) on top of the actual page work. Each search
+// still gets its own isolated context (cookies/session), just not its own
+// OS process. If the shared process dies (crash, manual kill, etc.) the
+// next search transparently relaunches it.
+let sharedBrowser: Browser | null = null;
+
+async function getBrowser(): Promise<Browser> {
+  if (sharedBrowser && sharedBrowser.isConnected()) return sharedBrowser;
+  sharedBrowser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
+  sharedBrowser.on("disconnected", () => {
+    sharedBrowser = null;
+  });
+  return sharedBrowser;
 }
 
 export async function searchVarsPlatformFlights(
@@ -26,32 +62,54 @@ export async function searchVarsPlatformFlights(
   config: VarsAirlineConfig
 ): Promise<FlightSearchResult> {
   const { logTag, requirementsUrl, airlineLabel } = config;
+  const timings: Record<string, number> = {};
+  const t0 = Date.now();
+  let lastMark = t0;
+  const mark = (stage: string) => {
+    const now = Date.now();
+    timings[stage] = now - lastMark;
+    lastMark = now;
+  };
 
-  const browser = await chromium.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  const browser = await getBrowser();
+  mark("browserAcquire");
+
+  const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+  context.on("dialog", (dialog) => {
+    console.log(`[${logTag}] DIALOG appeared: "${dialog.message()}" - dismissing`);
+    dialog.dismiss().catch(() => {});
+  });
+
+  await context.route("**/*", (route) => {
+    const req = route.request();
+    if (BLOCKED_RESOURCE_TYPES.has(req.resourceType())) return route.abort();
+    if (BLOCKED_HOST_PATTERNS.some((host) => req.url().includes(host))) return route.abort();
+    return route.continue();
   });
 
   try {
-    const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
-    context.on("dialog", (dialog) => {
-      console.log(`[${logTag}] DIALOG appeared: "${dialog.message()}" - dismissing`);
-      dialog.dismiss().catch(() => {});
-    });
     const page = await context.newPage();
 
     console.log(`[${logTag}] navigating to requirements form`);
     await page.goto(requirementsUrl, { waitUntil: "domcontentloaded" });
+    mark("navigateToForm");
 
     console.log(`[${logTag}] selecting origin: ${query.origin}`);
     await page.locator("#Origin").selectOption(query.origin);
 
     // Destination options are repopulated by the origin's change handler, so
     // wait for the target option to actually exist before selecting it.
+    // state: "attached" (DOM presence), NOT the default "visible" — a
+    // native <option> inside a <select> never reports as visible under
+    // Playwright's layout-based check (no bounding box; the OS renders the
+    // dropdown outside page layout), so the default was unconditionally
+    // eating the full 15s timeout on every single search, across every
+    // airline sharing this module. Confirmed via real timing logs: this
+    // one line was ~60% of total search time.
     await page
       .locator("#Destination")
       .locator(`option[value="${query.destination}"]`)
-      .waitFor({ timeout: 15000 })
+      .waitFor({ state: "attached", timeout: 15000 })
       .catch(() => {});
     console.log(`[${logTag}] selecting destination: ${query.destination}`);
     await page.locator("#Destination").selectOption(query.destination);
@@ -66,6 +124,7 @@ export async function searchVarsPlatformFlights(
       input.dispatchEvent(new Event("click", { bubbles: true }));
       input.dispatchEvent(new Event("change", { bubbles: true }));
     });
+    mark("fillForm");
 
     console.log(`[${logTag}] submitting search`);
     await Promise.all([
@@ -73,17 +132,20 @@ export async function searchVarsPlatformFlights(
       page.locator("#submitButton").evaluate((el) => (el as HTMLButtonElement).click()),
     ]);
     console.log(`[${logTag}] landed on ${page.url()}`);
+    mark("submitAndLoadResults");
 
     await navigateToDate(page, query.date, logTag);
+    mark("dateNavigation");
 
     const options = await extractFlightOptions(page, query.date, airlineLabel, logTag);
+    mark("extraction");
 
-    await browser.close();
+    const totalMs = Date.now() - t0;
+    console.log(`[${logTag}] TIMING total=${totalMs}ms ${JSON.stringify(timings)}`);
 
     return { query, options, searchedAt: new Date().toISOString() };
-  } catch (err) {
-    await browser.close().catch(() => {});
-    throw err;
+  } finally {
+    await context.close().catch(() => {});
   }
 }
 

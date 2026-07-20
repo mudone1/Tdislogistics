@@ -45,15 +45,6 @@ const SEARCH_INTENTS = new Set(["FLIGHT_SEARCH_ONE_WAY", "FLIGHT_SEARCH_ROUND_TR
 
 const ALL_AIRLINES = ["ENUGU", "UNITED", "XEJET", "RANO"] as const;
 
-// Round-trip searches run every airline sequentially for BOTH legs (see
-// the Railway memory note below) — with all 4 carriers that's 8 Playwright
-// runs in one request, well past what fits in a 60s serverless timeout.
-// So an unqualified round-trip search only auto-checks the two
-// longest-proven carriers; XeJet and Rano Air are still fully searchable
-// round-trip, just by naming them explicitly (which narrows to 1 airline,
-// i.e. 2 sequential runs — the same safe shape as before).
-const ROUND_TRIP_DEFAULT_AIRLINES = ["ENUGU", "UNITED"] as const;
-
 const AIRLINE_NAME_MATCHERS: Record<string, string> = {
   united: "UNITED",
   enugu: "ENUGU",
@@ -64,15 +55,18 @@ const AIRLINE_NAME_MATCHERS: Record<string, string> = {
 
 // If the user named a specific airline, narrow to just that one instead of
 // querying every implemented carrier. Unrecognized names fall back to
-// searching the default set rather than silently dropping the request.
-function airlinesToQuery(preference: string | null, isRoundTrip: boolean): readonly string[] {
-  const defaults = isRoundTrip ? ROUND_TRIP_DEFAULT_AIRLINES : ALL_AIRLINES;
-  if (!preference) return defaults;
+// searching every carrier rather than silently dropping the request.
+// Round-trip and one-way both search the same full set now — searches run
+// fully concurrently (see searchAllAirlines below), so even a round-trip's
+// 8 simultaneous Playwright runs (4 airlines x 2 legs) complete in ~25-31s,
+// well under the 60s timeout that made this a real concern before.
+function airlinesToQuery(preference: string | null): readonly string[] {
+  if (!preference) return ALL_AIRLINES;
   const p = preference.toLowerCase();
   for (const [name, key] of Object.entries(AIRLINE_NAME_MATCHERS)) {
     if (p.includes(name)) return [key];
   }
-  return defaults;
+  return ALL_AIRLINES;
 }
 
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
@@ -112,20 +106,33 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     return { reply };
   }
 
-  const airlines = airlinesToQuery(slots.airline, slots.isRoundTrip);
+  const airlines = airlinesToQuery(slots.airline);
+  const searchStartedAt = Date.now();
 
   try {
     if (slots.isRoundTrip) {
-      // Sequential, not Promise.all — two Chromium instances at once has
-      // exceeded Railway's available memory in the past. With multiple
-      // airlines this means up to 4 sequential searches (2 legs x 2
-      // carriers), which can run close to the API route's timeout for
-      // far-out dates that need date-strip paging.
-      const outbound = await searchAllAirlines(airlines, slots.origin!, slots.destination!, slots.date!);
-      const back = await searchAllAirlines(airlines, slots.destination!, slots.origin!, slots.returnDate!);
+      // Both legs across every airline run fully concurrently — measured
+      // against the real deployed connector-service: 8 simultaneous
+      // Playwright searches (4 airlines x 2 legs) all succeeded in ~25-31s
+      // total, vs. sequential summing to 150s+ and blowing the 60s
+      // Vercel function timeout (the actual root cause of the "Something
+      // went wrong" failures this replaces). The old "Railway can't
+      // handle concurrent Chromium" assumption was tested and found false
+      // with current resources.
+      const [outbound, back] = await Promise.all([
+        searchAllAirlines(airlines, slots.origin!, slots.destination!, slots.date!),
+        searchAllAirlines(airlines, slots.destination!, slots.origin!, slots.returnDate!),
+      ]);
+      logSearchTiming("round-trip", airlines, searchStartedAt, [outbound, back]);
 
-      if (outbound.error || back.error) {
-        const reply = "I couldn't complete that search just now — mind trying again in a moment?";
+      if (outbound.failedAirlines.length + back.failedAirlines.length > 0) {
+        console.warn(
+          `[travel-assistant] partial airline failures — outbound: [${outbound.failedAirlines.join(", ")}], return: [${back.failedAirlines.join(", ")}]`
+        );
+      }
+
+      if (outbound.options.length === 0 && back.options.length === 0) {
+        const reply = describeAllFailed([...outbound.failedAirlines, ...back.failedAirlines]);
         await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
         return { reply };
       }
@@ -142,8 +149,14 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     }
 
     const data = await searchAllAirlines(airlines, slots.origin!, slots.destination!, slots.date!);
-    if (data.error) {
-      const reply = "I couldn't complete that search just now — mind trying again in a moment?";
+    logSearchTiming("one-way", airlines, searchStartedAt, [data]);
+
+    if (data.failedAirlines.length > 0) {
+      console.warn(`[travel-assistant] partial airline failures: [${data.failedAirlines.join(", ")}]`);
+    }
+
+    if (data.options.length === 0) {
+      const reply = describeAllFailed(data.failedAirlines);
       await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
       return { reply };
     }
@@ -159,6 +172,27 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
     return { reply };
   }
+}
+
+function describeAllFailed(failedAirlines: string[]): string {
+  if (failedAirlines.length === 0) {
+    return "I couldn't find any flights for that search — try a different date or route?";
+  }
+  return `I couldn't reach any airline for that search just now (tried ${failedAirlines.join(", ")}) — mind trying again in a moment?`;
+}
+
+function logSearchTiming(
+  kind: string,
+  airlines: readonly string[],
+  startedAt: number,
+  results: Array<FlightSearchResult & { failedAirlines: string[] }>
+): void {
+  const totalMs = Date.now() - startedAt;
+  const totalOptions = results.reduce((sum, r) => sum + r.options.length, 0);
+  const failed = [...new Set(results.flatMap((r) => r.failedAirlines))];
+  console.log(
+    `[travel-assistant] TIMING kind=${kind} airlines=[${airlines.join(",")}] totalMs=${totalMs} options=${totalOptions} failed=[${failed.join(",")}]`
+  );
 }
 
 async function runIntentDetection(
@@ -228,39 +262,43 @@ function resetRouteSlots(slots: ConversationSlots): void {
   slots.isRoundTrip = false;
 }
 
-// Queries each requested airline in turn (never concurrently — see the
-// Railway memory note above) and merges their flight options into one
-// result. Only fails if every airline errored; a single carrier's outage
-// just means fewer options rather than no answer at all.
+// Queries every requested airline CONCURRENTLY (Promise.allSettled — never
+// rejects, so one slow/broken carrier can't take the others down with it)
+// and merges their flight options into one result. Verified against the
+// real deployed connector-service: 4-way and even 8-way concurrent
+// Playwright searches both completed reliably in ~20-31s total, vs.
+// sequential summing past the 60s Vercel function timeout — that timeout
+// (not a code exception) was the actual cause of "Something went wrong"
+// on unscoped searches like "Kano to Lagos tomorrow".
 async function searchAllAirlines(
   airlines: readonly string[],
   origin: string,
   destination: string,
   date: string
-): Promise<FlightSearchResult & { error?: string }> {
+): Promise<FlightSearchResult & { failedAirlines: string[] }> {
+  const settled = await Promise.allSettled(
+    airlines.map((airline) => callSearch(airline, origin, destination, date))
+  );
+
   const options: FlightOption[] = [];
-  let successCount = 0;
+  const failedAirlines: string[] = [];
 
-  for (const airline of airlines) {
-    const result = await callSearch(airline, origin, destination, date);
-    if (result.error) {
-      console.error(`[travel-assistant] ${airline} search failed:`, result.error);
-      continue;
+  settled.forEach((outcome, i) => {
+    const airline = airlines[i];
+    if (outcome.status === "rejected") {
+      console.error(`[travel-assistant] ${airline} search threw:`, outcome.reason);
+      failedAirlines.push(airline);
+      return;
     }
-    successCount++;
-    options.push(...result.options);
-  }
+    if (outcome.value.error) {
+      console.error(`[travel-assistant] ${airline} search failed:`, outcome.value.error);
+      failedAirlines.push(airline);
+      return;
+    }
+    options.push(...outcome.value.options);
+  });
 
-  if (successCount === 0) {
-    return {
-      query: { origin, destination, date },
-      options: [],
-      searchedAt: new Date().toISOString(),
-      error: "all airline searches failed",
-    };
-  }
-
-  return { query: { origin, destination, date }, options, searchedAt: new Date().toISOString() };
+  return { query: { origin, destination, date }, options, searchedAt: new Date().toISOString(), failedAirlines };
 }
 
 async function callSearch(
@@ -269,13 +307,40 @@ async function callSearch(
   destination: string,
   date: string
 ): Promise<FlightSearchResult & { error?: string }> {
-  const res = await fetch(`${BASE_URL}/internal/travel-assistant/search`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-internal-api-key": API_KEY! },
-    body: JSON.stringify({ origin, destination, date, airline }),
-    cache: "no-store",
-  });
-  const data = (await res.json()) as FlightSearchResult & { error?: string };
-  if (!res.ok && !data.error) return { ...data, error: `HTTP ${res.status}` };
-  return data;
+  const startedAt = Date.now();
+  try {
+    const res = await fetch(`${BASE_URL}/internal/travel-assistant/search`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-internal-api-key": API_KEY! },
+      body: JSON.stringify({ origin, destination, date, airline }),
+      cache: "no-store",
+    });
+
+    let data: (FlightSearchResult & { error?: string; stage?: string }) | null = null;
+    try {
+      data = await res.json();
+    } catch {
+      // Non-JSON body — e.g. a platform-level error page (timeout,
+      // gateway error) rather than a structured response from our own code.
+      return {
+        query: { origin, destination, date },
+        options: [],
+        searchedAt: new Date().toISOString(),
+        error: `HTTP ${res.status}: non-JSON response (likely upstream timeout/gateway error)`,
+      };
+    }
+
+    if (!res.ok && data && !data.error) return { ...data, error: `HTTP ${res.status}` };
+    return data as FlightSearchResult & { error?: string };
+  } catch (err) {
+    // fetch() itself threw — network failure, DNS, connector-service down, etc.
+    const durationMs = Date.now() - startedAt;
+    console.error(`[travel-assistant] ${airline} fetch failed after ${durationMs}ms:`, err);
+    return {
+      query: { origin, destination, date },
+      options: [],
+      searchedAt: new Date().toISOString(),
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }

@@ -102,21 +102,44 @@ export default function ChatBubble() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: text, pending, ...identity }),
       });
+
+      if (!res.ok) {
+        console.error(`[assistant] request failed: HTTP ${res.status}`);
+        setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: describeHttpError(res.status) }]);
+        setPending(null);
+        return;
+      }
+
       const data = await res.json();
       setMessages((m: ChatMessage[]) => [
         ...m,
         { id: idCounter++, role: "assistant", text: data.reply || "No response." },
       ]);
       setPending(data.pending ?? null);
-    } catch {
+    } catch (err) {
+      console.error("[assistant] request threw:", err);
       setMessages((m: ChatMessage[]) => [
         ...m,
-        { id: idCounter++, role: "assistant", text: "Something went wrong — try again." },
+        {
+          id: idCounter++,
+          role: "assistant",
+          text: "Couldn't reach the search service — check your connection and try again.",
+        },
       ]);
       setPending(null);
     } finally {
       setSending(false);
     }
+  }
+
+  function describeHttpError(status: number): string {
+    if (status === 504) {
+      return "That search is taking longer than expected and timed out — try narrowing it (e.g. name one airline) or try again in a moment.";
+    }
+    if (status >= 500) {
+      return "The search service hit an error on its end — try again in a moment.";
+    }
+    return "That request didn't go through — try rephrasing it.";
   }
 
   return (
