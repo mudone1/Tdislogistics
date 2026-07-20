@@ -11,9 +11,7 @@ interface QuoteRow {
   airline: string;
   fare: number | null;
   seatStatus: string | null;
-  cabin: string;
   baggage: string | null;
-  refundPolicy: string | null;
   seatsLeft: number | null;
 }
 
@@ -45,6 +43,19 @@ function formatDateTime(iso: string): string {
 function availabilityText(row: QuoteRow): string {
   if (row.seatsLeft != null) return `${row.seatsLeft} seat${row.seatsLeft === 1 ? "" : "s"} left`;
   return row.fare != null ? "Available" : "Sold out";
+}
+
+// Baggage strings from the scrapers include an excess-fee clause (e.g.
+// "20kg Checked | 6kg Cabin | Excess: N1,000/kg (N900/kg on the
+// website)") — segments are "|"-delimited, so drop any segment
+// mentioning "excess" and keep the rest.
+function stripExcess(baggage: string | null): string | null {
+  if (!baggage) return baggage;
+  const kept = baggage
+    .split("|")
+    .map((segment) => segment.trim())
+    .filter((segment) => !/excess/i.test(segment));
+  return kept.length > 0 ? kept.join(" | ") : null;
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
@@ -142,28 +153,12 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
                 >
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <div style={{ display: "flex", fontSize: 22, fontWeight: 700, color: NAVY }}>{row.airline}</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          fontSize: 14,
-                          fontWeight: 600,
-                          color: NAVY,
-                          background: "#EEF2F5",
-                          padding: "3px 14px",
-                          borderRadius: 999,
-                        }}
-                      >
-                        {row.cabin}
-                      </div>
-                      <div style={{ display: "flex", fontSize: 26, fontWeight: 800, color: NAVY }}>
-                        {row.fare != null ? formatNaira(row.fare) : row.seatStatus ?? "Unavailable"}
-                      </div>
+                    <div style={{ display: "flex", fontSize: 26, fontWeight: 800, color: NAVY }}>
+                      {row.fare != null ? formatNaira(row.fare) : row.seatStatus ?? "Unavailable"}
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 28, marginTop: 12, fontSize: 15, color: GRAY }}>
-                    <div style={{ display: "flex" }}>{row.baggage ?? "Baggage info unavailable"}</div>
-                    <div style={{ display: "flex" }}>{row.refundPolicy ?? "Fare condition unavailable"}</div>
+                    <div style={{ display: "flex" }}>{stripExcess(row.baggage) ?? "Baggage info unavailable"}</div>
                     <div style={{ display: "flex" }}>{availabilityText(row)}</div>
                   </div>
                 </div>
@@ -182,7 +177,7 @@ async function renderQuoteImage(req: NextRequest): Promise<Response> {
             paddingTop: 18,
           }}
         >
-          Quote valid for 24 hours from generation — fares subject to change without notice.
+          Fares subject to change without notice.
         </div>
       </div>
     ),

@@ -11,8 +11,6 @@ import {
   formatRouteHeader,
   cheapestPerAirline,
   cheapestFareClass,
-  cheapestFareClassName,
-  shortCabinClass,
 } from "@/modules/travel-assistant/formatting/formatFlightResults";
 import FlightCards, { type FlightLeg } from "./FlightCards";
 
@@ -77,9 +75,7 @@ function buildQuoteImagePayload(legs: FlightLeg[]) {
           airline: option.airline,
           fare: option.fare,
           seatStatus: option.seatStatus,
-          cabin: shortCabinClass(cheapestFareClassName(option)),
           baggage: fareClass?.baggage ?? null,
-          refundPolicy: fareClass?.refundPolicy ?? null,
           seatsLeft: fareClass?.seatsLeft ?? null,
         };
       }),
