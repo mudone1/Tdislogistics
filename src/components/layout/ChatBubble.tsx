@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Icon } from "@/lib/icon-map";
 import { authHelper } from "@/lib/firebase";
 import { useNotifications } from "@/lib/notifications";
+import { formatLeg, formatRouteHeader } from "@/modules/travel-assistant/formatting/formatFlightResults";
 import FlightCards, { type FlightLeg } from "./FlightCards";
 
 interface ChatMessage {
@@ -21,6 +22,16 @@ interface PendingRoundTrip {
   origin: string;
   destination: string;
   date: string;
+}
+
+interface HistoryEntry {
+  referenceId: string;
+  origin: string;
+  destination: string;
+  date: string;
+  resultCount: number;
+  createdAt: string;
+  result: FlightLeg["result"];
 }
 
 interface ChatIdentity {
@@ -58,6 +69,9 @@ export default function ChatBubble() {
   const [identity, setIdentity] = useState<ChatIdentity | null>(null);
   const [copiedId, setCopiedId] = useState<number | null>(null);
   const [scrollToId, setScrollToId] = useState<number | null>(null);
+  const [historyOpen, setHistoryOpen] = useState<boolean>(false);
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const greeted = useRef(false);
   const { addNotification } = useNotifications();
@@ -183,6 +197,35 @@ export default function ChatBubble() {
     setMessages((m: ChatMessage[]) => m.map((msg) => (msg.id === id ? { ...msg, showCards: !msg.showCards } : msg)));
   }
 
+  async function openHistory(): Promise<void> {
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    try {
+      const res = await fetch("/api/assistant/history", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionKey: identity?.sessionKey }),
+      });
+      const data = await res.json();
+      setHistoryEntries(data.searches ?? []);
+    } catch (err) {
+      console.error("[assistant] history fetch failed:", err);
+      setHistoryEntries([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  function reopenSearch(entry: HistoryEntry): void {
+    const legs: FlightLeg[] = [{ label: "", result: entry.result }];
+    const text = `${entry.referenceId} — ${formatRouteHeader(entry.origin, entry.destination, entry.date)}\n${formatLeg(entry.result)}`;
+    setMessages((m: ChatMessage[]) => [
+      ...m,
+      { id: idCounter++, role: "assistant", text, hasResults: true, legs },
+    ]);
+    setHistoryOpen(false);
+  }
+
   function describeHttpError(status: number): string {
     if (status === 504) {
       return "That search is taking longer than expected and timed out — try narrowing it (e.g. name one airline) or try again in a moment.";
@@ -216,11 +259,36 @@ export default function ChatBubble() {
               <span>
                 <Icon name="sparkles" size={14} /> AI Operations Assistant
               </span>
-              <button onClick={() => setOpen(false)} aria-label="Close">
-                ✕
-              </button>
+              <span style={{ display: "flex", gap: 4 }}>
+                <button onClick={() => (historyOpen ? setHistoryOpen(false) : openHistory())} aria-label="Search history">
+                  {historyOpen ? "← Back" : "🕘 History"}
+                </button>
+                <button onClick={() => setOpen(false)} aria-label="Close">
+                  ✕
+                </button>
+              </span>
             </div>
 
+            {historyOpen ? (
+              <div className="chat-bubble-history">
+                {historyLoading ? (
+                  <div className="chat-bubble-history-empty">Loading…</div>
+                ) : historyEntries.length === 0 ? (
+                  <div className="chat-bubble-history-empty">No past searches yet</div>
+                ) : (
+                  historyEntries.map((entry) => (
+                    <button key={entry.referenceId} className="chat-bubble-history-item" onClick={() => reopenSearch(entry)}>
+                      <div className="chat-bubble-history-ref">{entry.referenceId}</div>
+                      <div className="chat-bubble-history-route">
+                        {entry.origin} → {entry.destination} · {entry.date}
+                      </div>
+                      <div className="chat-bubble-history-meta">{entry.resultCount} result(s)</div>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : (
+              <>
             <div className="chat-bubble-messages" ref={scrollRef}>
               {messages.map((m: ChatMessage) => (
                 <div id={`chat-msg-${m.id}`} key={m.id} className={`chat-bubble-msg-wrap ${m.role} ${m.showCards ? "wide" : ""}`}>
@@ -258,6 +326,8 @@ export default function ChatBubble() {
                 Send
               </button>
             </div>
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

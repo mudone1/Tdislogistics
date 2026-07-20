@@ -138,6 +138,7 @@ model ChatSession {
   lastSeenAt   DateTime @updatedAt
 
   messages ChatMessage[]
+  searches FlightSearchRecord[]
 
   @@map("chat_sessions")
 }
@@ -163,4 +164,28 @@ model ChatMessage {
 
   @@index([sessionId, createdAt])
   @@map("chat_messages")
+}
+
+// One row per completed search (a leg, not a whole round-trip — a
+// round-trip produces two rows, one per direction, so each leg gets its
+// own reference ID and can be reopened independently). `resultsJson` is
+// a full FlightSearchResult snapshot so a reopened search shows exactly
+// what the agent originally quoted, not a live re-search that might
+// return different prices later.
+model FlightSearchRecord {
+  id          String   @id @default(cuid())
+  referenceId String   @unique
+  sessionId   String
+  origin      String
+  destination String
+  date        String
+  airlines    String[]
+  resultCount Int
+  resultsJson Json
+  createdAt   DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id])
+
+  @@index([sessionId, createdAt])
+  @@map("flight_search_records")
 }

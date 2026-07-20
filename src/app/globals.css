@@ -1007,6 +1007,33 @@ input:focus, select:focus { box-shadow: 0 0 0 3px rgba(24,79,115,0.10); }
 }
 .chat-bubble-header span { display: flex; align-items: center; gap: 6px; }
 .chat-bubble-header button { background: none; border: none; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 14px; }
+.chat-bubble-header button:first-child { font-size: 11px; font-weight: 600; }
+
+.chat-bubble-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--off-white);
+}
+.chat-bubble-history-empty { text-align: center; padding: 24px; font-size: 12.5px; color: var(--gray-400); }
+.chat-bubble-history-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 10px;
+  background: white;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.chat-bubble-history-item:hover { background: var(--gray-100); }
+.chat-bubble-history-ref { font-size: 11.5px; font-weight: 700; color: var(--navy); }
+.chat-bubble-history-route { font-size: 12.5px; color: var(--gray-600); margin-top: 2px; }
+.chat-bubble-history-meta { font-size: 10.5px; color: var(--gray-400); margin-top: 2px; }
 
 .chat-bubble-messages {
   flex: 1;

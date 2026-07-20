@@ -1,6 +1,7 @@
 import { groqJsonCompletion, type GroqMessage } from "./groqClient";
 import { SYSTEM_PROMPT } from "./systemPrompt";
 import { ChatMemoryRepository } from "../storage/ChatMemoryRepository";
+import { FlightSearchHistoryRepository } from "../storage/FlightSearchHistoryRepository";
 import { formatLeg, formatRouteHeader } from "../formatting/formatFlightResults";
 import type {
   AssistantTurn,
@@ -69,12 +70,32 @@ function airlinesToQuery(preference: string | null): readonly string[] {
   return ALL_AIRLINES;
 }
 
+const REFERENCE_ID_PATTERN = /^TDIS-\d{8}-\d{3}$/i;
+
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
   const session = await ChatMemoryRepository.getOrCreateSession(
     input.sessionKey,
     input.displayName,
     input.isAuthenticated
   );
+
+  // A bare reference ID is a lookup, not a new search — short-circuit
+  // before intent detection/LLM entirely.
+  const trimmed = input.message.trim();
+  if (REFERENCE_ID_PATTERN.test(trimmed)) {
+    const record = await FlightSearchHistoryRepository.getByReferenceId(trimmed);
+    await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
+    if (!record) {
+      const reply = `I couldn't find a search with reference ${trimmed.toUpperCase()} — double-check the ID?`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
+    const result = record.resultsJson as unknown as FlightSearchResult;
+    const reply =
+      `${record.referenceId} — ${formatRouteHeader(record.origin, record.destination, record.date)}\n${formatLeg(result)}`;
+    await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+    return { reply, result };
+  }
 
   const priorMessages = await ChatMemoryRepository.getRecentMessages(session.id, 10);
   const slots: ConversationSlots = { ...EMPTY_SLOTS, ...((session.slots as Partial<ConversationSlots>) ?? {}) };
@@ -137,10 +158,18 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
         return { reply };
       }
 
+      const [outboundRecord, backRecord] = await Promise.all([
+        outbound.options.length > 0 ? FlightSearchHistoryRepository.saveSearch(session.id, outbound, airlines) : null,
+        back.options.length > 0 ? FlightSearchHistoryRepository.saveSearch(session.id, back, airlines) : null,
+      ]);
+
       const reply =
         `${turn.reply}\n\n` +
-        `Outbound — ${formatRouteHeader(slots.origin!, slots.destination!, slots.date!)}\n${formatLeg(outbound)}\n\n` +
-        `Return — ${formatRouteHeader(slots.destination!, slots.origin!, slots.returnDate!)}\n${formatLeg(back)}`;
+        `Outbound — ${formatRouteHeader(slots.origin!, slots.destination!, slots.date!)}\n${formatLeg(outbound)}` +
+        (outboundRecord ? `\nRef: ${outboundRecord.referenceId}` : "") +
+        `\n\n` +
+        `Return — ${formatRouteHeader(slots.destination!, slots.origin!, slots.returnDate!)}\n${formatLeg(back)}` +
+        (backRecord ? `\nRef: ${backRecord.referenceId}` : "");
 
       resetRouteSlots(slots);
       await ChatMemoryRepository.updateSlots(session.id, slots);
@@ -161,7 +190,8 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
       return { reply };
     }
 
-    const reply = `${turn.reply}\n\n${formatRouteHeader(slots.origin!, slots.destination!, slots.date!)}\n${formatLeg(data)}`;
+    const record = await FlightSearchHistoryRepository.saveSearch(session.id, data, airlines);
+    const reply = `${turn.reply}\n\n${formatRouteHeader(slots.origin!, slots.destination!, slots.date!)}\n${formatLeg(data)}\nRef: ${record.referenceId}`;
     resetRouteSlots(slots);
     await ChatMemoryRepository.updateSlots(session.id, slots);
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
