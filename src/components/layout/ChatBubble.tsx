@@ -259,24 +259,12 @@ export default function ChatBubble() {
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
   }
 
-  async function shareImageBlob(blob: Blob): Promise<void> {
-    const file = new File([blob], "tdis-flight-quote.png", { type: "image/png" });
-
-    if (navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: "TDIS Flight Quote" });
-        return;
-      } catch (err) {
-        // AbortError just means the user dismissed the share sheet — not a
-        // failure worth falling back for.
-        if (err instanceof Error && err.name === "AbortError") return;
-        console.error("[assistant] navigator.share failed:", err);
-      }
-    }
-
-    // Desktop browsers mostly can't share files this way, and there's no
-    // URL-scheme way to pre-attach an image to wa.me — download the image
-    // and open WhatsApp Web so the user can attach it manually.
+  function downloadImageAndOpenWhatsApp(blob: Blob): void {
+    // No URL-scheme way to pre-attach an image to wa.me — download the
+    // image and open WhatsApp Web/App so the user can attach it manually.
+    // This is the guaranteed-delivery path: once we have a real image in
+    // hand, every other path funnels back to this rather than ever
+    // degrading to a plain-text message.
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -284,6 +272,31 @@ export default function ChatBubble() {
     a.click();
     URL.revokeObjectURL(url);
     window.open("https://wa.me/", "_blank", "noopener,noreferrer");
+  }
+
+  async function shareImageBlob(blob: Blob): Promise<void> {
+    const file = new File([blob], "tdis-flight-quote.png", { type: "image/png" });
+
+    // navigator.canShare (and even navigator.share itself) is inconsistent
+    // across installed-PWA/WebView contexts on Android — some versions
+    // throw synchronously rather than returning false for file shares, or
+    // silently drop the files and would otherwise leave us with nothing.
+    // Wrapping the whole check means any failure here still falls through
+    // to the guaranteed image-download path below instead of propagating
+    // and losing the image entirely.
+    try {
+      if (navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: "TDIS Flight Quote" });
+        return;
+      }
+    } catch (err) {
+      // AbortError just means the user dismissed the share sheet — not a
+      // failure worth falling back for.
+      if (err instanceof Error && err.name === "AbortError") return;
+      console.error("[assistant] navigator.share failed:", err);
+    }
+
+    downloadImageAndOpenWhatsApp(blob);
   }
 
   async function shareToWhatsApp(m: ChatMessage): Promise<void> {
@@ -300,7 +313,15 @@ export default function ChatBubble() {
     // not preserve the share gesture on strict mobile browsers, but it's
     // the best available fallback.
     if (m.imageBlob) {
-      await shareImageBlob(m.imageBlob);
+      try {
+        await shareImageBlob(m.imageBlob);
+      } catch (err) {
+        // We already have a valid image in hand at this point, so even an
+        // unexpected failure here should still deliver the image rather
+        // than degrading all the way down to a plain-text share.
+        console.error("[assistant] WhatsApp image share failed unexpectedly:", err);
+        downloadImageAndOpenWhatsApp(m.imageBlob);
+      }
       return;
     }
 
@@ -314,6 +335,8 @@ export default function ChatBubble() {
       const blob = await res.blob();
       await shareImageBlob(blob);
     } catch (err) {
+      // Only reachable when image GENERATION itself failed — there's no
+      // image to fall back to, so text is genuinely the last resort here.
       console.error("[assistant] WhatsApp image share failed:", err);
       shareTextToWhatsApp(m.text);
     }
