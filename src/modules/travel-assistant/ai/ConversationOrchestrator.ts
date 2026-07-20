@@ -116,9 +116,17 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
   const missing = required.filter((key) => !slots[key as keyof ConversationSlots]);
 
   if (missing.length > 0) {
+    // Reproduced bug: the LLM sometimes claims a search "couldn't find
+    // any flights" or "couldn't reach any airline" even though no search
+    // ran at all (confirmed via response time — under 2s, impossible for
+    // a real Playwright search) because required slots are still missing.
+    // Don't blindly trust it here — if the reply reads like a failure
+    // claim rather than a clarifying question, replace it with a
+    // deterministic one built from the actual missing slots.
+    const reply = looksLikeFalseFailureClaim(turn.reply) ? buildClarifyingQuestion(missing) : turn.reply;
     await ChatMemoryRepository.updateSlots(session.id, slots);
-    await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", turn.reply);
-    return { reply: turn.reply };
+    await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+    return { reply };
   }
 
   if (!BASE_URL || !API_KEY) {
@@ -211,6 +219,30 @@ function describeAllFailed(failedAirlines: string[]): string {
   return `I couldn't reach any airline for that search just now (tried ${failedAirlines.join(", ")}) — mind trying again in a moment?`;
 }
 
+const FAILURE_CLAIM_PATTERNS = [/couldn'?t find/i, /couldn'?t reach/i, /no flights/i, /search failed/i, /didn'?t find/i];
+
+// Heuristic, not perfect — but a reply that reads like it's reporting a
+// failed search while no search has even started is worse than a
+// heuristic false positive occasionally swapping in a plain clarifying
+// question instead.
+function looksLikeFalseFailureClaim(reply: string): boolean {
+  return FAILURE_CLAIM_PATTERNS.some((p) => p.test(reply));
+}
+
+const SLOT_LABELS: Record<string, string> = {
+  origin: "departure city",
+  destination: "destination",
+  date: "travel date",
+  returnDate: "return date",
+};
+
+function buildClarifyingQuestion(missing: readonly string[]): string {
+  const labels = missing.map((m) => SLOT_LABELS[m] ?? m);
+  const joined =
+    labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  return `Sure — what ${labels.length === 1 ? "is" : "are"} the ${joined} you'd like me to check?`;
+}
+
 function logSearchTiming(
   kind: string,
   airlines: readonly string[],
@@ -280,7 +312,16 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn): 
   if (e.adults != null) slots.adults = e.adults;
   if (e.children != null) slots.children = e.children;
   if (e.infants != null) slots.infants = e.infants;
-  if (e.airline) slots.airline = e.airline;
+  // Only let an airline preference stick if this turn is actually part of
+  // a search — either it names a route itself, or a route is already in
+  // progress. Reproduced bug: a bare "let me see xejet" with no route at
+  // all was silently narrowing every later, completely unrelated search
+  // to just that one airline for the rest of the session, since nothing
+  // ever cleared it. Also cleared in resetRouteSlots below so it doesn't
+  // outlive the search it was meant for.
+  if (e.airline && (e.origin || e.destination || slots.origin || slots.destination)) {
+    slots.airline = e.airline;
+  }
   if (e.cabinClass) slots.cabinClass = e.cabinClass;
 }
 
@@ -290,6 +331,7 @@ function resetRouteSlots(slots: ConversationSlots): void {
   slots.date = null;
   slots.returnDate = null;
   slots.isRoundTrip = false;
+  slots.airline = null;
 }
 
 // Queries every requested airline CONCURRENTLY (Promise.allSettled — never
