@@ -2,18 +2,24 @@ import crypto from "crypto";
 import { ConnectorRegistry } from "./ConnectorRegistry";
 import { AirlineWalletRepository } from "../storage/AirlineWalletRepository";
 import { decryptSecret } from "./CredentialService";
-import { mirrorBalanceToFirestore } from "./FirestoreMirrorService";
 import type { AirlineKey, SyncResult, SyncTrigger } from "../core/types";
 
 /**
  * The one place a sync actually happens, end to end:
  *
  *   Airline Portal -> Connector (Playwright) -> PostgreSQL (source of truth)
- *   -> Sync Service -> Firestore (realtime dashboard) + future analytics
  *
  * Only ever invoked from connector-service (this needs a real browser —
  * it cannot run on Vercel/serverless). The Next.js app never imports this
  * directly; it calls connector-service's HTTP API instead.
+ *
+ * Deliberately does NOT mirror into the existing Firestore `balances`
+ * document (the one "Airline Deposits" manually edits via Set
+ * Balance/+Fund) — the Airlines tab reads the synced balance straight
+ * from Postgres via /api/connectors instead (see AirlinesSection.tsx),
+ * so a connector sync can never clobber a manually-entered deposit
+ * figure and vice versa. This used to mirror into Firestore
+ * (FirestoreMirrorService, now removed) before that separation existed.
  */
 export async function runSync(airline: AirlineKey, trigger: SyncTrigger): Promise<SyncResult> {
   const runId = crypto.randomUUID();
@@ -34,19 +40,8 @@ export async function runSync(airline: AirlineKey, trigger: SyncTrigger): Promis
 
   const result = await connector.runFullSync(credentials, runId);
 
-  // 1. PostgreSQL — source of truth, append-only history + current pointer.
+  // PostgreSQL — source of truth, append-only history + current pointer.
   await AirlineWalletRepository.recordSyncResult(result, connector.constructor.name, trigger);
-
-  // 2. Firestore — realtime mirror for the existing dashboard. Best-effort:
-  //    a Firestore hiccup shouldn't make an otherwise-successful sync look
-  //    failed, since Postgres already has the authoritative record.
-  if (result.status === "SUCCESS" && result.balance) {
-    try {
-      await mirrorBalanceToFirestore(airline, result.balance.totalBalance);
-    } catch (err) {
-      console.error(`[SyncService] Firestore mirror failed for ${airline} (Postgres write succeeded):`, err);
-    }
-  }
 
   return result;
 }

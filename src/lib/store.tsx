@@ -241,11 +241,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       fsListen<Balance[]>("balances", (data) => {
         const next = ensureAllAirlines(data);
         // Fires a toast for any airline whose balance actually changed
-        // between snapshots — covers BOTH a manual "Set Balance" from
-        // another device and a connector sync landing via
-        // FirestoreMirrorService, since both write to this same document.
-        // Skipped on the very first snapshot (page load), which isn't a
-        // "change" from the user's point of view.
+        // between snapshots — this collection is edited manually only
+        // (Airline Deposits' Set Balance/+Fund), never by a connector
+        // sync (see SyncService.ts). Skipped on the very first snapshot
+        // (page load), which isn't a "change" from the user's point of
+        // view.
         if (balancesInitialized.current) {
           next.forEach((b) => {
             const prevEntry = balancesRef.current.find((p) => p.airline === b.airline);

@@ -49,7 +49,16 @@ export class ConnectorError extends Error {
     message: string,
     public readonly step: string,
     public readonly airline: AirlineKey,
-    public readonly cause?: unknown
+    public readonly cause?: unknown,
+    // Set on errors where retrying with the SAME credentials can't
+    // possibly help (e.g. the portal rejected the login outright) — most
+    // agent accounts have their password rotated every 2-3 months, so a
+    // wrong-credentials failure almost always means the stored password
+    // is stale, not a fluke worth retrying. retryWithBackoff stops
+    // immediately when this is true, instead of hammering the live
+    // portal with the same bad password up to 3 times (which risks
+    // tripping the airline's own lockout policy).
+    public readonly nonRetryable?: boolean
   ) {
     super(message);
     this.name = "ConnectorError";

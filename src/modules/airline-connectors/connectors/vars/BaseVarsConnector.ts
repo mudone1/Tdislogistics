@@ -50,14 +50,39 @@ export abstract class BaseVarsConnector extends BaseConnector {
     const page = this.getPage();
     await page.goto(this.loginUrl, { waitUntil: "domcontentloaded" });
 
+    this.lastDialogMessage = null; // clear any leftover message from an earlier attempt
     await page.locator("#txtSineCode").fill(credentials.username);
     await page.locator("#txtPassword").fill(credentials.password);
     await page.locator("#btnOk").click();
 
     // #btnOk drives an async postback rather than a plain form submit, so
-    // there's no reliable navigation event to await — wait directly for
-    // the marker isLoggedIn() also checks.
-    await page.locator(LOGGED_IN_MARKER).waitFor({ state: "visible", timeout: 20000 });
+    // there's no reliable navigation event to await — poll for the
+    // logged-in marker, but also fail fast (and non-retryably) the
+    // moment a dialog appears, since that's how this portal surfaces a
+    // rejected login. Sine codes/passwords get rotated every 2-3 months
+    // — a rejected login almost always means the stored credential is
+    // stale, not a fluke, so hammering the live portal with 3 retries on
+    // the same bad password is both pointless and risks the airline's
+    // own lockout policy.
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline) {
+      if (this.lastDialogMessage) {
+        throw new ConnectorError(
+          `Login rejected — portal said: "${this.lastDialogMessage}". This almost always means the stored ` +
+            `password is stale (Sine code/password are reset every 2-3 months) — update credentials in Admin ` +
+            `and confirm they're correct before trying again; retrying automatically here would just repeat ` +
+            `the same failed login against the live portal.`,
+          "LOGIN_STARTED",
+          this.airline,
+          undefined,
+          true
+        );
+      }
+      if (await page.locator(LOGGED_IN_MARKER).isVisible().catch(() => false)) return;
+      await page.waitForTimeout(300);
+    }
+
+    throw new ConnectorError("Login did not reach an authenticated state within 20s", "LOGIN_STARTED", this.airline);
   }
 
   async isLoggedIn(): Promise<boolean> {
