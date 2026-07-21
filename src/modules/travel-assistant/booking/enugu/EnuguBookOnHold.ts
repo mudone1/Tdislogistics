@@ -219,10 +219,18 @@ async function selectCheapestFare(
     await panel.locator(`[data-classband="${cheaperBand}"] .flight-class-select-fare-text`).click({ timeout: 8000 });
   } catch (err) {
     const diagnostic = await panel.evaluate((panelEl, band) => {
-      const card = panelEl.querySelector(`[data-classband="${band}"]`);
+      const card = panelEl.querySelector<HTMLElement>(`[data-classband="${band}"]`);
+      const selectEl = card?.querySelector<HTMLElement>(".flight-class-select-fare-text") ?? null;
+      const footer = card?.querySelector<HTMLElement>(".panel-footer");
+      const rect = selectEl?.getBoundingClientRect();
       return {
         cardFound: !!card,
-        cardHtml: card ? card.outerHTML.slice(0, 1500) : null,
+        selectElFound: !!selectEl,
+        selectElVisible: selectEl ? !!selectEl.offsetParent : null,
+        selectElRect: rect ? { width: rect.width, height: rect.height } : null,
+        selectElClasses: selectEl?.className ?? null,
+        footerText: footer ? footer.textContent?.replace(/\s+/g, " ").trim().slice(0, 300) : null,
+        footerHtml: footer ? footer.outerHTML.slice(0, 1200) : null,
       };
     }, cheaperBand);
     console.log(`DIAGNOSTIC [enugu-booking] leg ${legIndex} band="${cheaperBand}" click failed: ${JSON.stringify(diagnostic)}`);
