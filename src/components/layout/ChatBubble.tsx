@@ -14,6 +14,21 @@ import {
 } from "@/modules/travel-assistant/formatting/formatFlightResults";
 import FlightCards, { type FlightLeg } from "./FlightCards";
 
+interface BookingResult {
+  pnr: string | null;
+  holdExpiresAt: string | null;
+  totalPayable: number | null;
+  currency: string | null;
+  screenshotUrl: string | null;
+}
+
+interface BookingState {
+  jobId: string;
+  status: "processing" | "success" | "failed";
+  result?: BookingResult;
+  error?: { message: string; detail: string | null };
+}
+
 interface ChatMessage {
   id: number;
   role: "user" | "assistant";
@@ -23,6 +38,7 @@ interface ChatMessage {
   showCards?: boolean;
   imageBlob?: Blob;
   salesReport?: { reportId: string; status: "pending" | "saved" | "discarded" };
+  booking?: BookingState;
 }
 
 const SALES_REPORT_AIRLINES: { key: string; label: string; aliases: string[] }[] = [
@@ -130,6 +146,13 @@ export default function ChatBubble() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const greeted = useRef(false);
+  // Guards the async book-on-hold poll loop from setting state after unmount.
+  const mounted = useRef(true);
+  useEffect(() => {
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const { setSessionKey, refresh } = useNotifications();
 
   useEffect(() => {
@@ -175,6 +198,54 @@ export default function ChatBubble() {
     }
   }, []);
 
+  // Polls a Book-on-Hold job until it's terminal, updating the message the
+  // "placing hold…" line is attached to. A hold is a multi-minute Playwright
+  // run, so this is patient: every 4s for up to ~6 minutes.
+  const pollBookingJob = useCallback((jobId: string, messageId: number): void => {
+    const POLL_MS = 4000;
+    const MAX_ATTEMPTS = 90; // ~6 min
+    let attempts = 0;
+
+    const setBooking = (booking: BookingState) =>
+      setMessages((m: ChatMessage[]) => m.map((msg) => (msg.id === messageId ? { ...msg, booking } : msg)));
+
+    const tick = async (): Promise<void> => {
+      if (!mounted.current) return;
+      attempts++;
+      try {
+        const res = await fetch(`/api/assistant/book-hold/${jobId}`, { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === "SUCCESS") {
+            setBooking({ jobId, status: "success", result: data.result });
+            return;
+          }
+          if (data.status === "FAILED") {
+            setBooking({ jobId, status: "failed", error: data.error });
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("[assistant] booking poll failed:", err);
+      }
+      if (attempts >= MAX_ATTEMPTS) {
+        setBooking({
+          jobId,
+          status: "failed",
+          error: {
+            message: "The hold is taking longer than expected — it may still complete. Check with an admin or try again.",
+            detail: null,
+          },
+        });
+        return;
+      }
+      if (mounted.current) setTimeout(tick, POLL_MS);
+    };
+
+    // First check after 3s — the run has barely started before then.
+    setTimeout(tick, 3000);
+  }, []);
+
   const sendMessage = useCallback(
     async (text: string): Promise<void> => {
       if (!text || sending) return;
@@ -203,12 +274,23 @@ export default function ChatBubble() {
         if (data.result) legs.push({ label: "", result: data.result });
         const hasResults = legs.some((l) => l.result.options.length > 0);
 
+        const bookingJobId: string | undefined = data.bookingJobId;
         const newId = idCounter++;
         setMessages((m: ChatMessage[]) => [
           ...m,
-          { id: newId, role: "assistant", text: data.reply || "No response.", hasResults, legs },
+          {
+            id: newId,
+            role: "assistant",
+            text: data.reply || "No response.",
+            hasResults,
+            legs,
+            booking: bookingJobId ? { jobId: bookingJobId, status: "processing" } : undefined,
+          },
         ]);
         setPending(data.pending ?? null);
+
+        // A Book-on-Hold was just started — poll for the PNR/outcome.
+        if (bookingJobId) pollBookingJob(bookingJobId, newId);
 
         // The notification itself is created server-side (durable, survives
         // reload); eagerly re-poll here just so the bell updates within a
@@ -233,7 +315,7 @@ export default function ChatBubble() {
         setSending(false);
       }
     },
-    [sending, pending, identity, refresh, prefetchQuoteImage]
+    [sending, pending, identity, refresh, prefetchQuoteImage, pollBookingJob]
   );
 
   async function handleGenerateReport(file: File, airlineKey: string, airlineLabel: string): Promise<void> {
@@ -651,6 +733,18 @@ function describeHttpError(status: number): string {
                       <span>Discarded</span>
                     </div>
                   )}
+                  {m.booking?.status === "processing" && (
+                    <div className="chat-bubble-msg assistant chat-bubble-typing">⏳ Placing the hold — this can take a minute or two…</div>
+                  )}
+                  {m.booking?.status === "success" && m.booking.result && (
+                    <BookingResultCard result={m.booking.result} />
+                  )}
+                  {m.booking?.status === "failed" && m.booking.error && (
+                    <div className="chat-bubble-msg assistant" style={{ borderLeft: "3px solid #e11d48" }}>
+                      ⚠️ {m.booking.error.message}
+                      {m.booking.error.detail ? errorContactNote(m.booking.error.detail) : ""}
+                    </div>
+                  )}
                 </div>
               ))}
               {(sending || generatingReport) && (
@@ -695,5 +789,42 @@ function describeHttpError(status: number): string {
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+// Confirmation card for a successful Book-on-Hold: PNR, hold expiry, total,
+// and the captured confirmation screenshot (same-origin, click to enlarge).
+function BookingResultCard({ result }: { result: BookingResult }) {
+  return (
+    <div
+      className="chat-bubble-msg assistant"
+      style={{ borderLeft: "3px solid #16a34a", display: "flex", flexDirection: "column", gap: 6 }}
+    >
+      <div>
+        <strong>✅ Hold confirmed</strong>
+      </div>
+      {result.pnr && (
+        <div>
+          Booking reference (PNR): <strong>{result.pnr}</strong>
+        </div>
+      )}
+      {result.holdExpiresAt && <div>Held until: {result.holdExpiresAt}</div>}
+      {result.totalPayable != null && (
+        <div>
+          Total payable: {result.currency ? `${result.currency} ` : ""}
+          {result.totalPayable.toLocaleString()}
+        </div>
+      )}
+      {result.screenshotUrl && (
+        <a href={result.screenshotUrl} target="_blank" rel="noopener noreferrer">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={result.screenshotUrl}
+            alt="Enugu Air booking confirmation"
+            style={{ maxWidth: "100%", borderRadius: 6, marginTop: 4 }}
+          />
+        </a>
+      )}
+    </div>
   );
 }
