@@ -227,7 +227,11 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     return { reply, result: data };
   } catch (err) {
     console.error("[travel-assistant] orchestrator search failed:", err);
-    const reply = "I couldn't complete that search just now — mind trying again in a moment?";
+    const reason = err instanceof Error ? err.message : String(err);
+    // Users of this chat are TDIS staff, not the public — surfacing the
+    // actual reason is deliberate, per explicit product direction, so it
+    // can be relayed to Muhammed (the developer) to fix.
+    const reply = `I couldn't complete that search just now — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
     return { reply };
   }
@@ -254,7 +258,12 @@ function describeAllFailed(failedAirlines: FailedAirline[]): string {
   }
 
   const names = failedAirlines.map((f) => f.airline).join(", ");
-  return `I couldn't reach any airline for that search just now (tried ${names}) — mind trying again in a moment?`;
+  const reasons = failedAirlines.map((f) => `${f.airline}: ${f.error}`).join("; ");
+  // Real connector/network failures, unlike a route an airline simply
+  // doesn't fly — per explicit product direction, TDIS staff using this
+  // chat should relay the actual reason to Muhammed (the developer) so
+  // he can fix it, not have it hidden the way it would from a customer.
+  return `I couldn't reach any airline for that search just now (tried ${names}) — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reasons}"`;
 }
 
 const FAILURE_CLAIM_PATTERNS = [/couldn'?t find/i, /couldn'?t reach/i, /no flights/i, /search failed/i, /didn'?t find/i];

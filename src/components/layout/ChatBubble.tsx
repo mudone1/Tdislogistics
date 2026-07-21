@@ -191,12 +191,13 @@ export default function ChatBubble() {
         }
       } catch (err) {
         console.error("[assistant] request threw:", err);
+        const reason = err instanceof Error ? err.message : String(err);
         setMessages((m: ChatMessage[]) => [
           ...m,
           {
             id: idCounter++,
             role: "assistant",
-            text: "Couldn't reach the search service — check your connection and try again.",
+            text: `Couldn't reach the search service — check your connection and try again.${errorContactNote(reason)}`,
           },
         ]);
         setPending(null);
@@ -377,14 +378,22 @@ export default function ChatBubble() {
     prefetchQuoteImage(newId, legs);
   }
 
-  function describeHttpError(status: number): string {
+  // Per explicit product direction: unlike a public customer-facing bot, this
+// tool's users are TDIS staff — the whole point of surfacing the actual
+// reason is so it can be relayed to Muhammed (the developer) to fix, not
+// hidden from them the way a stack trace would be from an end customer.
+function errorContactNote(reason: string): string {
+  return ` Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
+}
+
+function describeHttpError(status: number): string {
     if (status === 504) {
-      return "That search is taking longer than expected and timed out — try narrowing it (e.g. name one airline) or try again in a moment.";
+      return `That search is taking longer than expected and timed out — try narrowing it (e.g. name one airline) or try again in a moment.${errorContactNote(`HTTP 504`)}`;
     }
     if (status >= 500) {
-      return "The search service hit an error on its end — try again in a moment.";
+      return `The search service hit an error on its end — try again in a moment.${errorContactNote(`HTTP ${status}`)}`;
     }
-    return "That request didn't go through — try rephrasing it.";
+    return `That request didn't go through — try rephrasing it.${errorContactNote(`HTTP ${status}`)}`;
   }
 
   return (
