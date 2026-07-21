@@ -204,10 +204,30 @@ async function selectCheapestFare(
   }, fareClasses);
 
   if (!cheaperBand) {
+    const diagnostic = await panel.evaluate((panelEl) =>
+      Array.from(panelEl.querySelectorAll("[data-classband]")).map((card) => ({
+        band: card.getAttribute("data-classband"),
+        hasSelectText: !!card.querySelector(".flight-class-select-fare-text"),
+        text: (card.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200),
+      }))
+    );
+    console.log(`DIAGNOSTIC [enugu-booking] leg ${legIndex} classbands: ${JSON.stringify(diagnostic)}`);
     throw new Error(`Neither of ${fareClasses.join(", ")} is available on leg ${legIndex}`);
   }
 
-  await panel.locator(`[data-classband="${cheaperBand}"] .flight-class-select-fare-text`).click();
+  try {
+    await panel.locator(`[data-classband="${cheaperBand}"] .flight-class-select-fare-text`).click({ timeout: 8000 });
+  } catch (err) {
+    const diagnostic = await panel.evaluate((panelEl, band) => {
+      const card = panelEl.querySelector(`[data-classband="${band}"]`);
+      return {
+        cardFound: !!card,
+        cardHtml: card ? card.outerHTML.slice(0, 1500) : null,
+      };
+    }, cheaperBand);
+    console.log(`DIAGNOSTIC [enugu-booking] leg ${legIndex} band="${cheaperBand}" click failed: ${JSON.stringify(diagnostic)}`);
+    throw err;
+  }
 }
 
 async function clickNext(page: import("playwright").Page): Promise<void> {
