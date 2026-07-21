@@ -113,7 +113,7 @@ export async function bookEnuguAirOnHold(
       await selectCheapestFare(page, leg, request.fareClassPreference);
     }
 
-    await clickNext(page);
+    await clickNext(page, "fare-selection");
 
     // --- Products page: remove any auto-added add-ons (e.g. Travel Insurance) ---
     await page.locator(".RemoveProductButton2").first().waitFor({ state: "visible", timeout: 15000 }).catch(() => {
@@ -127,7 +127,7 @@ export async function bookEnuguAirOnHold(
       await page.waitForTimeout(300);
     }
 
-    await clickNext(page);
+    await clickNext(page, "products");
 
     // --- Passenger details ---
     console.log("[enugu-booking] filling passenger details");
@@ -160,7 +160,7 @@ export async function bookEnuguAirOnHold(
 
     // --- Submit the hold ---
     console.log("[enugu-booking] submitting hold");
-    await clickNext(page);
+    await clickNext(page, "payment-details");
     await page
       .locator("text=/PNR|Booking Reference|TTL Payment Instructions|Manage My Booking/i")
       .first()
@@ -243,12 +243,42 @@ async function selectCheapestFare(
     });
 }
 
-async function clickNext(page: import("playwright").Page): Promise<void> {
+async function clickNext(page: import("playwright").Page, stage: string): Promise<void> {
   const next = page
     .locator('button, a, input[type="submit"], input[type="button"]')
     .filter({ hasText: /^next$/i })
     .last();
-  await next.click();
+
+  try {
+    await next.click({ timeout: 15000 });
+  } catch (err) {
+    // Same custom-toggle-control pattern seen on the Return/OneWay,
+    // payment-method, and fare-select controls in this flow — try a
+    // JS-dispatched click before giving up, and log every button/link/input
+    // candidate on the page so a genuine "no Next button here" case is
+    // diagnosable instead of a bare timeout.
+    const dispatched = await page.evaluate(() => {
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLElement>('button, a, input[type="submit"], input[type="button"]')
+      );
+      const match = candidates.find((el) => /^\s*next\s*$/i.test(el.textContent ?? (el as HTMLInputElement).value ?? ""));
+      if (!match) return null;
+      match.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return true;
+    });
+
+    if (!dispatched) {
+      const candidates = await page.evaluate(() =>
+        Array.from(document.querySelectorAll<HTMLElement>('button, a, input[type="submit"], input[type="button"]'))
+          .map((el) => (el.textContent ?? (el as HTMLInputElement).value ?? "").trim())
+          .filter(Boolean)
+          .slice(0, 30)
+      );
+      console.log(`DIAGNOSTIC [enugu-booking] stage="${stage}" no Next control found among: ${JSON.stringify(candidates)}`);
+      throw err;
+    }
+  }
+
   await page.waitForLoadState("domcontentloaded").catch(() => {});
 }
 
