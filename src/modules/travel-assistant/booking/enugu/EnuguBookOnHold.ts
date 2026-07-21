@@ -189,7 +189,13 @@ async function selectCheapestFare(
       const card = panelEl.querySelector<HTMLElement>(`[data-classband="${band}"]`);
       const priceEl = card?.querySelector<HTMLElement>("[data-original-amount]");
       const amount = priceEl?.getAttribute("data-original-amount");
-      return { band, amount: amount ? parseFloat(amount) : null };
+      // A sold-out fare can still show a price (data-original-amount) but
+      // has no clickable "Select this fare" element — same soldOut signal
+      // VarsFlightSearch.ts's extractFlightOptions already uses. Confirmed
+      // via a real run: picking a sold-out band by price alone hung
+      // waiting for .flight-class-select-fare-text that doesn't exist.
+      const soldOut = !!card?.querySelector(".seats-none") || /sold out/i.test(card?.textContent ?? "");
+      return { band, amount: amount && !soldOut ? parseFloat(amount) : null };
     });
     const available = amounts.filter((a) => a.amount != null);
     if (available.length === 0) return null;
