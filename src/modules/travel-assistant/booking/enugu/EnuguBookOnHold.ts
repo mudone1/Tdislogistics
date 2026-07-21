@@ -215,27 +215,32 @@ async function selectCheapestFare(
     throw new Error(`Neither of ${fareClasses.join(", ")} is available on leg ${legIndex}`);
   }
 
-  try {
-    await panel.locator(`[data-classband="${cheaperBand}"] .flight-class-select-fare-text`).click({ timeout: 8000 });
-  } catch (err) {
-    const diagnostic = await panel.evaluate((panelEl, band) => {
-      const card = panelEl.querySelector<HTMLElement>(`[data-classband="${band}"]`);
-      const selectEl = card?.querySelector<HTMLElement>(".flight-class-select-fare-text") ?? null;
-      const footer = card?.querySelector<HTMLElement>(".panel-footer");
-      const rect = selectEl?.getBoundingClientRect();
-      return {
-        cardFound: !!card,
-        selectElFound: !!selectEl,
-        selectElVisible: selectEl ? !!selectEl.offsetParent : null,
-        selectElRect: rect ? { width: rect.width, height: rect.height } : null,
-        selectElClasses: selectEl?.className ?? null,
-        footerText: footer ? footer.textContent?.replace(/\s+/g, " ").trim().slice(0, 300) : null,
-        footerHtml: footer ? footer.outerHTML.slice(0, 1200) : null,
-      };
-    }, cheaperBand);
-    console.log(`DIAGNOSTIC [enugu-booking] leg ${legIndex} band="${cheaperBand}" click failed: ${JSON.stringify(diagnostic)}`);
-    throw err;
+  // Confirmed via a real run: "Select this fare" is a custom toggle span
+  // (sibling "Selected"/radio-icon spans swap visibility via a "hidden"
+  // class) with a zero-size layout box of its own — same underlying
+  // pattern as the Return/OneWay and payment-method controls elsewhere in
+  // this flow. Playwright's real-mouse-click actionability check fails on
+  // it, but the click handler is bound above the text node, so dispatching
+  // the event directly via JS works reliably (same fix already proven for
+  // those other two controls).
+  const clicked = await panel.evaluate((panelEl, band) => {
+    const card = panelEl.querySelector<HTMLElement>(`[data-classband="${band}"]`);
+    const selectEl = card?.querySelector<HTMLElement>(".flight-class-select-fare-text");
+    if (!selectEl) return false;
+    selectEl.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    return true;
+  }, cheaperBand);
+
+  if (!clicked) {
+    throw new Error(`"${cheaperBand}" fare card found but its select element is missing on leg ${legIndex}`);
   }
+
+  await panel
+    .locator(`[data-classband="${cheaperBand}"] .flight-class-selected-text`)
+    .waitFor({ state: "visible", timeout: 8000 })
+    .catch(() => {
+      /* best-effort confirmation — some deployments may not toggle this class */
+    });
 }
 
 async function clickNext(page: import("playwright").Page): Promise<void> {
