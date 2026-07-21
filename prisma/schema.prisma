@@ -324,3 +324,71 @@ model SalesTicket {
   @@index([reportId])
   @@map("sales_tickets")
 }
+
+// ─── Book-on-Hold jobs ───
+// A real Book-on-Hold is a multi-minute Playwright run on connector-service,
+// well past what a Vercel function (~60s) can hold open. So the chat (or any
+// future WhatsApp/mobile/3rd-party client) creates a job row, connector-
+// service runs the automation and writes the outcome (PNR, screenshot, PDF,
+// or error) back here, and the client polls until it's terminal. Screenshot
+// and PDF are stored inline as bytea — low volume, and keeping them with the
+// job row avoids a separate blob store. Passenger PII lives here because a
+// booking record inherently needs it; it is never written to logs.
+enum BookingJobStatus {
+  PENDING // created, not yet picked up
+  RUNNING // connector-service is executing the automation
+  SUCCESS // PNR generated
+  FAILED // see errorCategory/errorMessage
+}
+
+// User-friendly buckets the automation maps raw failures into (item 8), so
+// the chat never shows a raw stack trace.
+enum BookingErrorCategory {
+  LOGIN_FAILED
+  SESSION_EXPIRED
+  PORTAL_UNAVAILABLE
+  SEAT_UNAVAILABLE
+  INVALID_PASSENGER
+  ROUTE_NOT_SERVED
+  UNKNOWN
+}
+
+model BookingJob {
+  id         String           @id @default(cuid())
+  status     BookingJobStatus @default(PENDING)
+  airline    AirlineKey
+  sessionKey String? // which chat session (or API client) requested it
+
+  // Request
+  origin        String
+  destination   String
+  departureDate String // "YYYY-MM-DD"
+  returnDate    String? // omit for one-way
+  title         String   @default("Mr")
+  firstName     String
+  lastName      String
+  phone         String?
+  email         String?
+
+  // Result (populated on SUCCESS)
+  pnr          String?
+  holdExpiresAt String?
+  totalPayable Decimal? @db.Decimal(14, 2)
+  currency     String?
+  screenshot   Bytes? // PNG of the confirmation page (PNR + passenger visible)
+  pdf          Bytes? // generated confirmation PDF
+
+  // Failure (populated on FAILED)
+  errorCategory BookingErrorCategory?
+  errorMessage  String?
+
+  createdBy   String?
+  durationMs  Int?
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  finishedAt  DateTime?
+
+  @@index([sessionKey, createdAt])
+  @@index([status])
+  @@map("booking_jobs")
+}

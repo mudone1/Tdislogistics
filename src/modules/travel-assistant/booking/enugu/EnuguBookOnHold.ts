@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { generateConfirmationPdf } from "../BookingConfirmationDoc";
 
 // Same VARS/Videcom agent portal as EnuguConnector.ts (wallet-balance
 // sync) — reuses its exact login mechanism (Sine code + password, a
@@ -43,6 +44,11 @@ export interface BookOnHoldResult {
   totalPayable: number | null;
   currency: string | null;
   raw: string;
+  // Populated after a successful hold: PNG of the airline's own confirmation
+  // page (immediate proof) and a generated TDIS-branded PDF confirmation.
+  // Optional so parseConfirmation() can build the base result without them.
+  screenshot?: Buffer | null;
+  pdf?: Buffer | null;
 }
 
 export async function bookEnuguAirOnHold(
