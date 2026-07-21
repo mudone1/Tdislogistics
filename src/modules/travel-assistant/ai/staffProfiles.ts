@@ -29,12 +29,23 @@ export interface StaffProfile {
 // Order roughly follows the source document (Managing Director first).
 export const STAFF_PROFILES: StaffProfile[] = [
   {
-    name: "The Managing Director",
-    aliases: ["managing director", "md", "the md", "director"],
-    role: "Managing Director — strategic anchor of the organization",
+    name: "Mr. Adewale Adelabu",
+    aliases: [
+      "adewale adelabu",
+      "adewale",
+      "adelabu",
+      "mr adewale",
+      "mr adelabu",
+      "managing director",
+      "md",
+      "the md",
+      "director",
+    ],
+    role: "Managing Director of TDIS — strategic anchor of the organization",
     strengths:
       "Vision-driven leadership: listens first, solves customer problems before selling, empowers people, thinks long-term, executes decisively, and develops those around him.",
-    summary: "The strategic anchor of TDIS — a vision-driven leader focused on people and long-term growth.",
+    summary:
+      "Managing Director of TDIS and its strategic anchor — a vision-driven leader focused on people and long-term growth.",
   },
   {
     name: "Bisi",
