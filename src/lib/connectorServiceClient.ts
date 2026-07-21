@@ -28,4 +28,8 @@ export const connectorServiceClient = {
   sync: (airline: string, trigger: "MANUAL" | "SCHEDULED" = "MANUAL") =>
     call(`/internal/connectors/${airline}/sync`, { method: "POST", body: JSON.stringify({ trigger }) }),
   test: (airline: string) => call(`/internal/connectors/${airline}/test`, { method: "POST" }),
+  // Kicks off a Book-on-Hold run for an already-created BookingJob row. Returns
+  // 202 immediately; the outcome is written back to the row and polled from there.
+  bookHold: (jobId: string) =>
+    call(`/internal/travel-assistant/book-hold`, { method: "POST", body: JSON.stringify({ jobId }) }),
 };

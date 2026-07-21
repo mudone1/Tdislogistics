@@ -10,7 +10,9 @@ import { searchEnuguAirFlights } from "../../src/modules/travel-assistant/search
 import { searchUnitedNigeriaFlights } from "../../src/modules/travel-assistant/search/united/UnitedNigeriaSearch";
 import { searchXeJetFlights } from "../../src/modules/travel-assistant/search/xejet/XeJetSearch";
 import { searchRanoAirFlights } from "../../src/modules/travel-assistant/search/rano/RanoAirSearch";
-import { bookEnuguAirOnHold, type BookOnHoldRequest } from "../../src/modules/travel-assistant/booking/enugu/EnuguBookOnHold";
+import { bookEnuguAirOnHold } from "../../src/modules/travel-assistant/booking/enugu/EnuguBookOnHold";
+import { BookingJobRepository } from "../../src/modules/travel-assistant/storage/BookingJobRepository";
+import { categorizeBookingError } from "../../src/modules/travel-assistant/booking/categorizeBookingError";
 import { decryptSecret } from "../../src/modules/airline-connectors/services/CredentialService";
 import type { FlightSearchQuery, FlightSearchResult } from "../../src/modules/travel-assistant/core/types";
 
@@ -158,27 +160,46 @@ const BOOK_ON_HOLD_HANDLERS: Record<string, typeof bookEnuguAirOnHold> = {
   ENUGU: bookEnuguAirOnHold,
 };
 
-// Credentials are decrypted here, immediately before use, and never
-// logged or included in the response — same rule CredentialService
-// documents for SyncService. The caller (Next.js) never sees the
-// plaintext or the encrypted value; it only ever asks this service to
-// act, exactly like /internal/connectors/:airline/sync already does.
+// Job-based Book-on-Hold. Unlike the old fire-and-forget version, the
+// outcome (PNR, screenshot, or a categorized error) is now written back to
+// the BookingJob row so any client — the chat today — can poll for it. The
+// row is created by the caller (Next.js) with all request fields; we only
+// receive its id, load it, run the multi-minute automation, and update it.
+//
+// Credentials are decrypted here, immediately before use, and never logged
+// or included in a response — same rule CredentialService documents for
+// SyncService. We still respond 202 immediately because the automation far
+// outlasts any reasonable HTTP hold; progress lives in the row, not the
+// connection.
 app.post("/internal/travel-assistant/book-hold", async (req, res) => {
-  const airline = (req.body?.airline || "ENUGU").toUpperCase();
-  const handler = BOOK_ON_HOLD_HANDLERS[airline];
-  if (!handler) {
-    res.status(404).json({ error: `"${airline}" has no book-on-hold automation implemented` });
+  const jobId = req.body?.jobId;
+  if (!jobId || typeof jobId !== "string") {
+    res.status(400).json({ error: "jobId is required" });
     return;
   }
 
-  const { origin, destination, departureDate, returnDate, fareClassPreference, passenger } = req.body || {};
-  if (!origin || !destination || !departureDate || !passenger?.firstName || !passenger?.lastName) {
-    res.status(400).json({ error: "origin, destination, departureDate, and passenger.firstName/lastName are required" });
+  const job = await BookingJobRepository.findById(jobId);
+  if (!job) {
+    res.status(404).json({ error: `No booking job ${jobId}` });
+    return;
+  }
+  if (job.status !== "PENDING") {
+    // Already picked up (or terminal) — never run the same hold twice.
+    res.status(409).json({ error: `Job ${jobId} is ${job.status}, not PENDING`, status: job.status });
+    return;
+  }
+
+  const airline = job.airline;
+  const handler = BOOK_ON_HOLD_HANDLERS[airline];
+  if (!handler) {
+    await BookingJobRepository.markFailed(jobId, "UNKNOWN", `"${airline}" has no book-on-hold automation implemented`, 0);
+    res.status(404).json({ error: `"${airline}" has no book-on-hold automation implemented` });
     return;
   }
 
   const settings = await AirlineWalletRepository.getSettings(airline);
   if (!settings?.encryptedUsername || !settings.encryptedPassword) {
+    await BookingJobRepository.markFailed(jobId, "LOGIN_FAILED", `No credentials configured for ${airline}`, 0);
     res.status(502).json({ error: `No credentials configured for ${airline}` });
     return;
   }
@@ -187,29 +208,56 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
     password: decryptSecret(settings.encryptedPassword),
   };
 
-  console.log(`[book-hold] starting ${airline} ${origin}->${destination} ${departureDate}${returnDate ? ` / return ${returnDate}` : ""}`);
-
-  // Fire-and-forget, same reasoning as /internal/connectors/:airline/sync:
-  // login + search + fare selection + passenger form + submission is a
-  // multi-minute Playwright flow, well past what most HTTP clients/proxies
-  // hold a connection open for. Respond immediately and log the outcome
-  // instead of making the caller hold a long-lived connection.
-  res.status(202).json({ accepted: true, airline });
+  console.log(
+    `[book-hold] starting job=${jobId} ${airline} ${job.origin}->${job.destination} ${job.departureDate}${job.returnDate ? ` / return ${job.returnDate}` : ""}`
+  );
+  await BookingJobRepository.markRunning(jobId);
+  const startedAt = Date.now();
+  res.status(202).json({ accepted: true, jobId, airline });
 
   handler(credentials, {
-    origin,
-    destination,
-    departureDate,
-    returnDate,
-    fareClassPreference: fareClassPreference ?? ["Economy Promo", "Economy Saver"],
-    passenger,
+    origin: job.origin,
+    destination: job.destination,
+    departureDate: job.departureDate,
+    returnDate: job.returnDate ?? undefined,
+    // Not stored on the job — same two bands the old endpoint defaulted to;
+    // the automation picks whichever is cheaper per leg.
+    fareClassPreference: ["Economy Promo", "Economy Saver"],
+    passenger: {
+      title: job.title,
+      firstName: job.firstName,
+      lastName: job.lastName,
+      mobileNumber: job.phone ?? "",
+      email: job.email ?? "",
+    },
   })
-    .then((result) => {
-      console.log(`[book-hold] ${airline} result: ${JSON.stringify(result)}`);
+    .then(async (result) => {
+      const durationMs = Date.now() - startedAt;
+      // A confirmation page with no parseable PNR is a soft failure — the
+      // hold may not have gone through — so treat a null PNR as FAILED rather
+      // than reporting a success the staff can't act on.
+      if (!result.pnr) {
+        console.error(`[book-hold] job=${jobId} finished with no PNR after ${durationMs}ms`);
+        await BookingJobRepository.markFailed(jobId, "UNKNOWN", "Completed the flow but no PNR was found on the confirmation page", durationMs);
+        return;
+      }
+      console.log(`[book-hold] job=${jobId} SUCCESS pnr=${result.pnr} in ${durationMs}ms`);
+      await BookingJobRepository.markSuccess(jobId, {
+        pnr: result.pnr,
+        holdExpiresAt: result.holdExpiresAt,
+        totalPayable: result.totalPayable,
+        currency: result.currency,
+        screenshot: result.screenshot,
+        durationMs,
+      });
     })
-    .catch((err) => {
+    .catch(async (err) => {
+      const durationMs = Date.now() - startedAt;
       const message = err instanceof Error ? err.message : String(err);
-      console.error(`[book-hold] ${airline} FAILED:`, message);
+      console.error(`[book-hold] job=${jobId} FAILED after ${durationMs}ms:`, message);
+      await BookingJobRepository.markFailed(jobId, categorizeBookingError(message), message, durationMs).catch((e) => {
+        console.error(`[book-hold] job=${jobId} could not record failure:`, e);
+      });
     });
 });
 
