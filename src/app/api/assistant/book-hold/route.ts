@@ -1,14 +1,8 @@
 import { NextResponse } from "next/server";
-import { connectorServiceClient } from "@/lib/connectorServiceClient";
-import { BookingJobRepository } from "@/modules/travel-assistant/storage/BookingJobRepository";
+import { startBookOnHold, BOOKABLE_AIRLINES } from "@/modules/travel-assistant/booking/startBookOnHold";
 import type { AirlineKey } from "@prisma/client";
 
 export const maxDuration = 60;
-
-// Airlines with a Book-on-Hold automation wired up. Others are rejected up
-// front rather than creating a job that could never run. Keep in sync with
-// BOOK_ON_HOLD_HANDLERS in connector-service/src/server.ts.
-const BOOKABLE_AIRLINES = new Set<AirlineKey>(["ENUGU"]);
 
 interface BookHoldBody {
   airline?: string;
@@ -62,11 +56,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "returnDate must be YYYY-MM-DD" }, { status: 400 });
   }
 
-  const job = await BookingJobRepository.create({
+  const result = await startBookOnHold({
     airline,
     sessionKey: body.sessionKey ?? null,
-    origin: body.origin!.toUpperCase(),
-    destination: body.destination!.toUpperCase(),
+    origin: body.origin!,
+    destination: body.destination!,
     departureDate: body.departureDate!,
     returnDate: body.returnDate ?? null,
     title: body.title,
@@ -77,22 +71,7 @@ export async function POST(req: Request) {
     createdBy: body.createdBy ?? null,
   });
 
-  try {
-    const { ok, status, body: triggerBody } = await connectorServiceClient.bookHold(job.id);
-    if (!ok) {
-      // connector-service reachable but refused the job — surface it and mark
-      // the job failed so the client doesn't poll a job that will never run.
-      const reason = (triggerBody as { error?: string })?.error || `connector-service returned ${status}`;
-      await BookingJobRepository.markFailed(job.id, "UNKNOWN", reason, 0);
-      return NextResponse.json({ jobId: job.id, status: "FAILED", error: reason }, { status: 502 });
-    }
-  } catch (err) {
-    // connector-service unreachable — same treatment, categorized as a portal
-    // problem so the chat shows the right friendly line.
-    const reason = err instanceof Error ? err.message : String(err);
-    await BookingJobRepository.markFailed(job.id, "PORTAL_UNAVAILABLE", reason, 0);
-    return NextResponse.json({ jobId: job.id, status: "FAILED", error: reason }, { status: 503 });
-  }
-
-  return NextResponse.json({ jobId: job.id, status: "PENDING" }, { status: 202 });
+  // 502 when the trigger couldn't be delivered (job already marked FAILED), 202
+  // when the run is under way and the caller should start polling.
+  return NextResponse.json(result, { status: result.status === "FAILED" ? 502 : 202 });
 }

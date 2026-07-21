@@ -5,6 +5,7 @@ import { ChatMemoryRepository } from "../storage/ChatMemoryRepository";
 import { FlightSearchHistoryRepository } from "../storage/FlightSearchHistoryRepository";
 import { NotificationRepository } from "../storage/NotificationRepository";
 import { formatLeg, formatRouteHeader } from "../formatting/formatFlightResults";
+import { startBookOnHold } from "../booking/startBookOnHold";
 import type {
   AssistantTurn,
   ConversationSlots,
@@ -27,6 +28,9 @@ export interface OrchestratorOutput {
   outbound?: FlightSearchResult;
   return?: FlightSearchResult;
   result?: FlightSearchResult;
+  // Set when a Book-on-Hold has just been started — the chat polls
+  // GET /api/assistant/book-hold/[id] with this until the job is terminal.
+  bookingJobId?: string;
 }
 
 const EMPTY_SLOTS: ConversationSlots = {
@@ -40,6 +44,11 @@ const EMPTY_SLOTS: ConversationSlots = {
   infants: null,
   airline: null,
   cabinClass: null,
+  passengerTitle: null,
+  passengerFirstName: null,
+  passengerLastName: null,
+  passengerPhone: null,
+  passengerEmail: null,
 };
 
 const REQUIRED_SEARCH_SLOTS = ["origin", "destination", "date"] as const;
@@ -105,6 +114,10 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
   const turn = await runIntentDetection(input.message, slots, priorMessages);
 
   await ChatMemoryRepository.appendMessage(session.id, "USER", input.message, turn.intent, turn.entities);
+
+  if (turn.intent === "BOOK_ON_HOLD") {
+    return handleBookOnHold(session.id, input.sessionKey, slots, turn, input.message);
+  }
 
   if (!SEARCH_INTENTS.has(turn.intent)) {
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", turn.reply);
@@ -343,6 +356,11 @@ async function runIntentDetection(
       infants: parsed.entities?.infants ?? null,
       airline: parsed.entities?.airline ?? null,
       cabinClass: parsed.entities?.cabinClass ?? null,
+      passengerTitle: parsed.entities?.passengerTitle ?? null,
+      passengerFirstName: parsed.entities?.passengerFirstName ?? null,
+      passengerLastName: parsed.entities?.passengerLastName ?? null,
+      passengerPhone: parsed.entities?.passengerPhone ?? null,
+      passengerEmail: parsed.entities?.passengerEmail ?? null,
     },
     missingRequiredSlots: parsed.missingRequiredSlots ?? [],
     reply: parsed.reply ?? "Sorry, could you rephrase that?",
@@ -373,6 +391,13 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
     slots.airline = e.airline;
   }
   if (e.cabinClass) slots.cabinClass = e.cabinClass;
+  // Passenger details (only ever populated on a Book-on-Hold turn). Trimmed;
+  // blanks are ignored so a later turn can fill a gap without clobbering.
+  if (e.passengerTitle?.trim()) slots.passengerTitle = e.passengerTitle.trim();
+  if (e.passengerFirstName?.trim()) slots.passengerFirstName = e.passengerFirstName.trim();
+  if (e.passengerLastName?.trim()) slots.passengerLastName = e.passengerLastName.trim();
+  if (e.passengerPhone?.trim()) slots.passengerPhone = e.passengerPhone.trim();
+  if (e.passengerEmail?.trim()) slots.passengerEmail = e.passengerEmail.trim();
 }
 
 function messageActuallyNamesAirline(rawMessage: string, airline: string): boolean {
@@ -394,6 +419,138 @@ function resetRouteSlots(slots: ConversationSlots): void {
   slots.returnDate = null;
   slots.isRoundTrip = false;
   slots.airline = null;
+}
+
+// ─── Book-on-Hold ───────────────────────────────────────────────────────
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Resolve a named carrier to its key, or null if the user didn't name a known
+// airline. Reuses the same alias table the search path uses.
+function resolveNamedAirline(pref: string | null): string | null {
+  if (!pref) return null;
+  const p = pref.toLowerCase();
+  for (const [name, key] of Object.entries(AIRLINE_NAME_MATCHERS)) {
+    if (p.includes(name)) return key;
+  }
+  return null;
+}
+
+// Local phone -> digits only; the automation strips the leading 0 and the
+// +234 prefix is fixed on the form. Returns null if it isn't plausibly a phone.
+function normalizePhone(phone: string): string | null {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 7 ? digits : null;
+}
+
+interface BookingGap {
+  label: string;
+}
+
+// What's still needed before a hold can be placed — missing route/date slots
+// plus passenger details, and email/phone that were given but don't validate.
+function collectBookingGaps(slots: ConversationSlots): BookingGap[] {
+  const gaps: BookingGap[] = [];
+  if (!slots.origin) gaps.push({ label: "departure city" });
+  if (!slots.destination) gaps.push({ label: "destination" });
+  if (!slots.date) gaps.push({ label: "travel date" });
+  if (slots.isRoundTrip && !slots.returnDate) gaps.push({ label: "return date" });
+  if (!slots.passengerFirstName) gaps.push({ label: "passenger's first name" });
+  if (!slots.passengerLastName) gaps.push({ label: "passenger's last name" });
+  if (!slots.passengerPhone) gaps.push({ label: "passenger's phone number" });
+  else if (!normalizePhone(slots.passengerPhone)) gaps.push({ label: "a valid phone number (that one didn't look right)" });
+  if (!slots.passengerEmail) gaps.push({ label: "passenger's email" });
+  else if (!EMAIL_RE.test(slots.passengerEmail)) gaps.push({ label: "a valid email address (that one didn't look right)" });
+  return gaps;
+}
+
+function buildBookingClarifyingQuestion(gaps: BookingGap[]): string {
+  const labels = gaps.map((g) => g.label);
+  const joined =
+    labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+  return `Happy to place that hold. Could you give me the ${joined}?`;
+}
+
+function resetBookingSlots(slots: ConversationSlots): void {
+  resetRouteSlots(slots);
+  slots.passengerTitle = null;
+  slots.passengerFirstName = null;
+  slots.passengerLastName = null;
+  slots.passengerPhone = null;
+  slots.passengerEmail = null;
+}
+
+// Drives the Book-on-Hold conversation: gather route + passenger details over
+// as many turns as needed, then create the job and hand its id back for the
+// chat to poll. Enugu Air only for now — a named other carrier is declined
+// rather than silently swapped.
+async function handleBookOnHold(
+  sessionId: string,
+  sessionKey: string,
+  slots: ConversationSlots,
+  turn: AssistantTurn,
+  rawMessage: string
+): Promise<OrchestratorOutput> {
+  mergeEntitiesIntoSlots(slots, turn, rawMessage);
+
+  const named = resolveNamedAirline(slots.airline);
+  if (named && named !== "ENUGU") {
+    const reply = `Right now I can only place a Book-on-Hold with Enugu Air — ${named} isn't wired up for holds yet. Want me to hold an Enugu Air flight instead?`;
+    await ChatMemoryRepository.updateSlots(sessionId, slots);
+    await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+    return { reply };
+  }
+
+  const gaps = collectBookingGaps(slots);
+  if (gaps.length > 0) {
+    const reply = buildBookingClarifyingQuestion(gaps);
+    await ChatMemoryRepository.updateSlots(sessionId, slots);
+    await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+    return { reply };
+  }
+
+  if (!BASE_URL || !API_KEY) {
+    const reply = "The booking service isn't configured yet — ask an admin to check CONNECTOR_SERVICE_URL.";
+    await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+    return { reply };
+  }
+
+  const paxName = [slots.passengerTitle, slots.passengerFirstName, slots.passengerLastName]
+    .filter(Boolean)
+    .join(" ");
+  const routeLine = `${slots.origin}→${slots.destination} on ${slots.date}${
+    slots.isRoundTrip && slots.returnDate ? `, returning ${slots.returnDate}` : ""
+  }`;
+
+  const result = await startBookOnHold({
+    airline: "ENUGU",
+    sessionKey,
+    origin: slots.origin!,
+    destination: slots.destination!,
+    departureDate: slots.date!,
+    returnDate: slots.isRoundTrip ? slots.returnDate : null,
+    title: slots.passengerTitle ?? "Mr",
+    firstName: slots.passengerFirstName!,
+    lastName: slots.passengerLastName!,
+    phone: normalizePhone(slots.passengerPhone!)!, // validated non-null by collectBookingGaps
+    email: slots.passengerEmail!,
+    createdBy: sessionKey,
+  });
+
+  // Clear route + passenger slots so the next hold or search starts clean,
+  // whether or not the trigger succeeded (a retry re-gathers details).
+  resetBookingSlots(slots);
+  await ChatMemoryRepository.updateSlots(sessionId, slots);
+
+  if (result.status === "FAILED") {
+    const reply = `I couldn't start the Enugu Air hold just now — mind trying again in a moment? Please tell Muhammed the reason, and he'll fix it: "${result.error ?? "unknown error"}"`;
+    await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+    return { reply };
+  }
+
+  const reply = `Got it — I'm placing an Enugu Air hold for ${paxName}, ${routeLine}. This takes a minute or two; I'll show the PNR right here as soon as it's done.`;
+  await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+  return { reply, bookingJobId: result.jobId };
 }
 
 // Queries every requested airline CONCURRENTLY (Promise.allSettled — never

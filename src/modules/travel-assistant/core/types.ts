@@ -39,6 +39,7 @@ export type ChatIntent =
   | "SMALL_TALK"
   | "FLIGHT_SEARCH_ONE_WAY"
   | "FLIGHT_SEARCH_ROUND_TRIP"
+  | "BOOK_ON_HOLD"
   | "BOOKING_ASSISTANCE"
   | "TICKET_AVAILABILITY"
   | "AIRLINE_INFO"
@@ -59,6 +60,13 @@ export interface ConversationSlots {
   infants: number | null;
   airline: string | null;
   cabinClass: string | null;
+  // Passenger details, only gathered for a Book-on-Hold. Kept alongside the
+  // route slots so the assistant asks only for what's still missing.
+  passengerTitle: string | null; // Mr | Mrs | Ms | Dr | Miss | ...
+  passengerFirstName: string | null;
+  passengerLastName: string | null;
+  passengerPhone: string | null;
+  passengerEmail: string | null;
 }
 
 export interface ChatEntities {
@@ -71,6 +79,11 @@ export interface ChatEntities {
   infants: number | null;
   airline: string | null;
   cabinClass: string | null;
+  passengerTitle: string | null;
+  passengerFirstName: string | null;
+  passengerLastName: string | null;
+  passengerPhone: string | null;
+  passengerEmail: string | null;
 }
 
 export interface AssistantTurn {
