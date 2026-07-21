@@ -22,6 +22,27 @@ interface ChatMessage {
   legs?: FlightLeg[];
   showCards?: boolean;
   imageBlob?: Blob;
+  salesReport?: { reportId: string; status: "pending" | "saved" | "discarded" };
+}
+
+const SALES_REPORT_AIRLINES: { key: string; label: string; aliases: string[] }[] = [
+  { key: "AERO", label: "Aero", aliases: ["aero"] },
+  { key: "AIRPEACE", label: "Airpeace", aliases: ["airpeace", "air peace"] },
+  { key: "IBOM", label: "Ibom", aliases: ["ibom"] },
+  { key: "ARIK", label: "Arik", aliases: ["arik"] },
+];
+
+function matchSalesReportAirline(text: string): { key: string; label: string } | null {
+  const t = text.toLowerCase();
+  const match = SALES_REPORT_AIRLINES.find((a) => a.aliases.some((alias) => t.includes(alias)));
+  return match ? { key: match.key, label: match.label } : null;
+}
+
+function detectAttachmentKind(file: File): "excel" | "image" | "other" {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "excel";
+  if (file.type.startsWith("image/")) return "image";
+  return "other";
 }
 
 interface PendingRoundTrip {
@@ -100,7 +121,14 @@ export default function ChatBubble() {
   const [historyOpen, setHistoryOpen] = useState<boolean>(false);
   const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState<boolean>(false);
+  // Set once an Excel sales-report file is attached, cleared once the user
+  // names the airline (or cancels) — while set, the next typed message is
+  // interpreted as an airline answer instead of a flight-search query.
+  const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null);
+  const [generatingReport, setGeneratingReport] = useState<boolean>(false);
+  const [reportBusy, setReportBusy] = useState<Record<number, "saving" | "discarding" | undefined>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const greeted = useRef(false);
   const { setSessionKey, refresh } = useNotifications();
 
@@ -208,10 +236,155 @@ export default function ChatBubble() {
     [sending, pending, identity, refresh, prefetchQuoteImage]
   );
 
+  async function handleGenerateReport(file: File, airlineKey: string, airlineLabel: string): Promise<void> {
+    setGeneratingReport(true);
+    try {
+      const form = new FormData();
+      form.set("airline", airlineKey);
+      form.append("files", file);
+      const res = await fetch("/api/sales-reports/generate", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+      const needsReviewNote = data.needsReview
+        ? `\n\n⚠️ Confidence ${Math.round(data.confidence * 100)}% — please double-check before saving.`
+        : "";
+      const unknownStaffNote =
+        data.unknownStaff?.length > 0
+          ? `\n\nUnrecognized staff codes (won't block saving, but worth naming in Admin → Sales Reports next time): ${data.unknownStaff.join(", ")}`
+          : "";
+
+      setMessages((m: ChatMessage[]) => [
+        ...m,
+        {
+          id: idCounter++,
+          role: "assistant",
+          text: `${data.reportText}${needsReviewNote}${unknownStaffNote}\n\nPlease verify this report. Reply Save if everything is correct, or Discard to cancel.`,
+          salesReport: { reportId: data.reportId, status: "pending" },
+        },
+      ]);
+    } catch (err) {
+      console.error("[assistant] sales report generation failed:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      setMessages((m: ChatMessage[]) => [
+        ...m,
+        {
+          id: idCounter++,
+          role: "assistant",
+          text: `Couldn't generate that report for ${airlineLabel} just now.${errorContactNote(reason)}`,
+        },
+      ]);
+    } finally {
+      setGeneratingReport(false);
+    }
+  }
+
+  function handleFileSelected(e: ChangeEvent<HTMLInputElement>): void {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+
+    setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text: `📎 ${file.name}` }]);
+
+    const kind = detectAttachmentKind(file);
+    if (kind === "excel") {
+      setPendingUploadFile(file);
+      setMessages((m: ChatMessage[]) => [
+        ...m,
+        {
+          id: idCounter++,
+          role: "assistant",
+          text: "Got it — which airline is this sales report for? Aero, Airpeace, Ibom, or Arik? (Reply \"cancel\" to skip this upload.)",
+        },
+      ]);
+      return;
+    }
+
+    if (kind === "image") {
+      setMessages((m: ChatMessage[]) => [
+        ...m,
+        {
+          id: idCounter++,
+          role: "assistant",
+          text: "I can see that's an image, but I can't process screenshots in chat yet — that's coming soon. Excel sales-report exports (.xls/.xlsx) work right now, or you can generate a report from a screenshot in Admin → Sales Reports once that's available.",
+        },
+      ]);
+      return;
+    }
+
+    setMessages((m: ChatMessage[]) => [
+      ...m,
+      {
+        id: idCounter++,
+        role: "assistant",
+        text: "I can only process Excel sales-report exports (.xls/.xlsx) here right now — other file types aren't supported yet.",
+      },
+    ]);
+  }
+
+  async function saveSalesReport(m: ChatMessage): Promise<void> {
+    if (!m.salesReport) return;
+    setReportBusy((b) => ({ ...b, [m.id]: "saving" }));
+    try {
+      const res = await fetch(`/api/sales-reports/${m.salesReport.reportId}/confirm`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ verifiedBy: identity?.displayName || identity?.sessionKey || "chat" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setMessages((msgs) => msgs.map((msg) => (msg.id === m.id ? { ...msg, salesReport: { ...msg.salesReport!, status: "saved" } } : msg)));
+    } catch (err) {
+      console.error("[assistant] sales report save failed:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      setMessages((msgs) => [
+        ...msgs,
+        { id: idCounter++, role: "assistant", text: `Couldn't save that report.${errorContactNote(reason)}` },
+      ]);
+    } finally {
+      setReportBusy((b) => ({ ...b, [m.id]: undefined }));
+    }
+  }
+
+  async function discardSalesReport(m: ChatMessage): Promise<void> {
+    if (!m.salesReport) return;
+    setReportBusy((b) => ({ ...b, [m.id]: "discarding" }));
+    try {
+      await fetch(`/api/sales-reports/${m.salesReport.reportId}/discard`, { method: "POST" });
+    } catch (err) {
+      console.error("[assistant] sales report discard failed:", err);
+    } finally {
+      setMessages((msgs) => msgs.map((msg) => (msg.id === m.id ? { ...msg, salesReport: { ...msg.salesReport!, status: "discarded" } } : msg)));
+      setReportBusy((b) => ({ ...b, [m.id]: undefined }));
+    }
+  }
+
   function send(): void {
     const text = input.trim();
     if (!text) return;
     setInput("");
+
+    if (pendingUploadFile) {
+      const file = pendingUploadFile;
+      if (/^cancel$/i.test(text)) {
+        setPendingUploadFile(null);
+        setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }, { id: idCounter++, role: "assistant", text: "Cancelled that upload." }]);
+        return;
+      }
+      const airline = matchSalesReportAirline(text);
+      setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
+      if (!airline) {
+        setMessages((m: ChatMessage[]) => [
+          ...m,
+          { id: idCounter++, role: "assistant", text: 'I didn\'t recognize that airline — please reply Aero, Airpeace, Ibom, or Arik, or "cancel" to skip this upload.' },
+        ]);
+        return;
+      }
+      setPendingUploadFile(null);
+      handleGenerateReport(file, airline.key, airline.label);
+      return;
+    }
+
     sendMessage(text);
   }
 
@@ -466,23 +639,61 @@ function describeHttpError(status: number): string {
                       <button onClick={() => toggleCards(m.id)}>{m.showCards ? "View Text" : "View Quote"}</button>
                     </div>
                   )}
+                  {m.salesReport?.status === "pending" && (
+                    <div className="chat-bubble-msg-actions">
+                      <button onClick={() => saveSalesReport(m)} disabled={!!reportBusy[m.id]}>
+                        {reportBusy[m.id] === "saving" ? "Saving…" : "Save Report"}
+                      </button>
+                      <button onClick={() => discardSalesReport(m)} disabled={!!reportBusy[m.id]}>
+                        {reportBusy[m.id] === "discarding" ? "Discarding…" : "Discard"}
+                      </button>
+                    </div>
+                  )}
+                  {m.salesReport?.status === "saved" && (
+                    <div className="chat-bubble-msg-actions">
+                      <span>✓ Saved</span>
+                    </div>
+                  )}
+                  {m.salesReport?.status === "discarded" && (
+                    <div className="chat-bubble-msg-actions">
+                      <span>Discarded</span>
+                    </div>
+                  )}
                 </div>
               ))}
-              {sending && (
-                <div className="chat-bubble-msg assistant chat-bubble-typing">🔍 Searching available flights…</div>
+              {(sending || generatingReport) && (
+                <div className="chat-bubble-msg assistant chat-bubble-typing">
+                  {generatingReport ? "📊 Generating sales report…" : "🔍 Searching available flights…"}
+                </div>
               )}
             </div>
 
             <div className="chat-bubble-input-row">
               <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xls,.xlsx,image/*,application/pdf"
+                style={{ display: "none" }}
+                onChange={handleFileSelected}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sending || generatingReport}
+                aria-label="Attach a file"
+                title="Attach a sales report, booking screenshot, or other document"
+              >
+                +
+              </button>
+              <input
                 type="text"
-                placeholder={pending ? "Return date…" : "Type a route and date…"}
+                placeholder={pendingUploadFile ? "Which airline? (Aero, Airpeace, Ibom, Arik)" : pending ? "Return date…" : "Type a route and date…"}
                 value={input}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setInput(e.target.value)}
                 onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && send()}
-                disabled={sending}
+                disabled={sending || generatingReport}
               />
-              <button onClick={send} disabled={sending || !input.trim()}>
+              <button onClick={send} disabled={sending || generatingReport || !input.trim()}>
                 Send
               </button>
             </div>
