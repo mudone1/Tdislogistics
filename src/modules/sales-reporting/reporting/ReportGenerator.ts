@@ -1,5 +1,6 @@
 import { prisma } from "../../airline-connectors/storage/prismaClient";
 import { parseExcelBuffer } from "../parsing/ExcelParser";
+import { parseScreenshotBuffers } from "../parsing/ScreenshotParser";
 import { applyRules } from "../rules/RuleEngine";
 import { resolveStaffName, normalizeRawCode } from "../staff/resolveStaffName";
 import { StaffAliasRepository } from "../staff/StaffAliasRepository";
@@ -17,6 +18,15 @@ const AIRLINE_LABELS: Record<AirlineRuleKey, string> = {
 export interface UploadedFile {
   name: string;
   buffer: Buffer;
+  mimeType?: string;
+}
+
+// Excel by extension (the reliable path), otherwise treat anything with an
+// image mime type as a screenshot. Anything else is rejected upstream.
+function fileKind(file: UploadedFile): "EXCEL" | "SCREENSHOT" {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "EXCEL";
+  return "SCREENSHOT";
 }
 
 export interface GeneratedReportSummary {
@@ -67,12 +77,27 @@ export async function generateReport(
   await StaffAliasRepository.ensureSeeded();
   const knownAliases = await StaffAliasRepository.listAll();
 
+  const excelFiles = files.filter((f) => fileKind(f) === "EXCEL");
+  const screenshotFiles = files.filter((f) => fileKind(f) === "SCREENSHOT");
+
   const allRows = [];
   const allWarnings: string[] = [];
-  for (const file of files) {
+
+  for (const file of excelFiles) {
     const parsed = parseExcelBuffer(file.buffer);
     allRows.push(...parsed.rows);
     allWarnings.push(...parsed.warnings.map((w) => `${file.name}: ${w}`));
+  }
+
+  // All screenshots go to the vision model together as ONE report — a long
+  // report split across several images must be merged before rule
+  // processing (per spec), not parsed image-by-image.
+  if (screenshotFiles.length > 0) {
+    const parsed = await parseScreenshotBuffers(
+      screenshotFiles.map((f) => ({ name: f.name, buffer: f.buffer, mimeType: f.mimeType ?? "image/png" }))
+    );
+    allRows.push(...parsed.rows);
+    allWarnings.push(...parsed.warnings);
   }
 
   const unknownStaff = new Set<string>();
@@ -95,7 +120,7 @@ export async function generateReport(
         grandTotal: result.grandTotal,
         confidence: confidence.score,
         reportText,
-        sourceFiles: files.map((f) => ({ name: f.name, kind: "EXCEL" as const })),
+        sourceFiles: files.map((f) => ({ name: f.name, kind: fileKind(f) })),
         rulesVersion: "v1",
         createdBy,
         status: "PENDING_VERIFICATION",

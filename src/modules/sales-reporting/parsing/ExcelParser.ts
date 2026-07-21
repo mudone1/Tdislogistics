@@ -56,13 +56,16 @@ function findHeaderRow(matrix: unknown[][]): { rowIndex: number; columns: Partia
   return null;
 }
 
-function normalizeKind(paymentType: string): TransactionKind {
+// Exported so the screenshot parser produces byte-for-byte identical
+// RawTransactionRows from the same PT/PM/CL/RT codes and numeric strings
+// — the rule engine must not be able to tell which input a row came from.
+export function normalizeKind(paymentType: string): TransactionKind {
   const t = paymentType.trim().toUpperCase();
   if (t === "PT" || t === "PM" || t === "CL" || t === "RT") return t;
   return "OTHER";
 }
 
-function toNumber(cell: unknown): number {
+export function toNumber(cell: unknown): number {
   if (typeof cell === "number") return cell;
   if (cell == null) return 0;
   const n = parseFloat(String(cell).replace(/[^0-9.-]/g, ""));
@@ -72,7 +75,7 @@ function toNumber(cell: unknown): number {
 // Source dates arrive as "DD/MM/YYYY HH:MM:SS" (sometimes with a
 // malformed time portion, e.g. "17:27:3") — only the date portion is
 // used for reporting, so a strict time parse isn't needed.
-function extractDate(cell: unknown): string | null {
+export function extractDate(cell: unknown): string | null {
   if (cell == null) return null;
   const match = String(cell).match(/^(\d{1,2}\/\d{1,2}\/\d{4})/);
   return match ? match[1] : null;

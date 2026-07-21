@@ -4,9 +4,14 @@ import { AIRLINE_RULE_KEYS, type AirlineRuleKey } from "@/modules/sales-reportin
 
 export const runtime = "nodejs";
 
-// multipart/form-data: "airline" field + one or more "files" entries
-// (.xls/.xlsx). Screenshot upload isn't implemented yet — Excel-only for
-// now, per the agreed MVP scope (Excel is also the more reliable input).
+// Vision extraction of a screenshot can take a while on the larger Llama-4
+// model; give it well past the default before Vercel kills the function.
+export const maxDuration = 120;
+
+// multipart/form-data: "airline" field + one or more "files" entries.
+// Accepts Excel (.xls/.xlsx — the reliable path) and image screenshots
+// (.png/.jpg/etc — extracted via a vision model). Multiple screenshots of
+// one report are merged into a single report before rule processing.
 export async function POST(req: Request) {
   const form = await req.formData().catch(() => null);
   if (!form) {
@@ -23,14 +28,18 @@ export async function POST(req: Request) {
 
   const fileEntries = form.getAll("files").filter((f): f is File => f instanceof File);
   if (fileEntries.length === 0) {
-    return NextResponse.json({ error: "At least one Excel file is required (field name: files)" }, { status: 400 });
+    return NextResponse.json({ error: "At least one file is required (field name: files)" }, { status: 400 });
   }
 
   const createdBy = form.get("createdBy");
 
   try {
     const files = await Promise.all(
-      fileEntries.map(async (f) => ({ name: f.name, buffer: Buffer.from(await f.arrayBuffer()) }))
+      fileEntries.map(async (f) => ({
+        name: f.name,
+        buffer: Buffer.from(await f.arrayBuffer()),
+        mimeType: f.type || undefined,
+      }))
     );
     const summary = await generateReport(
       airline as AirlineRuleKey,

@@ -23,6 +23,61 @@ export interface GroqMessage {
   content: string;
 }
 
+// Groq's vision-capable models (multimodal Llama 4). Kept separate from
+// MODELS above because the text-only fallback (llama-3.1-8b-instant)
+// can't see images — a vision request that 429s has to fail over to
+// another *vision* model, not a text one. Scout first (cheaper/faster),
+// Maverick as the higher-capacity fallback.
+const VISION_MODELS = [
+  "meta-llama/llama-4-scout-17b-16e-instruct",
+  "meta-llama/llama-4-maverick-17b-128e-instruct",
+];
+
+// Extracts structured JSON from one or more images. Each image is a data
+// URL (e.g. "data:image/png;base64,...."). Same JSON-mode + per-model
+// 429 failover contract as groqJsonCompletion, but over vision models.
+export async function groqVisionJsonCompletion(prompt: string, imageDataUrls: string[]): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new GroqNotConfiguredError();
+
+  const content = [
+    { type: "text", text: prompt },
+    ...imageDataUrls.map((url) => ({ type: "image_url", image_url: { url } })),
+  ];
+
+  let lastError: Error | null = null;
+
+  for (const model of VISION_MODELS) {
+    const res = await fetch(GROQ_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: "user", content }],
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content;
+      if (typeof text !== "string") throw new Error("Groq vision response missing message content");
+      return text;
+    }
+
+    const body = await res.text().catch(() => "");
+    lastError = new Error(`Groq vision request failed (${model}): HTTP ${res.status} ${body.slice(0, 300)}`);
+    if (res.status !== 429) throw lastError;
+    console.warn(`[groq] vision model ${model} rate-limited, trying next model`, lastError.message);
+  }
+
+  throw lastError ?? new Error("Groq vision request failed: no models available");
+}
+
 export async function groqJsonCompletion(messages: GroqMessage[]): Promise<string> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) throw new GroqNotConfiguredError();

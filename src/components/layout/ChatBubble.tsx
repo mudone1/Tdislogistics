@@ -287,26 +287,18 @@ export default function ChatBubble() {
     setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text: `📎 ${file.name}` }]);
 
     const kind = detectAttachmentKind(file);
-    if (kind === "excel") {
+    // Excel (.xls/.xlsx) and screenshots (images) both go through the exact
+    // same flow now — ask which airline, then generate. Excel parses
+    // directly; screenshots are read by a vision model server-side.
+    if (kind === "excel" || kind === "image") {
       setPendingUploadFile(file);
+      const inputLabel = kind === "image" ? "screenshot" : "sales report";
       setMessages((m: ChatMessage[]) => [
         ...m,
         {
           id: idCounter++,
           role: "assistant",
-          text: "Got it — which airline is this sales report for? Aero, Airpeace, Ibom, or Arik? (Reply \"cancel\" to skip this upload.)",
-        },
-      ]);
-      return;
-    }
-
-    if (kind === "image") {
-      setMessages((m: ChatMessage[]) => [
-        ...m,
-        {
-          id: idCounter++,
-          role: "assistant",
-          text: "I can see that's an image, but I can't process screenshots in chat yet — that's coming soon. Excel sales-report exports (.xls/.xlsx) work right now, or you can generate a report from a screenshot in Admin → Sales Reports once that's available.",
+          text: `Got it — which airline is this ${inputLabel} for? Aero, Airpeace, Ibom, or Arik? (Reply "cancel" to skip this upload.)`,
         },
       ]);
       return;
@@ -317,7 +309,7 @@ export default function ChatBubble() {
       {
         id: idCounter++,
         role: "assistant",
-        text: "I can only process Excel sales-report exports (.xls/.xlsx) here right now — other file types aren't supported yet.",
+        text: "I can process Excel sales-report exports (.xls/.xlsx) or screenshots of a report here — that file type isn't supported.",
       },
     ]);
   }
