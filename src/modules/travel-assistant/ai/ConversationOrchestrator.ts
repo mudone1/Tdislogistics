@@ -1,5 +1,6 @@
 import { groqJsonCompletion, type GroqMessage } from "./groqClient";
 import { SYSTEM_PROMPT } from "./systemPrompt";
+import { STAFF_KNOWLEDGE } from "./staffProfiles";
 import { ChatMemoryRepository } from "../storage/ChatMemoryRepository";
 import { FlightSearchHistoryRepository } from "../storage/FlightSearchHistoryRepository";
 import { NotificationRepository } from "../storage/NotificationRepository";
@@ -316,6 +317,7 @@ async function runIntentDetection(
 
   const messages: GroqMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: STAFF_KNOWLEDGE },
     {
       role: "system",
       content: `Today's date: ${new Date().toISOString().slice(0, 10)}. Remembered slots so far: ${JSON.stringify(
