@@ -2,8 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ChangeEvent, KeyboardEvent } from "react";
-import { AnimatePresence, motion } from "framer-motion";
 import { Icon } from "@/lib/icon-map";
+import FloatingChatShell from "./chat/FloatingChatShell";
 import { authHelper } from "@/lib/firebase";
 import { useNotifications, OPEN_REFERENCE_EVENT } from "@/lib/notifications";
 import {
@@ -643,59 +643,49 @@ function describeHttpError(status: number): string {
     return `That request didn't go through — try rephrasing it.${errorContactNote(`HTTP ${status}`)}`;
   }
 
+  const headerExtras = (
+    <button
+      className="tdis-chat-headerbtn"
+      onClick={() => (historyOpen ? setHistoryOpen(false) : openHistory())}
+      aria-label={historyOpen ? "Back to conversation" : "Search history"}
+      title={historyOpen ? "Back" : "Search history"}
+    >
+      {historyOpen ? "← Back" : "🕘"}
+    </button>
+  );
+
   return (
-    <>
-      <button
-        className="chat-bubble-fab"
-        onClick={() => setOpen((o: boolean) => !o)}
-        aria-label="AI Operations Assistant"
-      >
-        <Icon name="sparkles" size={22} />
-      </button>
-
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            className="chat-bubble-panel"
-            initial={{ opacity: 0, y: 16, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.96 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <div className="chat-bubble-header">
-              <span>
-                <Icon name="sparkles" size={14} /> AI Operations Assistant
-              </span>
-              <span style={{ display: "flex", gap: 4 }}>
-                <button onClick={() => (historyOpen ? setHistoryOpen(false) : openHistory())} aria-label="Search history">
-                  {historyOpen ? "← Back" : "🕘 History"}
-                </button>
-                <button onClick={() => setOpen(false)} aria-label="Close">
-                  ✕
-                </button>
-              </span>
-            </div>
-
-            {historyOpen ? (
-              <div className="chat-bubble-history">
-                {historyLoading ? (
-                  <div className="chat-bubble-history-empty">Loading…</div>
-                ) : historyEntries.length === 0 ? (
-                  <div className="chat-bubble-history-empty">No past searches yet</div>
-                ) : (
-                  historyEntries.map((entry) => (
-                    <button key={entry.referenceId} className="chat-bubble-history-item" onClick={() => reopenSearch(entry)}>
-                      <div className="chat-bubble-history-ref">{entry.referenceId}</div>
-                      <div className="chat-bubble-history-route">
-                        {entry.origin} → {entry.destination} · {entry.date}
-                      </div>
-                      <div className="chat-bubble-history-meta">{entry.resultCount} result(s)</div>
-                    </button>
-                  ))
-                )}
-              </div>
-            ) : (
-              <>
+    <FloatingChatShell
+      open={open}
+      onOpen={() => setOpen(true)}
+      onMinimize={() => setOpen(false)}
+      title={
+        <>
+          <Icon name="sparkles" size={14} /> AI Operations Assistant
+        </>
+      }
+      headerExtras={headerExtras}
+    >
+      {historyOpen ? (
+        <div className="chat-bubble-history">
+          {historyLoading ? (
+            <div className="chat-bubble-history-empty">Loading…</div>
+          ) : historyEntries.length === 0 ? (
+            <div className="chat-bubble-history-empty">No past searches yet</div>
+          ) : (
+            historyEntries.map((entry) => (
+              <button key={entry.referenceId} className="chat-bubble-history-item" onClick={() => reopenSearch(entry)}>
+                <div className="chat-bubble-history-ref">{entry.referenceId}</div>
+                <div className="chat-bubble-history-route">
+                  {entry.origin} → {entry.destination} · {entry.date}
+                </div>
+                <div className="chat-bubble-history-meta">{entry.resultCount} result(s)</div>
+              </button>
+            ))
+          )}
+        </div>
+      ) : (
+        <>
             <div className="chat-bubble-messages" ref={scrollRef}>
               {messages.map((m: ChatMessage) => (
                 <div id={`chat-msg-${m.id}`} key={m.id} className={`chat-bubble-msg-wrap ${m.role} ${m.showCards ? "wide" : ""}`}>
@@ -783,12 +773,9 @@ function describeHttpError(status: number): string {
                 Send
               </button>
             </div>
-              </>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </>
+        </>
+      )}
+    </FloatingChatShell>
   );
 }
 
