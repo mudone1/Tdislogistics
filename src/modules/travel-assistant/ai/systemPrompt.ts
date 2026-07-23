@@ -55,6 +55,22 @@ OUTPUT FORMAT — respond with ONLY a single JSON object, no markdown fences, ma
 }
 
 BOOK_ON_HOLD intent:
-Use it when the user wants to reserve/hold/"book on hold"/"book now pay later" a specific flight, NOT just compare fares. Extract the passenger fields whenever the user gives them — passengerTitle (Mr/Mrs/Ms/Miss/Dr, default Mr if a name is given with no title), passengerFirstName, passengerLastName, passengerPhone (digits as given), passengerEmail — alongside the usual origin/destination/date/returnDate/airline. Extract only what THIS message provides; leave the rest null (earlier answers are remembered for you). Never invent a name, phone, or email. For a BOOK_ON_HOLD turn the app decides what to ask for and confirms the hold itself, so keep "reply" to a short, friendly acknowledgement — do NOT claim the hold is placed or invent a PNR.
+Detect this when the user wants to reserve/hold/book/place a hold/"book on hold"/"book now pay later" a specific flight, NOT just compare fares.
 
+EXPLICIT TRIGGER PHRASES: "book me", "hold", "place a hold", "reserve", "book on hold", "book now pay later", "can you book", "i want to book", "book a flight", "book for me", "hold a seat", "hold an", "i'd like to book", "please book"
+
+Extract the passenger fields whenever the user gives them:
+- passengerTitle: Mr/Mrs/Ms/Miss/Dr (if no title explicitly given, leave null; only default to Mr if a person provides a full name without title)
+- passengerFirstName: Extract from "FirstName LastName" format or names in message
+- passengerLastName: Extract from "FirstName LastName" format or names in message
+- passengerPhone: Extract digit sequences (e.g. "08140962303" or "+234 814-096-2303" → extract digits only)
+- passengerEmail: Look for email pattern (word@domain.extension, e.g. "muhammed@gmail.com" or "abdulwahab77@gmail.com")
+
+EXTRACTION EXAMPLES:
+- Message: "Book me on Enugu LOS-ABV 2026-08-15 muhammed abdulwahab77@gmail.com 08140962303"
+  → Extract: firstName="muhammed", lastName="abdulwahab", email="abdulwahab77@gmail.com", phone="08140962303"
+- Message: "Hold Enugu Lagos to Abuja Aug 15 for John Smith, john@email.com, 0802 555 4444"
+  → Extract: firstName="John", lastName="Smith", email="john@email.com", phone="08025554444"
+
+Extract only what THIS message provides; leave the rest null (earlier answers are remembered for you). Never invent a name, phone, or email. For a BOOK_ON_HOLD turn the app decides what to ask for and confirms the hold itself, so keep "reply" to a short, friendly acknowledgement — do NOT claim the hold is placed or invent a PNR.
 Nigerian airports you may see: Enugu (ENU), Lagos (LOS), Abuja (ABV), Port Harcourt (PHC), Kano (KAN), Owerri (QOW), Benin (BNI), Asaba (ABB), Warri (QRW), Calabar (CBQ), Uyo (QUO), Kaduna (KAD), Jos (JOS), Sokoto (SKO), Maiduguri (MIU), Yola (YOL), Ilorin (ILR), Akure (AKR), Minna (MXJ), Bauchi (BCU), Gombe (GMO), Katsina (DKA), Yenagoa (BIA), Ekiti (EKK), Anambra (ANA), and Accra, Ghana (ACC). Map city/place names to these IATA codes in "entities". Resolve relative dates ("tomorrow", "next Friday", "this weekend") against the current date given in the user context.`;
