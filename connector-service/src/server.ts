@@ -14,6 +14,7 @@ import { bookEnuguAirOnHold } from "../../src/modules/travel-assistant/booking/e
 import { BookingJobRepository } from "../../src/modules/travel-assistant/storage/BookingJobRepository";
 import { categorizeBookingError } from "../../src/modules/travel-assistant/booking/categorizeBookingError";
 import { decryptSecret } from "../../src/modules/airline-connectors/services/CredentialService";
+import { UserCredentialRepository } from "../../src/modules/airline-connectors/storage/UserCredentialRepository";
 import type { FlightSearchQuery, FlightSearchResult } from "../../src/modules/travel-assistant/core/types";
 
 const TRAVEL_ASSISTANT_SEARCHERS: Record<string, (query: FlightSearchQuery) => Promise<FlightSearchResult>> = {
@@ -197,19 +198,41 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
     return;
   }
 
-  const settings = await AirlineWalletRepository.getSettings(airline);
-  if (!settings?.encryptedUsername || !settings.encryptedPassword) {
-    await BookingJobRepository.markFailed(jobId, "LOGIN_FAILED", `No credentials configured for ${airline}`, 0);
-    res.status(502).json({ error: `No credentials configured for ${airline}` });
-    return;
+  // Prefer user's personal credentials if available, fall back to admin credentials
+  let credentials: { username: string; password: string } | null = null;
+  let credentialSource = "admin";
+
+  if (job.userId) {
+    try {
+      const userCred = await UserCredentialRepository.findByUserAndAirline(job.userId, airline);
+      if (userCred?.encryptedUsername && userCred.encryptedPassword) {
+        credentials = {
+          username: decryptSecret(userCred.encryptedUsername),
+          password: decryptSecret(userCred.encryptedPassword),
+        };
+        credentialSource = "user";
+      }
+    } catch (err) {
+      console.warn(`[book-hold] could not load user credentials for ${job.userId}/${airline}:`, err);
+    }
   }
-  const credentials = {
-    username: decryptSecret(settings.encryptedUsername),
-    password: decryptSecret(settings.encryptedPassword),
-  };
+
+  // Fall back to admin/connector credentials if user credentials unavailable
+  if (!credentials) {
+    const settings = await AirlineWalletRepository.getSettings(airline);
+    if (!settings?.encryptedUsername || !settings.encryptedPassword) {
+      await BookingJobRepository.markFailed(jobId, "LOGIN_FAILED", `No credentials configured for ${airline}`, 0);
+      res.status(502).json({ error: `No credentials configured for ${airline}` });
+      return;
+    }
+    credentials = {
+      username: decryptSecret(settings.encryptedUsername),
+      password: decryptSecret(settings.encryptedPassword),
+    };
+  }
 
   console.log(
-    `[book-hold] starting job=${jobId} ${airline} ${job.origin}->${job.destination} ${job.departureDate}${job.returnDate ? ` / return ${job.returnDate}` : ""}`
+    `[book-hold] starting job=${jobId} ${airline} ${job.origin}->${job.destination} ${job.departureDate}${job.returnDate ? ` / return ${job.returnDate}` : ""} [using ${credentialSource} credentials]`
   );
   await BookingJobRepository.markRunning(jobId);
   const startedAt = Date.now();

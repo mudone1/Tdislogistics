@@ -165,10 +165,28 @@ export async function bookEnuguAirOnHold(
     // --- Submit the hold ---
     console.log("[enugu-booking] submitting hold");
     await clickNext(page, "payment-details");
+
+    // Wait for the confirmation summary page to appear
     await page
       .locator("text=/PNR|Booking Reference|TTL Payment Instructions|Manage My Booking/i")
       .first()
       .waitFor({ state: "visible", timeout: 30000 });
+
+    // Click the final Confirm/Submit button to actually complete the booking
+    console.log("[enugu-booking] confirming booking submission");
+    await clickNext(page, "confirmation-summary");
+
+    // Wait for the final success page
+    await page
+      .locator("text=/booking.*(?:confirmed|successful|completed)|thank you/i")
+      .first()
+      .waitFor({ state: "visible", timeout: 30000 })
+      .catch(async () => {
+        // If the final success page doesn't appear, still check if we have a PNR
+        // Some deployments may not show a final success page, but the booking
+        // should be confirmed if we got here without an error
+        console.warn("[enugu-booking] no final success page detected, but continuing");
+      });
 
     const raw = await page.locator("body").innerText();
     // Best-effort — a screenshot failure must never turn a real successful

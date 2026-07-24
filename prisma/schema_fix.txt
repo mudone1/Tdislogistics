@@ -1,0 +1,7 @@
+Find this in prisma/schema.prisma (around line 459):
+
+  @@index([userId, createdAt])
+
+Replace with:
+
+  @@index([userId, bookedAt])
