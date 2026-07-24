@@ -101,7 +101,7 @@ model AirlineBalanceHistory {
   currency     String       @default("NGN")
 
   // === SYNC METADATA ===
-  runId        String       @index  // Group all airlines from one sync run
+  runId        String       // Group all airlines from one sync run
   retrievedAt  DateTime     @default(now())
   syncStatus   SyncStatus
   connector    String       // e.g., "AirPeaceConnector"
@@ -176,7 +176,7 @@ model AirlineConnectorSettings {
 // Retrieved, Balance Saved, Logout, Errors — one row per event, per run.
 model AirlineSyncLog {
   id        String     @id @default(cuid())
-  runId     String     @index
+  runId     String
   airline   AirlineKey?
 
   step      String     // e.g. LOGIN_STARTED, LOGIN_SUCCESS, BALANCE_RETRIEVED, ERROR
