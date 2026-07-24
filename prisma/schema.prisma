@@ -89,13 +89,13 @@ model AirlineBalanceHistory {
 // Per-airline connector configuration, managed from Admin → Airline Connectors.
 // `encryptedUsername`/`encryptedPassword` are AES-256-GCM ciphertext (see
 // CredentialService) — plaintext credentials are never persisted or sent to
-// the frontend.
+// the frontend. This is for ADMIN/SYNC credentials only, NOT user credentials.
 model AirlineConnectorSettings {
   id                  String     @id @default(cuid())
   airline             AirlineKey @unique
   enabled             Boolean    @default(false)
-  encryptedUsername   String?
-  encryptedPassword   String?
+  encryptedUsername   String?    // Admin sync account
+  encryptedPassword   String?    // Admin sync account
   syncIntervalMinutes Int? // null = manual only. 120 = every 2 hours, 1440 = daily.
   dailyRunAtUtc       String? // "00:00" style, used when syncIntervalMinutes is null and a fixed daily time is wanted
   connectionStatus    String     @default("NOT_CONFIGURED") // NOT_CONFIGURED | CONNECTED | ERROR
@@ -134,6 +134,7 @@ model ChatSession {
   sessionKey      String   @unique
   displayName     String?
   isAuthenticated Boolean  @default(false)
+  userId          String? // Firebase UID if authenticated
   slots           Json?
   firstSeenAt     DateTime @default(now())
   lastSeenAt      DateTime @updatedAt
@@ -199,10 +200,10 @@ model FlightSearchRecord {
 model AppNotification {
   id        String   @id @default(cuid())
   sessionId String
-  kind      String // QUOTE_GENERATED | SYSTEM_ALERT
+  kind      String // QUOTE_GENERATED | SYSTEM_ALERT | BOOKING_CREATED | TICKET_ISSUED
   title     String
   body      String
-  link      Json? // arbitrary click-through payload (e.g. { referenceId })
+  link      Json? // arbitrary click-through payload (e.g. { referenceId, bookingId })
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
 
@@ -323,4 +324,157 @@ model SalesTicket {
   @@index([staff])
   @@index([reportId])
   @@map("sales_tickets")
+}
+
+// ─── Book-on-Hold jobs ───
+// A real Book-on-Hold is a multi-minute Playwright run on connector-service,
+// well past what a Vercel function (~60s) can hold open. So a client (the
+// chat today, or a future WhatsApp/mobile/3rd-party integration) creates a
+// job row via the REST API, connector-service runs the automation and writes
+// the outcome (PNR, screenshot, PDF, or a categorized error) back here, and
+// the client polls until it's terminal. Screenshot and PDF are stored inline
+// as bytea — low volume, and keeping them with the job row avoids standing up
+// a separate blob store. Passenger PII lives here because a booking record
+// inherently needs it; it is never written to logs.
+enum BookingJobStatus {
+  PENDING // created, not yet picked up
+  RUNNING // connector-service is executing the automation
+  SUCCESS // PNR generated (hold created, but not yet issued/paid)
+  FAILED // see errorCategory/errorMessage
+}
+
+// User-friendly buckets the automation maps raw failures into (so the chat
+// never shows a raw stack trace).
+enum BookingErrorCategory {
+  LOGIN_FAILED
+  SESSION_EXPIRED
+  PORTAL_UNAVAILABLE
+  SEAT_UNAVAILABLE
+  INVALID_PASSENGER
+  ROUTE_NOT_SERVED
+  UNKNOWN
+}
+
+enum TicketStatus {
+  BOOKED // Hold created, not yet issued
+  ISSUED // Payment completed, ticket issued
+  VOIDED // Ticket was voided
+  EXPIRED // Hold expired without payment
+}
+
+model BookingJob {
+  id         String           @id @default(cuid())
+  status     BookingJobStatus @default(PENDING)
+  airline    AirlineKey
+  sessionKey String? // which chat session (or API client) requested it
+  userId     String? // Firebase UID of the user who created this booking
+
+  // Request
+  origin        String
+  destination   String
+  departureDate String // "YYYY-MM-DD"
+  returnDate    String? // omit for one-way
+  title         String  @default("Mr")
+  firstName     String
+  lastName      String
+  phone         String?
+  email         String?
+
+  // Result (populated on SUCCESS)
+  pnr           String?
+  holdExpiresAt String?
+  totalPayable  Decimal? @db.Decimal(14, 2)
+  currency      String?
+  screenshot    Bytes? // PNG of the confirmation page (PNR + passenger visible)
+  pdf           Bytes? // generated TDIS confirmation PDF
+
+  // Failure (populated on FAILED)
+  errorCategory BookingErrorCategory?
+  errorMessage  String?
+
+  createdBy  String?
+  durationMs Int?
+  createdAt  DateTime  @default(now())
+  startedAt  DateTime?
+  finishedAt DateTime?
+
+  // Relationship to user bookings (for history/retrieval)
+  userBooking UserBooking?
+
+  @@index([sessionKey, createdAt])
+  @@index([status])
+  @@index([userId])
+  @@index([pnr])
+  @@map("booking_jobs")
+}
+
+// ─── User Credentials & Booking History ───
+// Each user can save their own airline credentials (encrypted).
+// This allows booking automation to use the user's own account, not admin credentials.
+model UserAirlineCredential {
+  id                  String     @id @default(cuid())
+  userId              String     // Firebase UID
+  airline             AirlineKey
+  encryptedUsername   String     // AES-256-GCM ciphertext
+  encryptedPassword   String     // AES-256-GCM ciphertext
+  connectionStatus    String     @default("CONFIGURED") // CONFIGURED | ERROR
+  lastTestedAt        DateTime?
+  lastTestError       String?
+  updatedAt           DateTime   @updatedAt
+  createdAt           DateTime   @default(now())
+
+  userBookings UserBooking[]
+
+  @@unique([userId, airline])
+  @@index([userId, airline])
+  @@map("user_airline_credentials")
+}
+
+// User's booking history — one row per saved/issued booking.
+// Links a BookingJob with a user so they can retrieve and act on it later.
+model UserBooking {
+  id         String       @id @default(cuid())
+  userId     String       // Firebase UID
+  jobId      String       @unique // Reference to BookingJob
+  pnr        String       // Denormalized from job for quick search
+  airline    AirlineKey
+  status     TicketStatus @default(BOOKED) // BOOKED | ISSUED | VOIDED | EXPIRED
+
+  // Timestamps
+  bookedAt   DateTime @default(now())
+  issuedAt   DateTime? // When ticket was issued (paid)
+  voidedAt   DateTime?
+  expiresAt  DateTime? // When the hold expires
+
+  // Issue/Void job tracking
+  issueJobId String? // Reference to subsequent BookingJob for issuing
+  voidJobId  String? // Reference to subsequent BookingJob for voiding
+
+  // Relationship back to the booking job
+  job BookingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  // Relationship to the user's credentials (to know which account issued this)
+  credential UserAirlineCredential? @relation(fields: [userId, airline], references: [userId, airline])
+
+  @@index([userId, bookedAt])
+  @@index([userId, pnr])
+  @@index([airline])
+  @@index([status])
+  @@map("user_bookings")
+}
+
+// Track PNR verification attempts (for audit/debugging)
+model PnrVerification {
+  id             String   @id @default(cuid())
+  pnr            String
+  airline        AirlineKey
+  passengerName  String
+  verified       Boolean
+  verifiedAt     DateTime @default(now())
+  errorMessage   String?
+  verificationMs Int? // How long verification took
+
+  @@index([pnr, airline])
+  @@index([verifiedAt])
+  @@map("pnr_verifications")
 }

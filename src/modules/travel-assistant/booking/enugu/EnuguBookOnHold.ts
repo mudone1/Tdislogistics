@@ -43,6 +43,10 @@ export interface BookOnHoldResult {
   totalPayable: number | null;
   currency: string | null;
   raw: string;
+  // PNG of the confirmation page (PNR + passenger visible) — captured on the
+  // final page so the chat/job record has visual proof of the hold. Null only
+  // if the screenshot call itself fails (best-effort, never blocks the result).
+  screenshot: Buffer | null;
 }
 
 export async function bookEnuguAirOnHold(
@@ -161,13 +165,34 @@ export async function bookEnuguAirOnHold(
     // --- Submit the hold ---
     console.log("[enugu-booking] submitting hold");
     await clickNext(page, "payment-details");
+
+    // Wait for the confirmation summary page to appear
     await page
       .locator("text=/PNR|Booking Reference|TTL Payment Instructions|Manage My Booking/i")
       .first()
       .waitFor({ state: "visible", timeout: 30000 });
 
+    // Click the final Confirm/Submit button to actually complete the booking
+    console.log("[enugu-booking] confirming booking submission");
+    await clickNext(page, "confirmation-summary");
+
+    // Wait for the final success page
+    await page
+      .locator("text=/booking.*(?:confirmed|successful|completed)|thank you/i")
+      .first()
+      .waitFor({ state: "visible", timeout: 30000 })
+      .catch(async () => {
+        // If the final success page doesn't appear, still check if we have a PNR
+        // Some deployments may not show a final success page, but the booking
+        // should be confirmed if we got here without an error
+        console.warn("[enugu-booking] no final success page detected, but continuing");
+      });
+
     const raw = await page.locator("body").innerText();
-    return parseConfirmation(raw);
+    // Best-effort — a screenshot failure must never turn a real successful
+    // hold into a failed job, so swallow and fall back to null.
+    const screenshot = await page.screenshot({ fullPage: true }).catch(() => null);
+    return parseConfirmation(raw, screenshot);
   } finally {
     await browser.close().catch(() => {});
   }
@@ -282,7 +307,7 @@ async function clickNext(page: import("playwright").Page, stage: string): Promis
   await page.waitForLoadState("domcontentloaded").catch(() => {});
 }
 
-function parseConfirmation(raw: string): BookOnHoldResult {
+function parseConfirmation(raw: string, screenshot: Buffer | null): BookOnHoldResult {
   // VARS confirmation pages show the PNR as a short, standalone
   // alphanumeric code near "Manage My Booking" — same pattern documented
   // in the XEJET SOP screenshots for this shared platform (e.g.
@@ -298,5 +323,6 @@ function parseConfirmation(raw: string): BookOnHoldResult {
     totalPayable: totalMatch ? parseFloat(totalMatch[1].replace(/,/g, "")) : null,
     currency: totalMatch ? totalMatch[2].toUpperCase() : null,
     raw,
+    screenshot,
   };
 }

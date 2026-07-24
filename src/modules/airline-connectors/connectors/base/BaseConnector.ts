@@ -19,16 +19,6 @@ export abstract class BaseConnector implements IAirlineConnector {
   protected page: Page | null = null;
   protected logger!: SyncRunLogger;
 
-  // Set whenever the portal shows a dialog (alert/confirm) during this
-  // connector's lifetime — a wrong-credentials login on these ASP.NET
-  // WebForms portals typically surfaces as a JS alert rather than an
-  // inline error label. Subclasses can check this right after a login
-  // attempt to fail fast on likely-stale credentials instead of waiting
-  // out a full timeout (see BaseVarsConnector.login()). Reset it
-  // yourself before an attempt where a stale message would be
-  // misleading — connect() does NOT clear it automatically.
-  protected lastDialogMessage: string | null = null;
-
   async connect(): Promise<void> {
     // headless: true is required for server/CI environments; flip to false
     // locally only when actively debugging a selector with Playwright's
@@ -60,11 +50,6 @@ export abstract class BaseConnector implements IAirlineConnector {
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
       proxy: proxyConfig,
     });
-    // Explicit wide viewport: this portal's sidebar appears to collapse to
-    // icon-only at narrower widths (a responsive breakpoint), which codegen
-    // never triggers because it opens a full-size window sized to the
-    // screen it's run on. Without this, headless runs may render a
-    // meaningfully different, narrower layout than what was recorded.
     const context = await this.browser.newContext({ viewport: { width: 1600, height: 900 } });
 
     // Confirmed via codegen that at least one Crane airline (Ibom) shows a
@@ -75,7 +60,6 @@ export abstract class BaseConnector implements IAirlineConnector {
     // login — an unhandled dialog can otherwise silently block all further
     // interaction on that page.
     context.on("dialog", (dialog) => {
-      this.lastDialogMessage = dialog.message();
       this.logger?.log("DIALOG", `Auto-dismissing dialog: "${dialog.message()}"`, "info");
       dialog.dismiss().catch(() => {});
     });
