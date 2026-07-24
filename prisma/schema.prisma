@@ -199,7 +199,7 @@ model AirlineSyncLog {
 // Groups all log lines and results for a single sync orchestration.
 model AirlineSyncRun {
   id            String   @id @default(cuid())
-  runId         String   @unique @index
+  runId         String   @unique
 
   // === WHEN & WHO ===
   trigger       SyncTrigger
@@ -375,11 +375,28 @@ model SalesReport {
   createdAt    DateTime          @default(now())
   verifiedAt   DateTime?
 
+  // NEW FIELDS - PHASE 1: Airline detection & tracking
+  airlineDetectedBy      String?     // Method: "MANUAL" | "CONTENT" | "FORMAT" | "METADATA" | "VISION"
+  detectionConfidence    Float?      // 0-1 confidence score
+  detectionReasoning     String[]    // Why this airline was detected (for debugging)
+  fileHash               String?     // SHA-256 hex (for exact duplicate detection)
+  originalFilename       String?     // Original uploaded filename
+  fileSize               Int?        // Bytes (to track large files)
+  importedAt             DateTime?   // When user uploaded this file
+  importedBy             String?     // Firebase UID
+  supersededById         String?     // If overwritten, which report replaced this
+  supersededAt           DateTime?   // When it was superseded
+  supersededBy           String?     // User ID who approved supersession
+
   staffSales   StaffSales[]
   transactions SalesTransaction[]
   tickets      SalesTicket[]
+  analytics    SalesReportAnalytics?
 
-  @@index([airline, reportDate])
+  @@index([airline, reportDate, status])
+  @@index([fileHash])
+  @@index([importedAt])
+  @@index([supersededById])
   @@map("sales_reports")
 }
 
@@ -439,12 +456,122 @@ model SalesTicket {
   reasonIfExcluded String?
   createdAt        DateTime   @default(now())
 
+  // NEW FIELDS - PHASE 1: Enhanced metrics for analytics
+  grossSalesAmount   Decimal? @db.Decimal(14, 2)  // Before deductions
+  netSalesAmount     Decimal? @db.Decimal(14, 2)  // After deductions
+  commission         Decimal? @db.Decimal(14, 2)
+  refundAmount       Decimal? @db.Decimal(14, 2)
+  admAmount          Decimal? @db.Decimal(14, 2)
+  bspAmount          Decimal? @db.Decimal(14, 2)
+
   report SalesReport @relation(fields: [reportId], references: [id])
 
   @@index([airline, date])
   @@index([staff])
   @@index([reportId])
   @@map("sales_tickets")
+}
+
+// ─── NEW PHASE 1: Sales Analytics Tables ───
+// Pre-calculated KPI summary per report for fast dashboard queries
+model SalesReportAnalytics {
+  id                    String      @id @default(cuid())
+  reportId              String      @unique
+  airline               AirlineKey
+  reportDate            String      // "DD/MM/YYYY"
+  reportingPeriod       String?     // e.g., "Jul 2024"
+  reportingPeriodStart  String?     // Start date of period
+  reportingPeriodEnd    String?     // End date of period
+
+  // Executive KPIs - All required for dashboard
+  totalTicketsIssued    Int         // PT count (included)
+  totalTicketsVoided    Int         // Voided tickets
+  totalVoidAmount       Decimal @db.Decimal(14, 2)
+  totalCreditAmount     Decimal @db.Decimal(14, 2)
+  totalDebitAmount      Decimal @db.Decimal(14, 2)
+  grossSalesAmount      Decimal @db.Decimal(14, 2)  // Before deductions
+  netSalesAmount        Decimal @db.Decimal(14, 2)  // After deductions
+  totalCommission       Decimal @db.Decimal(14, 2)
+
+  // Airline-specific metrics (optional)
+  bspValues             Decimal? @db.Decimal(14, 2)
+  refundValues          Decimal? @db.Decimal(14, 2)
+  admValues             Decimal? @db.Decimal(14, 2)
+
+  createdAt             DateTime    @default(now())
+
+  report                SalesReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId])
+  @@index([airline, reportDate])
+  @@index([airline, reportingPeriodStart, reportingPeriodEnd])
+  @@map("sales_report_analytics")
+}
+
+// Track report supersessions and maintain audit trail
+model ReportDuplicateHistory {
+  id                    String      @id @default(cuid())
+  originalReportId      String      // Report that was replaced
+  supersededById        String?     // Which report replaced it (null if discarded)
+  airline               AirlineKey
+  reportDate            String      // "DD/MM/YYYY"
+
+  // Status and tracking
+  originalStatus        SalesReportStatus  // PENDING_VERIFICATION or SAVED
+  replacedAt            DateTime?   // When replacement happened
+  replacedBy            String?     // User ID who approved
+  replacementReason     String?     // Why it was replaced
+
+  createdAt             DateTime    @default(now())
+
+  @@index([airline, reportDate])
+  @@index([originalReportId])
+  @@index([supersededById])
+  @@map("report_duplicate_history")
+}
+
+// Denormalized daily staff metrics for fast staff analytics queries
+model StaffDailyPerformance {
+  id                    String      @id @default(cuid())
+  date                  String      // "DD/MM/YYYY"
+  airline               AirlineKey
+  staffName             String      // Resolved display name (e.g., "FLORENCE")
+
+  // Metrics (calculated from SalesTicket)
+  ticketsIssued         Int         // Count of tickets
+  salesAmount           Decimal @db.Decimal(14, 2)
+  commission            Decimal @db.Decimal(14, 2)
+  voidAmount            Decimal @db.Decimal(14, 2)
+  creditAmount          Decimal @db.Decimal(14, 2)
+
+  createdAt             DateTime    @default(now())
+
+  @@unique([date, airline, staffName])
+  @@index([airline, date])
+  @@index([staffName, date])
+  @@index([date])  // For "top staff today" queries
+  @@map("staff_daily_performance")
+}
+
+// Daily airline totals for trend analysis
+model AirlineDailyMetrics {
+  id                    String      @id @default(cuid())
+  date                  String      // "DD/MM/YYYY"
+  airline               AirlineKey
+
+  // Totals (calculated from reports)
+  totalSales            Decimal @db.Decimal(14, 2)
+  totalTickets          Int
+  totalVoids            Int
+  totalVoidAmount       Decimal @db.Decimal(14, 2)
+  netSales              Decimal @db.Decimal(14, 2)
+
+  createdAt             DateTime    @default(now())
+
+  @@unique([date, airline])
+  @@index([airline, date])
+  @@index([date])  // For "today's totals by airline"
+  @@map("airline_daily_metrics")
 }
 
 // ─── Book-on-Hold jobs ───
