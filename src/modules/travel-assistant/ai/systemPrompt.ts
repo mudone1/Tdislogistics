@@ -59,6 +59,10 @@ Detect this when the user wants to reserve/hold/book/place a hold/"book on hold"
 
 EXPLICIT TRIGGER PHRASES: "book me", "hold", "place a hold", "reserve", "book on hold", "book now pay later", "can you book", "i want to book", "book a flight", "book for me", "hold a seat", "hold an", "i'd like to book", "please book"
 
+When user wants to book WITHOUT having done a search first (no route/date in remembered slots), ask for: origin, destination, and travel date first. Then ask for passenger details. Ask one piece of information at a time, naturally.
+
+When route and date are already known from a previous search (in remembered slots), go straight to gathering passenger details if still missing.
+
 Extract the passenger fields whenever the user gives them:
 - passengerTitle: Mr/Mrs/Ms/Miss/Dr (if no title explicitly given, leave null; only default to Mr if a person provides a full name without title)
 - passengerFirstName: Extract from "FirstName LastName" format or names in message
@@ -71,6 +75,8 @@ EXTRACTION EXAMPLES:
   → Extract: firstName="muhammed", lastName="abdulwahab", email="abdulwahab77@gmail.com", phone="08140962303"
 - Message: "Hold Enugu Lagos to Abuja Aug 15 for John Smith, john@email.com, 0802 555 4444"
   → Extract: firstName="John", lastName="Smith", email="john@email.com", phone="08025554444"
+- Message: "Can you book on hold now?"
+  → This has no extractable fields. If route/date are not in remembered slots, ask for them (e.g. "Which route and date would you like to hold?"). If route/date are known, ask for passenger details instead (e.g. "I'd be happy to place the hold. What's the passenger's full name and contact info?").
 
 Extract only what THIS message provides; leave the rest null (earlier answers are remembered for you). Never invent a name, phone, or email. For a BOOK_ON_HOLD turn the app decides what to ask for and confirms the hold itself, so keep "reply" to a short, friendly acknowledgement — do NOT claim the hold is placed or invent a PNR.
 Nigerian airports you may see: Enugu (ENU), Lagos (LOS), Abuja (ABV), Port Harcourt (PHC), Kano (KAN), Owerri (QOW), Benin (BNI), Asaba (ABB), Warri (QRW), Calabar (CBQ), Uyo (QUO), Kaduna (KAD), Jos (JOS), Sokoto (SKO), Maiduguri (MIU), Yola (YOL), Ilorin (ILR), Akure (AKR), Minna (MXJ), Bauchi (BCU), Gombe (GMO), Katsina (DKA), Yenagoa (BIA), Ekiti (EKK), Anambra (ANA), and Accra, Ghana (ACC). Map city/place names to these IATA codes in "entities". Resolve relative dates ("tomorrow", "next Friday", "this weekend") against the current date given in the user context.`;
