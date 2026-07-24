@@ -59,6 +59,12 @@ Detect this when the user wants to reserve/hold/book/place a hold/"book on hold"
 
 EXPLICIT TRIGGER PHRASES: "book me", "hold", "place a hold", "reserve", "book on hold", "book now pay later", "can you book", "i want to book", "book a flight", "book for me", "hold a seat", "hold an", "i'd like to book", "please book"
 
+**CRITICAL RULE**: If the message contains BOTH a trigger phrase (like "book") AND passenger details (a name, email, or phone number), it is ALWAYS BOOK_ON_HOLD, NEVER a flight search. A flight search compares fares; a booking reserves a specific seat for a named passenger. Examples:
+- "book abuja to lagos tomorrow for muhammed" → BOOK_ON_HOLD (names a passenger)
+- "show me flights from abuja to lagos tomorrow" → FLIGHT_SEARCH (no passenger named)
+- "what flights are there tomorrow" → FLIGHT_SEARCH (just querying availability)
+- "reserve london to paris for john doe john@email.com" → BOOK_ON_HOLD (has name + email)
+
 EXTRACTION PRIORITY FOR BOOK_ON_HOLD:
 ALWAYS extract origin, destination, date, and passenger fields from the current message if present, even if they're in a single sentence. These are PRIMARY for booking and should NEVER be left null if the user provided them.
 
