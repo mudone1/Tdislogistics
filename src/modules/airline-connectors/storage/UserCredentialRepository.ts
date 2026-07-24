@@ -1,5 +1,5 @@
 import { prisma } from "./prismaClient";
-import type { AirlineKey } from "../core/types";
+import type { AirlineKey } from "@prisma/client";
 
 export const UserCredentialRepository = {
   async findByUserAndAirline(userId: string, airline: AirlineKey) {
