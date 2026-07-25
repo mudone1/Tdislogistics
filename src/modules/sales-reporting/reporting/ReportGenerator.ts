@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { prisma } from "../../airline-connectors/storage/prismaClient";
 import { parseExcelBuffer } from "../parsing/ExcelParser";
 import { parseScreenshotBuffers } from "../parsing/ScreenshotParser";
@@ -6,7 +7,9 @@ import { resolveStaffName, normalizeRawCode } from "../staff/resolveStaffName";
 import { StaffAliasRepository } from "../staff/StaffAliasRepository";
 import { renderReportText } from "./ReportTextRenderer";
 import { scoreConfidence } from "./ConfidenceScorer";
+import { checkDuplicate, recordSupersession, type DuplicateMatch } from "../services/DuplicateCheckService";
 import type { AirlineRuleKey } from "../core/types";
+import type { DetectionMethod } from "../services/AirlineDetectionService";
 
 const AIRLINE_LABELS: Record<AirlineRuleKey, string> = {
   AERO: "Aero",
@@ -44,6 +47,26 @@ export interface GeneratedReportSummary {
   transactionsIgnoredCount: number;
   unknownStaff: string[]; // raw codes needing human confirmation before saving
   warnings: string[];
+  isDuplicate: boolean;
+  duplicateMatch?: DuplicateMatch;
+}
+
+export interface DetectionMeta {
+  method: DetectionMethod;
+  confidence: number;
+  reasoning: string[];
+}
+
+export interface GenerateReportOptions {
+  createdBy?: string;
+  importedBy?: string;
+  detection?: DetectionMeta; // set when the caller ran AirlineDetectionService rather than a manual pick
+}
+
+function hashFiles(files: UploadedFile[]): string {
+  const hash = createHash("sha256");
+  for (const f of files) hash.update(f.buffer);
+  return hash.digest("hex");
 }
 
 // "DD/MM/YYYY" for whichever date appears most often across the parsed
@@ -72,8 +95,9 @@ function detectReportDate(dates: (string | null)[]): string {
 export async function generateReport(
   airline: AirlineRuleKey,
   files: UploadedFile[],
-  createdBy?: string
+  options?: GenerateReportOptions
 ): Promise<GeneratedReportSummary> {
+  const createdBy = options?.createdBy;
   await StaffAliasRepository.ensureSeeded();
   const knownAliases = await StaffAliasRepository.listAll();
 
@@ -112,6 +136,14 @@ export async function generateReport(
   const reportText = renderReportText(AIRLINE_LABELS[airline], reportDate, result.staffTotals, result.transactions);
   const confidence = scoreConfidence(result.transactions, result.grandTotal, Array.from(unknownStaff), allWarnings.length);
 
+  const fileHash = hashFiles(files);
+  const primaryFile = files[0];
+  // checkDuplicate's own fileHash comparison already covers the exact-file
+  // case (byte-identical upload) as one of its weighted factors, so a
+  // single call covers both "same file re-uploaded" and "same
+  // date/airline/totals from a different export" duplicates.
+  const duplicateMatch = await checkDuplicate(airline, reportDate, result.grandTotal, result.ticketCount, fileHash);
+
   const report = await prisma.$transaction(async (tx) => {
     const created = await tx.salesReport.create({
       data: {
@@ -124,6 +156,14 @@ export async function generateReport(
         rulesVersion: "v1",
         createdBy,
         status: "PENDING_VERIFICATION",
+        airlineDetectedBy: options?.detection?.method,
+        detectionConfidence: options?.detection?.confidence,
+        detectionReasoning: options?.detection?.reasoning ?? [],
+        fileHash,
+        originalFilename: primaryFile?.name,
+        fileSize: files.reduce((sum, f) => sum + f.buffer.byteLength, 0),
+        importedAt: new Date(),
+        importedBy: options?.importedBy,
       },
     });
 
@@ -187,6 +227,8 @@ export async function generateReport(
     transactionsIgnoredCount: result.transactions.length - transactionsIncludedCount,
     unknownStaff: Array.from(unknownStaff),
     warnings: allWarnings,
+    isDuplicate: duplicateMatch != null,
+    duplicateMatch: duplicateMatch ?? undefined,
   };
 }
 
@@ -198,11 +240,21 @@ export async function generateReport(
 export async function confirmReport(
   reportId: string,
   verifiedBy: string,
-  staffCorrections?: Record<string, string>
+  staffCorrections?: Record<string, string>,
+  overwriteExisting?: { existingReportId: string; reason?: string }
 ): Promise<GeneratedReportSummary> {
   const report = await prisma.salesReport.findUniqueOrThrow({ where: { id: reportId } });
   if (report.status === "SAVED") {
     throw new Error(`Report ${reportId} was already saved.`);
+  }
+
+  if (overwriteExisting) {
+    const existing = await prisma.salesReport.findUniqueOrThrow({ where: { id: overwriteExisting.existingReportId } });
+    if (existing.airline !== report.airline || existing.reportDate !== report.reportDate) {
+      throw new Error(
+        `Report ${overwriteExisting.existingReportId} is not a match for this report's airline/date — refusing to supersede.`
+      );
+    }
   }
 
   if (staffCorrections && Object.keys(staffCorrections).length > 0) {
@@ -268,6 +320,15 @@ export async function confirmReport(
     include: { staffSales: true, transactions: true },
   });
 
+  if (overwriteExisting) {
+    await recordSupersession(overwriteExisting.existingReportId, reportId, verifiedBy, overwriteExisting.reason);
+  }
+
+  // Best-effort: the report is already SAVED at this point regardless of
+  // whether this succeeds — dashboard rollups can be backfilled/retried
+  // separately, but a hiccup here must never undo the save itself.
+  await syncDenormalizedAnalytics(reportId);
+
   return {
     reportId: updated.id,
     airline: updated.airline as AirlineRuleKey,
@@ -283,7 +344,113 @@ export async function confirmReport(
     transactionsIgnoredCount: updated.transactions.filter((t) => t.status !== "INCLUDED" && t.status !== "SYSTEM_CL_DEBIT").length,
     unknownStaff: [],
     warnings: [],
+    isDuplicate: false,
   };
+}
+
+// Populates the denormalized rollup tables from this report's own
+// transaction/ticket rows. Since DuplicateCheckService guarantees at most
+// one SAVED report per (airline, date), this always fully REPLACES that
+// date's rollup rows rather than incrementing — a superseding report's own
+// confirm just overwrites the same (date, airline) rows, no separate
+// subtract-old-add-new step needed.
+//
+// The rule engine's "included" set is entirely debit-direction (PT/CL
+// debits only — see isPTDebit/isCLDebit in rules/shared.ts), so grandTotal
+// already *is* the total debit amount; there's no separate gross/net split
+// or commission calculation in the rule engine yet, so grossSalesAmount and
+// netSalesAmount both hold that same figure and totalCommission is 0 until
+// those rules exist. "Voided" maps to CANCELLED_BY_RT (a PT cancelled by a
+// matching RT row) — the closest existing concept to a void in this domain.
+async function syncDenormalizedAnalytics(reportId: string): Promise<void> {
+  const report = await prisma.salesReport.findUniqueOrThrow({ where: { id: reportId } });
+  const tickets = await prisma.salesTicket.findMany({ where: { reportId } });
+  const transactions = await prisma.salesTransaction.findMany({ where: { reportId } });
+
+  const issuedTickets = tickets.filter((t) => t.included);
+  const voidedTickets = tickets.filter((t) => t.status === "CANCELLED_BY_RT");
+  const creditTransactions = transactions.filter((t) => t.status === "IGNORED_CREDIT");
+
+  const totalTicketsIssued = issuedTickets.length;
+  const totalTicketsVoided = voidedTickets.length;
+  const totalVoidAmount = voidedTickets.reduce((sum, t) => sum + Number(t.ticketValue), 0);
+  const totalCreditAmount = creditTransactions.reduce((sum, t) => sum + Number(t.amount), 0);
+  const grandTotal = Number(report.grandTotal);
+
+  await prisma.salesReportAnalytics.upsert({
+    where: { reportId },
+    create: {
+      reportId,
+      airline: report.airline,
+      reportDate: report.reportDate,
+      totalTicketsIssued,
+      totalTicketsVoided,
+      totalVoidAmount,
+      totalCreditAmount,
+      totalDebitAmount: grandTotal,
+      grossSalesAmount: grandTotal,
+      netSalesAmount: grandTotal,
+      totalCommission: 0,
+    },
+    update: {
+      totalTicketsIssued,
+      totalTicketsVoided,
+      totalVoidAmount,
+      totalCreditAmount,
+      totalDebitAmount: grandTotal,
+      grossSalesAmount: grandTotal,
+      netSalesAmount: grandTotal,
+      totalCommission: 0,
+    },
+  });
+
+  await prisma.airlineDailyMetrics.upsert({
+    where: { date_airline: { date: report.reportDate, airline: report.airline } },
+    create: {
+      date: report.reportDate,
+      airline: report.airline,
+      totalSales: grandTotal,
+      totalTickets: totalTicketsIssued,
+      totalVoids: totalTicketsVoided,
+      totalVoidAmount,
+      netSales: grandTotal,
+    },
+    update: {
+      totalSales: grandTotal,
+      totalTickets: totalTicketsIssued,
+      totalVoids: totalTicketsVoided,
+      totalVoidAmount,
+      netSales: grandTotal,
+    },
+  });
+
+  const staffNames = new Set(issuedTickets.map((t) => t.staff));
+  for (const staffName of staffNames) {
+    const staffTickets = issuedTickets.filter((t) => t.staff === staffName);
+    const staffVoids = voidedTickets.filter((t) => t.staff === staffName);
+    const staffCredits = creditTransactions.filter((t) => t.staffName === staffName);
+
+    await prisma.staffDailyPerformance.upsert({
+      where: { date_airline_staffName: { date: report.reportDate, airline: report.airline, staffName } },
+      create: {
+        date: report.reportDate,
+        airline: report.airline,
+        staffName,
+        ticketsIssued: staffTickets.length,
+        salesAmount: staffTickets.reduce((sum, t) => sum + Number(t.ticketValue), 0),
+        commission: 0,
+        voidAmount: staffVoids.reduce((sum, t) => sum + Number(t.ticketValue), 0),
+        creditAmount: staffCredits.reduce((sum, t) => sum + Number(t.amount), 0),
+      },
+      update: {
+        ticketsIssued: staffTickets.length,
+        salesAmount: staffTickets.reduce((sum, t) => sum + Number(t.ticketValue), 0),
+        commission: 0,
+        voidAmount: staffVoids.reduce((sum, t) => sum + Number(t.ticketValue), 0),
+        creditAmount: staffCredits.reduce((sum, t) => sum + Number(t.amount), 0),
+      },
+    });
+  }
 }
 
 export async function discardReport(reportId: string): Promise<void> {

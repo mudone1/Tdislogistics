@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { generateReport } from "@/modules/sales-reporting/reporting/ReportGenerator";
+import { detectAirline, type DetectionMethod } from "@/modules/sales-reporting/services/AirlineDetectionService";
 import { AIRLINE_RULE_KEYS, type AirlineRuleKey } from "@/modules/sales-reporting/core/types";
 
 export const runtime = "nodejs";
@@ -8,18 +9,24 @@ export const runtime = "nodejs";
 // model; give it well past the default before Vercel kills the function.
 export const maxDuration = 120;
 
-// multipart/form-data: "airline" field + one or more "files" entries.
+// multipart/form-data: "files" entries + an OPTIONAL "airline" field.
 // Accepts Excel (.xls/.xlsx — the reliable path) and image screenshots
 // (.png/.jpg/etc — extracted via a vision model). Multiple screenshots of
 // one report are merged into a single report before rule processing.
+//
+// When "airline" is omitted, AirlineDetectionService runs against the
+// first uploaded file. A confident detection (>=70%) proceeds
+// automatically; anything less returns 422 with the detection result
+// instead of guessing — the caller should show a confirm/select prompt and
+// retry with an explicit "airline".
 export async function POST(req: Request) {
   const form = await req.formData().catch(() => null);
   if (!form) {
     return NextResponse.json({ error: "Expected multipart/form-data" }, { status: 400 });
   }
 
-  const airline = form.get("airline");
-  if (typeof airline !== "string" || !AIRLINE_RULE_KEYS.includes(airline as AirlineRuleKey)) {
+  const airlineField = form.get("airline");
+  if (airlineField != null && (typeof airlineField !== "string" || !AIRLINE_RULE_KEYS.includes(airlineField as AirlineRuleKey))) {
     return NextResponse.json(
       { error: `"airline" must be one of ${AIRLINE_RULE_KEYS.join(", ")}` },
       { status: 400 }
@@ -32,6 +39,7 @@ export async function POST(req: Request) {
   }
 
   const createdBy = form.get("createdBy");
+  const importedBy = form.get("importedBy");
 
   try {
     const files = await Promise.all(
@@ -41,11 +49,25 @@ export async function POST(req: Request) {
         mimeType: f.type || undefined,
       }))
     );
-    const summary = await generateReport(
-      airline as AirlineRuleKey,
-      files,
-      typeof createdBy === "string" ? createdBy : undefined
-    );
+
+    let airline = airlineField as AirlineRuleKey | null;
+    let detection: { method: DetectionMethod; confidence: number; reasoning: string[] } | undefined;
+
+    if (!airline) {
+      const primary = files[0];
+      const result = await detectAirline(primary.buffer, primary.name, primary.mimeType);
+      if (!result.airline || result.requiresUserSelection) {
+        return NextResponse.json({ detection: result, needsAirlineSelection: true }, { status: 422 });
+      }
+      airline = result.airline;
+      detection = { method: result.method, confidence: result.confidence, reasoning: result.reasoning };
+    }
+
+    const summary = await generateReport(airline, files, {
+      createdBy: typeof createdBy === "string" ? createdBy : undefined,
+      importedBy: typeof importedBy === "string" ? importedBy : undefined,
+      detection,
+    });
     return NextResponse.json(summary);
   } catch (err) {
     console.error("[sales-reports/generate] failed:", err);
