@@ -107,8 +107,13 @@ export default function AirlinesSection() {
         {AIRLINES.map((a) => {
           const key = CODE_TO_AIRLINE_KEY[a.code];
           const entry = key ? connectors.find((c) => c.airline === key) : undefined;
-          const bal = entry?.currentBalance ?? null;
-          const prevBal = entry?.previousBalance ?? null;
+          // A wallet row is created with a placeholder currentBalance of 0
+          // the first time an airline is registered — that's not a real
+          // synced balance, so gate display on lastSynced, not on whether
+          // currentBalance happens to be a number.
+          const hasSynced = !!entry?.lastSynced;
+          const bal = hasSynced ? entry?.currentBalance ?? null : null;
+          const prevBal = hasSynced ? entry?.previousBalance ?? null : null;
           const change = bal !== null && prevBal !== null ? bal - prevBal : null;
           const logo = AIRLINE_LOGO_MAP[a.code];
           return (
