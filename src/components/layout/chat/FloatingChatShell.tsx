@@ -256,37 +256,73 @@ export default function FloatingChatShell({
   );
 
   // ── FAB dragging (mouse + touch), with edge-snap and click-to-open ─
+  // Plain pointer events only — NOT Framer's `drag` prop. Framer's drag
+  // positions the element via its own internal transform, independent of
+  // the left/top style we set from `fab` state; the two fight each other
+  // and the button visually snaps back after release. Writing directly to
+  // the DOM during the move (fast, no re-render) and committing a single
+  // setFab on release keeps one source of truth for position at all times.
   const onFabPointerDown = useCallback(
     (e: ReactPointerEvent) => {
       const btn = fabRef.current;
       if (!btn) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      btn.setPointerCapture(e.pointerId);
+
       const r = btn.getBoundingClientRect();
       const sx = e.clientX;
       const sy = e.clientY;
-      const ox = r.left;
-      const oy = r.top;
+      const startX = r.left;
+      const startY = r.top;
       let moved = false;
+      let finalX = startX;
+      let finalY = startY;
+
+      btn.style.transition = "none";
+      btn.style.cursor = "grabbing";
 
       const move = (ev: PointerEvent) => {
         const dx = ev.clientX - sx;
         const dy = ev.clientY - sy;
-        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
-        btn.style.left = `${clamp(ox + dx, 0, vp.w - FAB_SIZE)}px`;
-        btn.style.top = `${clamp(oy + dy, 0, vp.h - FAB_SIZE)}px`;
+
+        if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+          moved = true;
+        }
+        if (!moved) return;
+
+        finalX = clamp(startX + dx, 0, vp.w - FAB_SIZE);
+        finalY = clamp(startY + dy, 0, vp.h - FAB_SIZE);
+        btn.style.left = `${finalX}px`;
+        btn.style.top = `${finalY}px`;
       };
+
       const up = () => {
         document.removeEventListener("pointermove", move);
         document.removeEventListener("pointerup", up);
+        btn.style.transition = "";
+        btn.style.cursor = "grab";
+
         if (!moved) {
           onOpen();
           return;
         }
-        const nr = btn.getBoundingClientRect();
-        // Gently snap to whichever vertical edge is nearer.
+
+        // Snap to nearest vertical edge after drag
+        const distToLeft = finalX;
+        const distToRight = vp.w - (finalX + FAB_SIZE);
         const snapX =
-          nr.left + FAB_SIZE / 2 < vp.w / 2 ? EDGE_MARGIN : vp.w - FAB_SIZE - EDGE_MARGIN;
-        setFab({ x: snapX, y: clamp(nr.top, EDGE_MARGIN, vp.h - FAB_SIZE - EDGE_MARGIN) });
+          distToLeft < distToRight ? EDGE_MARGIN : vp.w - FAB_SIZE - EDGE_MARGIN;
+        const snapY = clamp(finalY, EDGE_MARGIN, vp.h - FAB_SIZE - EDGE_MARGIN);
+
+        // Write the resting position directly so there's no flash before
+        // React re-renders with the same value from state.
+        btn.style.left = `${snapX}px`;
+        btn.style.top = `${snapY}px`;
+        setFab({ x: snapX, y: snapY });
       };
+
       document.addEventListener("pointermove", move);
       document.addEventListener("pointerup", up);
     },
@@ -386,9 +422,17 @@ export default function FloatingChatShell({
             ref={fabRef}
             type="button"
             className="tdis-chat-fab"
-            style={{ left: fab?.x ?? vp.w - FAB_SIZE - 24, top: fab?.y ?? vp.h - FAB_SIZE - 24 }}
+            style={{
+              position: "fixed",
+              left: fab?.x ?? vp.w - FAB_SIZE - 24,
+              top: fab?.y ?? vp.h - FAB_SIZE - 24,
+              width: FAB_SIZE,
+              height: FAB_SIZE,
+              cursor: "grab",
+            }}
             onPointerDown={onFabPointerDown}
             aria-label="Open AI Operations Assistant"
+            title="Click to open • Drag to move"
             initial={{ opacity: 0, scale: 0.6 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.6 }}

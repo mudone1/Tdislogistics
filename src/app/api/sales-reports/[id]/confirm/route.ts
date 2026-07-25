@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 interface ConfirmPayload {
   verifiedBy?: string;
   staffCorrections?: Record<string, string>; // rawCode -> corrected display name
+  overwriteExisting?: { existingReportId: string; reason?: string }; // from a prior /check-duplicate match, user chose "Overwrite"
 }
 
 // "Reply Save" from the spec's verification step — nothing is queryable
@@ -15,7 +16,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const payload = (await req.json().catch(() => ({}))) as ConfirmPayload;
 
   try {
-    const summary = await confirmReport(id, payload.verifiedBy || "unknown", payload.staffCorrections);
+    const summary = await confirmReport(id, payload.verifiedBy || "unknown", payload.staffCorrections, payload.overwriteExisting);
     return NextResponse.json(summary);
   } catch (err) {
     console.error("[sales-reports/confirm] failed:", err);

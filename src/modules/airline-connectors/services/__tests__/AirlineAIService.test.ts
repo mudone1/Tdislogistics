@@ -3,6 +3,7 @@ import { AirlineAIService } from "../AirlineAIService";
 import { AirlineBalanceService } from "../AirlineBalanceService";
 import { SyncHistoryService } from "../SyncHistoryService";
 import { ConnectorRegistry } from "../ConnectorRegistry";
+import type { AirlineKey } from "../../core/types";
 
 jest.mock("../AirlineBalanceService");
 jest.mock("../SyncHistoryService");
@@ -83,15 +84,30 @@ describe("AirlineAIService", () => {
       const mockSyncHistoryService = SyncHistoryService as jest.Mocked<typeof SyncHistoryService>;
       const mockConnectorRegistry = ConnectorRegistry as jest.Mocked<typeof ConnectorRegistry>;
 
+      // Decimal.js-like mock: every chained operation returns the same
+      // object so the source's minus().dividedBy().times().toNumber()
+      // chain resolves to `finalValue` regardless of the operands passed in.
+      const decimalMock = (finalValue: number): any => {
+        const obj: any = {
+          minus: () => obj,
+          dividedBy: () => obj,
+          times: () => obj,
+          toNumber: () => finalValue,
+          gt: (n: number) => finalValue > n,
+          lt: (n: number) => finalValue < n,
+        };
+        return obj;
+      };
+
       mockSyncHistoryService.getAirlinesChangedToday.mockResolvedValue([
         {
           airline: "AIRPEACE",
-          balance: { minus: () => ({ times: () => 0.1 } as any) } as any,
+          balance: decimalMock(0.1),
           previousBalance: { gt: () => true } as any,
         },
         {
           airline: "AERO",
-          balance: { minus: () => ({ times: () => -0.05 } as any) } as any,
+          balance: decimalMock(-0.05),
           previousBalance: { gt: () => true } as any,
         },
       ] as any);
@@ -164,7 +180,9 @@ describe("AirlineAIService", () => {
 
     it("should handle no failures case", async () => {
       const mockSyncHistoryService = SyncHistoryService as jest.Mocked<typeof SyncHistoryService>;
-      mockSyncHistoryService.getMostProblematicAirline.mockResolvedValue(null);
+      // Prisma's groupBy() return type isn't indexed-access-safe (no noUncheckedIndexedAccess),
+      // so TS doesn't know failures[0] can be undefined even though it is at runtime for an empty result.
+      mockSyncHistoryService.getMostProblematicAirline.mockResolvedValue(undefined as any);
 
       const result = await AirlineAIService.getMostProblematicAirline(30);
 
@@ -206,7 +224,7 @@ describe("AirlineAIService", () => {
       const mockConnectorRegistry = ConnectorRegistry as jest.Mocked<typeof ConnectorRegistry>;
       mockConnectorRegistry.isImplemented.mockReturnValue(false);
 
-      await expect(AirlineAIService.getAirlineBalance("UNKNOWN")).rejects.toThrow("Unknown airline");
+      await expect(AirlineAIService.getAirlineBalance("UNKNOWN" as AirlineKey)).rejects.toThrow("Unknown airline");
     });
   });
 

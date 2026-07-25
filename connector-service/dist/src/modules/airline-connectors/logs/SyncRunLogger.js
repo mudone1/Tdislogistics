@@ -1,4 +1,7 @@
-export const SYNC_STEPS = {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SyncRunLogger = exports.SYNC_STEPS = void 0;
+exports.SYNC_STEPS = {
     LOGIN_STARTED: "LOGIN_STARTED",
     LOGIN_SUCCESS: "LOGIN_SUCCESS",
     NAVIGATION: "NAVIGATION",
@@ -13,7 +16,7 @@ export const SYNC_STEPS = {
  * persisted in one batch insert by SyncService once the run finishes,
  * success or fail.
  */
-export class SyncRunLogger {
+class SyncRunLogger {
     airline;
     runId;
     lines = [];
@@ -36,3 +39,4 @@ export class SyncRunLogger {
         return this.lines;
     }
 }
+exports.SyncRunLogger = SyncRunLogger;

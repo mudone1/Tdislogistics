@@ -21,6 +21,8 @@ import ClientsSection from "@/components/sections/ClientsSection";
 import AdminSection from "@/components/sections/admin/AdminSection";
 import ClientDebtSection from "@/components/sections/ClientDebtSection";
 import DebtDashboardSection from "@/components/sections/DebtDashboardSection";
+import SalesReportsSection from "@/components/sections/SalesReportsSection";
+import SalesAnalyticsSection from "@/components/sections/SalesAnalyticsSection";
 
 export default function Home() {
   const { currentUser, authReady, hasPermission } = useApp();
@@ -59,6 +61,10 @@ export default function Home() {
         return <ClientDebtSection />;
       case "debtDashboard":
         return <DebtDashboardSection />;
+      case "salesReports":
+        return isAdmin ? <SalesReportsSection /> : <NoAccess />;
+      case "salesAnalytics":
+        return isAdmin ? <SalesAnalyticsSection /> : <NoAccess />;
       case "admin":
         return isAdmin ? <AdminSection /> : <NoAccess />;
       default:

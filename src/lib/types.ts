@@ -134,4 +134,6 @@ export type SectionId =
   | "staff"
   | "admin"
   | "clientDebt"
-  | "debtDashboard";
+  | "debtDashboard"
+  | "salesReports"
+  | "salesAnalytics";

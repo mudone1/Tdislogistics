@@ -43,6 +43,7 @@ export type ChatIntent =
   | "BOOKING_ASSISTANCE"
   | "TICKET_AVAILABILITY"
   | "AIRLINE_INFO"
+  | "SALES_REPORT_QUERY"
   | "GENERAL_QUESTION"
   | "UNKNOWN";
 

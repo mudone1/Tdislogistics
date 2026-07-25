@@ -11,5 +11,5 @@
     "resolveJsonModule": true
   },
   "include": ["src/**/*.ts", "../src/modules/airline-connectors/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "**/__tests__/**", "**/*.test.ts"]
 }

@@ -161,7 +161,7 @@ describe("AuthFailureService", () => {
 
       const message = await AuthFailureService.getCooldownMessage("AIRPEACE");
       expect(message).toContain("Authentication failed");
-      expect(message).toContain("5 minute");
+      expect(message).toContain("5 more minute");
     });
 
     it("should return null when not in cooldown", async () => {

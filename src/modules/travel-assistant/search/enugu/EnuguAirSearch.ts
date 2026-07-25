@@ -87,12 +87,15 @@ async function extractFlightOptions(page: Page, frame: FrameLocator, requestedDa
 
     options.push({
       airline: "Enugu Air",
+      flightNumber: null,
       departureTime: parsed.time,
+      arrivalTime: null,
       date: parsed.date ?? requestedDate,
       durationMinutes: parsed.durationMinutes,
       fare: fareInfo.fare,
       currency: "NGN",
       seatStatus: fareInfo.status,
+      fareClasses: [],
       raw: raw.trim(),
     });
   }

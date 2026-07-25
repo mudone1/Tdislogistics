@@ -41,6 +41,7 @@ export const ErrorClassificationService = {
       /unauthorized/i,
       /authentication\s+failed/i,
       /password\s+(changed|expired|incorrect)/i,
+      /credentials?\s+(expired|invalid|incorrect)/i,
       /invalid\s+username/i,
       /account\s+(locked|disabled)/i,
       /login\s+(failed|incorrect)/i,
@@ -61,7 +62,7 @@ export const ErrorClassificationService = {
     const networkPatterns = [
       /timeout/i,
       /econnrefused|connection.*refused/i,
-      /enotfound|dns.*failed|not.*found/i,
+      /enotfound|dns.*failed/i,
       /econnreset|connection.*reset/i,
       /enetunreach|network.*unreachable/i,
       /socket.*hangup/i,

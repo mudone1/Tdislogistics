@@ -38,7 +38,10 @@ function cacheKey(airline: string, origin: string, destination: string, date: st
 const app = express();
 app.use(express.json());
 
-app.get("/internal/health", (_req, res) => res.json({ ok: true, build: "travel-assistant-v1" }));
+// build marker bumped whenever this file changes — used to confirm a Railway
+// deploy actually picked up the latest code, since this service deploys
+// separately from the Vercel app and has no other visible version signal.
+app.get("/internal/health", (_req, res) => res.json({ ok: true, build: "job-based-book-hold-v2" }));
 
 app.get("/internal/whatismyip", requireInternalApiKey, async (_req, res) => {
   try {

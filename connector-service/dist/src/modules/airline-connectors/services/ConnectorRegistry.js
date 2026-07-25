@@ -1,8 +1,15 @@
-import { AirPeaceConnector } from "../connectors/airpeace/AirPeaceConnector";
-import { AeroConnector } from "../connectors/aero/AeroConnector";
-import { ArikConnector } from "../connectors/arik/ArikConnector";
-import { IbomConnector } from "../connectors/ibom/IbomConnector";
-import { NGEagleConnector } from "../connectors/ngeagle/NGEagleConnector";
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ConnectorRegistry = void 0;
+const AirPeaceConnector_1 = require("../connectors/airpeace/AirPeaceConnector");
+const AeroConnector_1 = require("../connectors/aero/AeroConnector");
+const ArikConnector_1 = require("../connectors/arik/ArikConnector");
+const IbomConnector_1 = require("../connectors/ibom/IbomConnector");
+const NGEagleConnector_1 = require("../connectors/ngeagle/NGEagleConnector");
+const EnuguConnector_1 = require("../connectors/enugu/EnuguConnector");
+const UnitedConnector_1 = require("../connectors/united/UnitedConnector");
+const RanoConnector_1 = require("../connectors/rano/RanoConnector");
+const XeJetConnector_1 = require("../connectors/xejet/XeJetConnector");
 /**
  * Simple DI container / factory. SyncService and API routes ask this
  * registry for a connector by AirlineKey — they never import a concrete
@@ -10,13 +17,17 @@ import { NGEagleConnector } from "../connectors/ngeagle/NGEagleConnector";
  * later a registry-only change (see connectors/README.md).
  */
 const factories = {
-    AIRPEACE: () => new AirPeaceConnector(),
-    AERO: () => new AeroConnector(),
-    ARIK: () => new ArikConnector(),
-    IBOM: () => new IbomConnector(),
-    NGEAGLE: () => new NGEagleConnector(),
+    AIRPEACE: () => new AirPeaceConnector_1.AirPeaceConnector(),
+    AERO: () => new AeroConnector_1.AeroConnector(),
+    ARIK: () => new ArikConnector_1.ArikConnector(),
+    IBOM: () => new IbomConnector_1.IbomConnector(),
+    NGEAGLE: () => new NGEagleConnector_1.NGEagleConnector(),
+    ENUGU: () => new EnuguConnector_1.EnuguConnector(),
+    UNITED: () => new UnitedConnector_1.UnitedConnector(),
+    RANO: () => new RanoConnector_1.RanoConnector(),
+    XEJET: () => new XeJetConnector_1.XeJetConnector(),
 };
-export const ConnectorRegistry = {
+exports.ConnectorRegistry = {
     create(airline) {
         const factory = factories[airline];
         if (!factory) {
@@ -33,5 +44,9 @@ export const ConnectorRegistry = {
     },
     isImplemented(airline) {
         return airline in factories;
+    },
+    getDisplayName(airline) {
+        const instance = factories[airline]();
+        return instance.displayName;
     },
 };
