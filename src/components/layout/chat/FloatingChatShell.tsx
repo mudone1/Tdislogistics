@@ -267,60 +267,52 @@ export default function FloatingChatShell({
       const r = btn.getBoundingClientRect();
       const sx = e.clientX;
       const sy = e.clientY;
-      const ox = r.left;
-      const oy = r.top;
+      const startX = fab?.x ?? r.left;
+      const startY = fab?.y ?? r.top;
       let moved = false;
-
-      btn.style.transition = "none"; // Disable transition during drag
-      btn.style.cursor = "grabbing";
 
       const move = (ev: PointerEvent) => {
         const dx = ev.clientX - sx;
         const dy = ev.clientY - sy;
 
-        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+        if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
           moved = true;
         }
 
-        const newX = clamp(ox + dx, 0, vp.w - FAB_SIZE);
-        const newY = clamp(oy + dy, 0, vp.h - FAB_SIZE);
-
-        btn.style.left = `${newX}px`;
-        btn.style.top = `${newY}px`;
-        btn.style.right = "auto";
-        btn.style.bottom = "auto";
+        if (moved) {
+          const newX = clamp(startX + dx, 0, vp.w - FAB_SIZE);
+          const newY = clamp(startY + dy, 0, vp.h - FAB_SIZE);
+          setFab({ x: newX, y: newY });
+        }
       };
 
       const up = () => {
         document.removeEventListener("pointermove", move);
         document.removeEventListener("pointerup", up);
 
-        btn.style.cursor = "grab";
-        btn.style.transition = ""; // Re-enable transition
-
         if (!moved) {
           onOpen();
           return;
         }
 
-        const nr = btn.getBoundingClientRect();
-        // Snap to nearest vertical edge
-        const distToLeft = nr.left;
-        const distToRight = vp.w - (nr.left + FAB_SIZE);
-        const snapX =
-          distToLeft < distToRight
-            ? EDGE_MARGIN
-            : vp.w - FAB_SIZE - EDGE_MARGIN;
+        // Snap to nearest vertical edge after drag
+        if (fab) {
+          const distToLeft = fab.x;
+          const distToRight = vp.w - (fab.x + FAB_SIZE);
+          const snapX =
+            distToLeft < distToRight
+              ? EDGE_MARGIN
+              : vp.w - FAB_SIZE - EDGE_MARGIN;
 
-        const newY = clamp(nr.top, EDGE_MARGIN, vp.h - FAB_SIZE - EDGE_MARGIN);
-
-        setFab({ x: snapX, y: newY });
+          const newY = clamp(fab.y, EDGE_MARGIN, vp.h - FAB_SIZE - EDGE_MARGIN);
+          setFab({ x: snapX, y: newY });
+        }
       };
 
       document.addEventListener("pointermove", move);
       document.addEventListener("pointerup", up);
     },
-    [vp.w, vp.h, onOpen, setFab]
+    [vp.w, vp.h, onOpen, setFab, fab]
   );
 
   // ── Overlay (Document Picture-in-Picture) ─────────────────────────
