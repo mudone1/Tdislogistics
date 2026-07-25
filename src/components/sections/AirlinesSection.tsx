@@ -50,8 +50,8 @@ export default function AirlinesSection() {
           setConnectors(
             data.balances.map((b: any) => ({
               airline: b.airline,
-              currentBalance: b.currentBalance ? parseFloat(b.currentBalance.toString()) : null,
-              previousBalance: b.previousBalance ? parseFloat(b.previousBalance.toString()) : null,
+              currentBalance: b.currentBalance != null ? parseFloat(b.currentBalance.toString()) : null,
+              previousBalance: b.previousBalance != null ? parseFloat(b.previousBalance.toString()) : null,
               currency: b.currency,
               lastSynced: b.lastSynced,
               isInAuthCooldown: b.isInAuthCooldown,
