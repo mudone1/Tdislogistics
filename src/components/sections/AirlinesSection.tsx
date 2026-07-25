@@ -43,10 +43,23 @@ export default function AirlinesSection() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/connectors", { cache: "no-store" })
+    fetch("/api/balances", { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => {
-        if (!cancelled) setConnectors(data.connectors ?? []);
+        if (!cancelled && Array.isArray(data.balances)) {
+          setConnectors(
+            data.balances.map((b: any) => ({
+              airline: b.airline,
+              currentBalance: b.currentBalance ? parseFloat(b.currentBalance.toString()) : null,
+              previousBalance: b.previousBalance ? parseFloat(b.previousBalance.toString()) : null,
+              currency: b.currency,
+              lastSynced: b.lastSynced,
+              isInAuthCooldown: b.isInAuthCooldown,
+              cooldownRemainingMs: b.cooldownRemainingMs,
+              cooldownMessage: b.cooldownMessage,
+            }))
+          );
+        }
       })
       .catch(() => {
         /* tiles just show "Not yet synced" — no separate error state needed here */
