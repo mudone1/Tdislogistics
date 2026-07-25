@@ -414,8 +414,36 @@ export default function FloatingChatShell({
               top: fab?.y ?? vp.h - FAB_SIZE - 24,
               width: FAB_SIZE,
               height: FAB_SIZE,
+              cursor: "grab",
             }}
-            onPointerDown={onFabPointerDown}
+            drag
+            dragMomentum={false}
+            dragElastic={0}
+            onDragStart={() => {
+              if (fabRef.current) fabRef.current.style.cursor = "grabbing";
+            }}
+            onDragEnd={(event, info) => {
+              if (fabRef.current) fabRef.current.style.cursor = "grab";
+              const newX = clamp(fab!.x + info.offset.x, 0, vp.w - FAB_SIZE);
+              const newY = clamp(fab!.y + info.offset.y, 0, vp.h - FAB_SIZE);
+
+              // Snap to nearest edge
+              const distToLeft = newX;
+              const distToRight = vp.w - (newX + FAB_SIZE);
+              const snapX =
+                distToLeft < distToRight
+                  ? EDGE_MARGIN
+                  : vp.w - FAB_SIZE - EDGE_MARGIN;
+
+              const snapY = clamp(newY, EDGE_MARGIN, vp.h - FAB_SIZE - EDGE_MARGIN);
+              setFab({ x: snapX, y: snapY });
+            }}
+            onClick={(e) => {
+              if (!fab) return;
+              // Only trigger open if we didn't drag
+              const moved = Math.abs((e.currentTarget as HTMLElement).getBoundingClientRect().left - (fab.x || vp.w - FAB_SIZE - 24)) > 4;
+              if (!moved) onOpen();
+            }}
             aria-label="Open AI Operations Assistant"
             title="Click to open • Drag to move"
             initial={{ opacity: 0, scale: 0.6 }}
