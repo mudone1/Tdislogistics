@@ -63,6 +63,7 @@ export default function AirlineSyncPanel({
         }
       } catch (err) {
         console.error("Failed to fetch sync progress:", err);
+        setSyncing(false);
       }
     }, 1000); // Poll every 1 second
 

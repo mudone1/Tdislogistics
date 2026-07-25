@@ -269,6 +269,16 @@ export const AirlineAIService = {
   async queryByIntent(intent: string, entities: Record<string, any>): Promise<AirlineQueryResponse> {
     const intent_lower = intent.toLowerCase();
 
+    if (intent_lower.includes("auth") || intent_lower.includes("authentication") || intent_lower.includes("cooldown")) {
+      const days = entities.days || 7;
+      return this.getAuthFailuresSince(days);
+    }
+
+    if (intent_lower.includes("most") || intent_lower.includes("problematic") || intent_lower.includes("worst")) {
+      const days = entities.days || 30;
+      return this.getMostProblematicAirline(days);
+    }
+
     if (intent_lower.includes("failed") || intent_lower.includes("fail")) {
       return this.getFailedAirlinesToday();
     }
@@ -280,16 +290,6 @@ export const AirlineAIService = {
 
     if (intent_lower.includes("changed") || intent_lower.includes("change") || intent_lower.includes("movement")) {
       return this.getAirlinesChangedToday();
-    }
-
-    if (intent_lower.includes("auth") || intent_lower.includes("authentication") || intent_lower.includes("cooldown")) {
-      const days = entities.days || 7;
-      return this.getAuthFailuresSince(days);
-    }
-
-    if (intent_lower.includes("most") || intent_lower.includes("problematic") || intent_lower.includes("worst")) {
-      const days = entities.days || 30;
-      return this.getMostProblematicAirline(days);
     }
 
     if (intent_lower.includes("balance")) {

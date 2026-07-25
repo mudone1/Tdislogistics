@@ -6,6 +6,7 @@ import { FlightSearchHistoryRepository } from "../storage/FlightSearchHistoryRep
 import { NotificationRepository } from "../storage/NotificationRepository";
 import { formatLeg, formatRouteHeader } from "../formatting/formatFlightResults";
 import { startBookOnHold } from "../booking/startBookOnHold";
+import { handleQuery as handleSalesReportQuery } from "../orchestration/SalesReportAssistant";
 import type {
   AssistantTurn,
   ConversationSlots,
@@ -117,6 +118,21 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
 
   if (turn.intent === "BOOK_ON_HOLD") {
     return handleBookOnHold(session.id, input.sessionKey, slots, turn, input.message);
+  }
+
+  if (turn.intent === "SALES_REPORT_QUERY") {
+    let reply: string;
+    try {
+      reply = (await handleSalesReportQuery(input.message)).reply;
+    } catch (err) {
+      console.error("[travel-assistant] sales report query failed:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      // Same "surface the real reason" policy as the flight-search catch
+      // below — these users are TDIS staff, not the public.
+      reply = `I couldn't pull that up just now — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
+    }
+    await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+    return { reply };
   }
 
   if (!SEARCH_INTENTS.has(turn.intent)) {

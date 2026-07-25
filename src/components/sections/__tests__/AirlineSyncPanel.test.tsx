@@ -1,3 +1,6 @@
+/**
+ * @jest-environment jsdom
+ */
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import AirlineSyncPanel from "../AirlineSyncPanel";
@@ -5,7 +8,7 @@ import AirlineSyncPanel from "../AirlineSyncPanel";
 describe("AirlineSyncPanel", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    global.fetch = jest.fn();
+    global.fetch = jest.fn() as unknown as typeof fetch;
   });
 
   describe("rendering", () => {
@@ -37,7 +40,7 @@ describe("AirlineSyncPanel", () => {
 
   describe("sync triggering", () => {
     it("should call API when sync button clicked", async () => {
-      const mockFetch = global.fetch as jest.Mock;
+      const mockFetch = global.fetch as jest.Mock<(...args: any[]) => Promise<any>>;
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -63,7 +66,7 @@ describe("AirlineSyncPanel", () => {
     });
 
     it("should disable button during sync", async () => {
-      const mockFetch = global.fetch as jest.Mock;
+      const mockFetch = global.fetch as jest.Mock<(...args: any[]) => Promise<any>>;
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -87,7 +90,7 @@ describe("AirlineSyncPanel", () => {
 
     it("should call onSyncStart callback", async () => {
       const mockCallback = jest.fn();
-      const mockFetch = global.fetch as jest.Mock;
+      const mockFetch = global.fetch as jest.Mock<(...args: any[]) => Promise<any>>;
       mockFetch.mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -109,7 +112,7 @@ describe("AirlineSyncPanel", () => {
     });
 
     it("should show error alert on API failure", async () => {
-      const mockFetch = global.fetch as jest.Mock;
+      const mockFetch = global.fetch as jest.Mock<(...args: any[]) => Promise<any>>;
       mockFetch.mockResolvedValueOnce({
         ok: false,
         json: async () => ({ error: "Failed to start sync" }),
@@ -131,7 +134,7 @@ describe("AirlineSyncPanel", () => {
 
   describe("progress polling", () => {
     it("should poll progress every 1 second", async () => {
-      const mockFetch = global.fetch as jest.Mock;
+      const mockFetch = global.fetch as jest.Mock<(...args: any[]) => Promise<any>>;
       mockFetch
         .mockResolvedValueOnce({
           ok: true,
@@ -183,7 +186,7 @@ describe("AirlineSyncPanel", () => {
 
     it("should stop polling when sync completes", async () => {
       const mockCallback = jest.fn();
-      const mockFetch = global.fetch as jest.Mock;
+      const mockFetch = global.fetch as jest.Mock<(...args: any[]) => Promise<any>>;
       mockFetch
         .mockResolvedValueOnce({
           ok: true,
@@ -217,20 +220,26 @@ describe("AirlineSyncPanel", () => {
 
       fireEvent.click(button);
 
-      await waitFor(() => {
-        expect(mockCallback).toHaveBeenCalled();
-      });
+      await waitFor(
+        () => {
+          expect(mockCallback).toHaveBeenCalled();
+        },
+        { timeout: 3000 }
+      );
 
       // Button should be re-enabled after completion
-      await waitFor(() => {
-        expect(button).not.toBeDisabled();
-      });
+      await waitFor(
+        () => {
+          expect(button).not.toBeDisabled();
+        },
+        { timeout: 3000 }
+      );
     });
   });
 
   describe("error handling", () => {
     it("should handle network error during progress fetch", async () => {
-      const mockFetch = global.fetch as jest.Mock;
+      const mockFetch = global.fetch as jest.Mock<(...args: any[]) => Promise<any>>;
       mockFetch
         .mockResolvedValueOnce({
           ok: true,
@@ -255,7 +264,7 @@ describe("AirlineSyncPanel", () => {
 
   describe("airline detail expansion", () => {
     it("should expand/collapse airline details", async () => {
-      const mockFetch = global.fetch as jest.Mock;
+      const mockFetch = global.fetch as jest.Mock<(...args: any[]) => Promise<any>>;
       mockFetch
         .mockResolvedValueOnce({
           ok: true,
@@ -295,10 +304,13 @@ describe("AirlineSyncPanel", () => {
       fireEvent.click(button);
 
       // Wait for completion and details to appear
-      await waitFor(() => {
-        const airlineElements = screen.queryAllByText(/AIRPEACE/);
-        expect(airlineElements.length).toBeGreaterThan(0);
-      });
+      await waitFor(
+        () => {
+          const airlineElements = screen.queryAllByText(/AIRPEACE/);
+          expect(airlineElements.length).toBeGreaterThan(0);
+        },
+        { timeout: 3000 }
+      );
     });
   });
 });

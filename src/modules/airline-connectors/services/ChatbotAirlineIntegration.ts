@@ -28,6 +28,24 @@ export const ChatbotAirlineIntegration = {
   extractIntent(userMessage: string): AirlineQuery | null {
     const message = userMessage.toLowerCase();
 
+    // Auth failures query
+    if (message.includes("auth") || message.includes("authentication") || message.includes("password")) {
+      const daysMatch = userMessage.match(/(\d+)\s*days?/i);
+      return {
+        intent: "AUTH_FAILURES",
+        entities: { days: daysMatch ? parseInt(daysMatch[1]) : 7 },
+      };
+    }
+
+    // Most problematic airline query
+    if (message.includes("most") || message.includes("worst") || message.includes("problematic")) {
+      const daysMatch = userMessage.match(/(\d+)\s*days?/i);
+      return {
+        intent: "MOST_PROBLEMATIC",
+        entities: { days: daysMatch ? parseInt(daysMatch[1]) : 30 },
+      };
+    }
+
     // Failed airlines query
     if (message.includes("fail") || message.includes("error")) {
       return { intent: "FAILED_AIRLINES", entities: {} };
@@ -47,27 +65,9 @@ export const ChatbotAirlineIntegration = {
       return { intent: "CHANGED_AIRLINES", entities: {} };
     }
 
-    // Auth failures query
-    if (message.includes("auth") || message.includes("authentication") || message.includes("password")) {
-      const daysMatch = userMessage.match(/(\d+)\s*days?/i);
-      return {
-        intent: "AUTH_FAILURES",
-        entities: { days: daysMatch ? parseInt(daysMatch[1]) : 7 },
-      };
-    }
-
-    // Most problematic airline query
-    if (message.includes("most") || message.includes("worst") || message.includes("problematic")) {
-      const daysMatch = userMessage.match(/(\d+)\s*days?/i);
-      return {
-        intent: "MOST_PROBLEMATIC",
-        entities: { days: daysMatch ? parseInt(daysMatch[1]) : 30 },
-      };
-    }
-
     // Individual airline balance query
     if (message.includes("balance") || message.includes("how much")) {
-      const airlines = ["AIRPEACE", "AERO", "DANA", "XEJET", "UNITED", "AIRLINE", "MEDVIEW", "OVERLAND", "AZMAN"];
+      const airlines = ["AIRPEACE", "AERO", "ARIK", "IBOM", "NGEAGLE", "ENUGU", "UNITED", "RANO", "XEJET"];
       for (const airline of airlines) {
         if (message.includes(airline.toLowerCase())) {
           return { intent: "AIRLINE_BALANCE", entities: { airline: airline as AirlineKey } };

@@ -1,3 +1,6 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.requireInternalApiKey = requireInternalApiKey;
 /**
  * This API is internal-only — called by the Next.js app's server-side API
  * routes, never directly by a browser. Protected by a shared secret rather
@@ -6,7 +9,7 @@
  * firewall rule in addition to this check where possible — a shared
  * secret alone is a reasonable baseline, not a complete security model.
  */
-export function requireInternalApiKey(req, res, next) {
+function requireInternalApiKey(req, res, next) {
     const expected = process.env.CONNECTOR_SERVICE_API_KEY;
     if (!expected) {
         console.error("[auth] CONNECTOR_SERVICE_API_KEY is not set — refusing all requests until it is.");
