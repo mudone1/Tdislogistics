@@ -178,6 +178,16 @@ export const SIDEBAR_SECTIONS: {
     ],
   },
   {
+    // Phased rollout: Admin/Finance only for now (there's no separate
+    // Finance role yet, so this gates on the same admin flag as the Admin
+    // Dashboard below).
+    label: "Sales",
+    items: [
+      { id: "salesReports", icon: "file-bar-chart", label: "Sales Reports", requiresAdmin: true },
+      { id: "salesAnalytics", icon: "trending-up", label: "Sales Analytics", requiresAdmin: true },
+    ],
+  },
+  {
     label: "System",
     items: [{ id: "admin", icon: "settings", label: "Admin Dashboard", requiresAdmin: true }],
   },
