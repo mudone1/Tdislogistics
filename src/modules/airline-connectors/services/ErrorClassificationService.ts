@@ -112,7 +112,7 @@ export const ErrorClassificationService = {
     };
   },
 
-  private classifyAuthError(message: string): ErrorCode {
+  classifyAuthError(message: string): ErrorCode {
     if (/password.*changed|changed.*password/i.test(message))
       return "INVALID_PASSWORD";
     if (/expired|expir/i.test(message)) return "CREDENTIALS_EXPIRED";
@@ -121,7 +121,7 @@ export const ErrorClassificationService = {
     return "INVALID_PASSWORD";
   },
 
-  private classifyNetworkError(message: string): ErrorCode {
+  classifyNetworkError(message: string): ErrorCode {
     if (/timeout|timed out/i.test(message)) return "TIMEOUT";
     if (/dns|enotfound|not.*found/i.test(message)) return "DNS_FAILURE";
     if (/econnrefused|refused/i.test(message)) return "CONNECTION_REFUSED";
@@ -129,7 +129,7 @@ export const ErrorClassificationService = {
     return "TIMEOUT";
   },
 
-  private classifyPortalError(message: string): ErrorCode {
+  classifyPortalError(message: string): ErrorCode {
     if (/captcha|recaptcha/i.test(message)) return "CAPTCHA_DETECTED";
     if (/parsing|html|structure|selector/i.test(message))
       return "HTML_PARSING_FAILED";

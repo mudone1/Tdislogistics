@@ -31,7 +31,7 @@ export const AirlineAIService = {
       if (!groupedByAirline.has(failure.airline)) {
         groupedByAirline.set(failure.airline, []);
       }
-      groupedByAirline.get(failure.airline).push(failure);
+      groupedByAirline.get(failure.airline)!.push(failure);
     });
 
     const result = Array.from(groupedByAirline.entries()).map(([airline, history]) => ({
@@ -97,8 +97,8 @@ export const AirlineAIService = {
           : 0,
     }));
 
-    const increases = result.filter((r) => r.change > 0);
-    const decreases = result.filter((r) => r.change < 0);
+    const increases = result.filter((r) => r.change.gt(0));
+    const decreases = result.filter((r) => r.change.lt(0));
 
     return {
       type: "status",
@@ -124,7 +124,7 @@ export const AirlineAIService = {
       if (!groupedByAirline.has(failure.airline)) {
         groupedByAirline.set(failure.airline, []);
       }
-      groupedByAirline.get(failure.airline).push(failure);
+      groupedByAirline.get(failure.airline)!.push(failure);
     });
 
     const result = Array.from(groupedByAirline.entries())
@@ -220,7 +220,7 @@ export const AirlineAIService = {
         cooldownRemaining: balance.cooldownRemainingMs,
         cooldownMessage: balance.cooldownMessage,
       },
-      message: `${balance.displayName} balance: ₦${balance.currentBalance.toLocaleString()} (updated ${balance.lastSynced ? new Date(balance.lastSynced).toLocaleString("en-NG") : "never"})`,
+      message: `${balance.displayName} balance: ₦${Number(balance.currentBalance).toLocaleString()} (updated ${balance.lastSynced ? new Date(balance.lastSynced).toLocaleString("en-NG") : "never"})`,
       airlinesQueried: [airline],
       timestamp: new Date(),
     };
@@ -256,7 +256,7 @@ export const AirlineAIService = {
           neverSynced: stats.neverSynced,
         },
       },
-      message: `${stats.totalAirlines} airlines tracked, total balance: ₦${stats.total.toLocaleString()}`,
+      message: `${stats.totalAirlines} airlines tracked, total balance: ₦${Number(stats.total).toLocaleString()}`,
       airlinesQueried: result.map((r) => r.airline),
       timestamp: new Date(),
     };

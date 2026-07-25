@@ -37,16 +37,16 @@ export async function GET(
       balance: result.balance,
       history: result.history,
       trend: {
-        dayChange: result.history[0]?.balanceChange ?? 0,
+        dayChange: result.history[0]?.balanceChange != null ? Number(result.history[0].balanceChange) : 0,
         // Calculate week change (7 days ago)
         weekChange:
           result.history.length > 7
-            ? result.history[0].balance - result.history[Math.min(6, result.history.length - 1)].balance
+            ? Number(result.history[0].balance) - Number(result.history[Math.min(6, result.history.length - 1)].balance)
             : null,
         // Calculate month change (30 days ago)
         monthChange:
           result.history.length > 30
-            ? result.history[0].balance - result.history[Math.min(29, result.history.length - 1)].balance
+            ? Number(result.history[0].balance) - Number(result.history[Math.min(29, result.history.length - 1)].balance)
             : null,
       },
     });

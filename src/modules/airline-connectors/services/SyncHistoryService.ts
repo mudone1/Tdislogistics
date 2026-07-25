@@ -9,7 +9,7 @@ import type { Decimal } from "@prisma/client/runtime/library";
 export interface SyncRunSummary {
   runId: string;
   trigger: SyncTrigger;
-  initiatedBy?: string;
+  initiatedBy?: string | null;
   startedAt: Date;
   completedAt: Date | null;
   durationMs: number | null;

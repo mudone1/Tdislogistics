@@ -61,7 +61,7 @@ export const AirlineBalanceService = {
       isInAuthCooldown: inCooldown,
       cooldownRemainingMs: cooldownRemaining,
       cooldownMessage,
-      lastError: latestFailure?.errorMessage,
+      lastError: latestFailure?.errorMessage ?? undefined,
     };
   },
 
@@ -131,7 +131,7 @@ export const AirlineBalanceService = {
     const total = balances.reduce((s, b) => s.plus(b.currentBalance), new Decimal(0));
     const average = balances.length > 0 ? total.dividedBy(balances.length) : new Decimal(0);
     const highest = balances.reduce((max, b) => (b.currentBalance.gt(max) ? b.currentBalance : max), new Decimal(0));
-    const lowest = balances.reduce((min, b) => (b.currentBalance.lt(min) ? b.currentBalance : min), new Decimal(Infinity)));
+    const lowest = balances.reduce((min, b) => (b.currentBalance.lt(min) ? b.currentBalance : min), new Decimal(Infinity));
 
     const inCooldown = balances.filter((b) => b.isInAuthCooldown).length;
     const neverSynced = balances.filter((b) => !b.lastSynced).length;

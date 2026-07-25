@@ -83,7 +83,7 @@ export const AirlineWalletRepository = {
 
     // Calculate balance change
     const newBalance = balance?.totalBalance ?? 0;
-    const balanceChange = previousBalance ? newBalance - previousBalance : null;
+    const balanceChange = previousBalance ? newBalance - Number(previousBalance) : null;
 
     await prisma.airlineBalanceHistory.create({
       data: {
@@ -207,7 +207,8 @@ export const AirlineWalletRepository = {
       parallelism: number;
     }
   ) {
-    const totalTime = new Date().getTime() - (await this.getSyncRun(runId)).then((r) => r?.startedAt.getTime() || 0);
+    const run = await this.getSyncRun(runId);
+    const totalTime = new Date().getTime() - (run?.startedAt.getTime() || 0);
 
     return prisma.airlineSyncRun.update({
       where: { runId },
@@ -271,8 +272,8 @@ export const AirlineWalletRepository = {
           gte: filters.since,
           lte: filters.until,
         },
-        errorCategory: filters.errorCategory ? filters.errorCategory : undefined,
-        syncStatus: filters.status ? filters.status : undefined,
+        errorCategory: filters.errorCategory ? (filters.errorCategory as any) : undefined,
+        syncStatus: filters.status ? (filters.status as any) : undefined,
       },
       orderBy: { retrievedAt: "desc" },
     });
@@ -290,7 +291,7 @@ export const AirlineWalletRepository = {
 
   // === ANALYTICS QUERIES ===
 
-  async getSyncStatistics(since: Date, until?: Date = new Date()) {
+  async getSyncStatistics(since: Date, until: Date = new Date()) {
     const runs = await prisma.airlineSyncRun.findMany({
       where: {
         startedAt: {
@@ -353,7 +354,7 @@ export const AirlineWalletRepository = {
         retrievedAt: { gte: since },
       },
       _count: true,
-      orderBy: { _count: "desc" },
+      orderBy: { _count: { airline: "desc" } },
       take: 1,
     });
 
