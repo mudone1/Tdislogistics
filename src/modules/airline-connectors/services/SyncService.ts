@@ -2,6 +2,8 @@ import crypto from "crypto";
 import { ConnectorRegistry } from "./ConnectorRegistry";
 import { AirlineWalletRepository } from "../storage/AirlineWalletRepository";
 import { decryptSecret } from "./CredentialService";
+import { ErrorClassificationService } from "./ErrorClassificationService";
+import { AuthFailureService } from "./AuthFailureService";
 import type { AirlineKey, SyncResult, SyncTrigger } from "../core/types";
 
 /**
@@ -20,16 +22,39 @@ import type { AirlineKey, SyncResult, SyncTrigger } from "../core/types";
  * so a connector sync can never clobber a manually-entered deposit
  * figure and vice versa. This used to mirror into Firestore
  * (FirestoreMirrorService, now removed) before that separation existed.
+ *
+ * NEW: Integrates with ErrorClassificationService and AuthFailureService
+ * for smart error handling and cooldown management.
  */
-export async function runSync(airline: AirlineKey, trigger: SyncTrigger): Promise<SyncResult> {
-  const runId = crypto.randomUUID();
+export async function runSync(
+  airline: AirlineKey,
+  trigger: SyncTrigger,
+  runId?: string,
+  initiatedBy?: string
+): Promise<SyncResult & { errorCategory?: string }> {
+  const finalRunId = runId || crypto.randomUUID();
+  const started = Date.now();
 
   const settings = await AirlineWalletRepository.getSettings(airline);
   if (!settings?.enabled) {
-    return { airline, status: "FAILED", error: "Connector is not enabled", durationMs: 0, runId };
+    return {
+      airline,
+      status: "FAILED",
+      error: "Connector is not enabled",
+      durationMs: Date.now() - started,
+      runId: finalRunId,
+      errorCategory: "UNKNOWN",
+    };
   }
   if (!settings.encryptedUsername || !settings.encryptedPassword) {
-    return { airline, status: "FAILED", error: "No credentials configured", durationMs: 0, runId };
+    return {
+      airline,
+      status: "FAILED",
+      error: "No credentials configured",
+      durationMs: Date.now() - started,
+      runId: finalRunId,
+      errorCategory: "UNKNOWN",
+    };
   }
 
   const connector = ConnectorRegistry.create(airline);
@@ -38,12 +63,29 @@ export async function runSync(airline: AirlineKey, trigger: SyncTrigger): Promis
     password: decryptSecret(settings.encryptedPassword),
   };
 
-  const result = await connector.runFullSync(credentials, runId);
+  const result = await connector.runFullSync(credentials, finalRunId);
+  const durationMs = Date.now() - started;
 
-  // PostgreSQL — source of truth, append-only history + current pointer.
-  await AirlineWalletRepository.recordSyncResult(result, connector.constructor.name, trigger);
+  // Classify error if sync failed
+  let errorCategory: string | undefined;
+  if (result.status === "FAILED" && result.error) {
+    const classified = ErrorClassificationService.classify(result.error);
+    errorCategory = classified.category;
 
-  return result;
+    // Record auth failure and enter cooldown if auth error
+    if (classified.shouldEnterCooldown) {
+      await AuthFailureService.recordAuthFailure(airline, result.error);
+    }
+  }
+
+  // Record sync result with categorization and metadata
+  await AirlineWalletRepository.recordSyncResult(
+    { ...result, durationMs, errorCategory, runId: finalRunId, initiatedBy },
+    connector.constructor.name,
+    trigger
+  );
+
+  return { ...result, durationMs, errorCategory, runId: finalRunId };
 }
 
 /** Used by the "Test Connection" admin action — no balance read/save, just verifies login works. */

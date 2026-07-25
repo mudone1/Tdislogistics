@@ -49,15 +49,36 @@ enum SyncTrigger {
   SCHEDULED
 }
 
+enum ErrorCategory {
+  AUTH
+  NETWORK
+  PORTAL
+  UNKNOWN
+}
+
+// Current balance + metadata for each airline (updated on successful sync).
 model AirlineWallet {
-  id             String     @id @default(cuid())
-  airline        AirlineKey @unique
-  currentBalance Decimal    @default(0) @db.Decimal(14, 2)
-  currency       String     @default("NGN")
-  lastSynced     DateTime?
-  lastStatus     SyncStatus @default(PENDING)
-  updatedAt      DateTime   @updatedAt
-  createdAt      DateTime   @default(now())
+  id              String     @id @default(cuid())
+  airline         AirlineKey @unique
+
+  // === BALANCE DATA ===
+  currentBalance  Decimal    @default(0) @db.Decimal(14, 2)
+  previousBalance Decimal?   @db.Decimal(14, 2)  // For UI comparison
+  currency        String     @default("NGN")
+
+  // === SYNC METADATA ===
+  lastSynced      DateTime?
+  lastStatus      SyncStatus @default(PENDING)
+  lastRunId       String?    // Latest sync attempt (for polling)
+
+  // === CACHE (from most recent AirlineBalanceHistory) ===
+  lastSuccessfulSync DateTime?
+  lastFailedSync     DateTime?
+  failureCount       Int        @default(0)       // Cumulative failures
+  consecutiveFailures Int       @default(0)       // Failures in a row
+
+  updatedAt       DateTime   @updatedAt
+  createdAt       DateTime   @default(now())
 
   history  AirlineBalanceHistory[]
   settings AirlineConnectorSettings?
@@ -69,20 +90,39 @@ model AirlineWallet {
 // (successful or failed) inserts a new row, so balance history and audit
 // trail are always intact.
 model AirlineBalanceHistory {
-  id           String      @id @default(cuid())
+  id           String       @id @default(cuid())
   airline      AirlineKey
-  balance      Decimal     @db.Decimal(14, 2)
-  currency     String      @default("NGN")
-  retrievedAt  DateTime    @default(now())
+
+  // === BALANCE DATA ===
+  balance      Decimal      @db.Decimal(14, 2)
+  previousBalance Decimal?  @db.Decimal(14, 2)
+  balanceChange Decimal?    @db.Decimal(14, 2)  // Computed: balance - previousBalance
+  currency     String       @default("NGN")
+
+  // === SYNC METADATA ===
+  runId        String?      // Group all airlines from one sync run
+  retrievedAt  DateTime     @default(now())
   syncStatus   SyncStatus
-  connector    String // e.g. "AirPeaceConnector" — which connector produced this row
-  trigger      SyncTrigger @default(MANUAL)
-  errorMessage String?
-  createdAt    DateTime    @default(now())
+  connector    String       // e.g., "AirPeaceConnector"
+  trigger      SyncTrigger  @default(MANUAL)
+  durationMs   Int?         // How long the sync took
+
+  // === ERROR CATEGORIZATION ===
+  errorCategory ErrorCategory?
+  errorMessage  String?
+  errorCode     String?     // e.g., "INVALID_PASSWORD", "TIMEOUT"
+
+  // === INITIATIVE TRACKING ===
+  initiatedBy   String?     // "admin@example.com" or "scheduler"
+
+  createdAt    DateTime     @default(now())
 
   wallet AirlineWallet @relation(fields: [airline], references: [airline])
 
   @@index([airline, retrievedAt])
+  @@index([runId])
+  @@index([syncStatus])
+  @@index([errorCategory])
   @@map("airline_balance_history")
 }
 
@@ -96,9 +136,32 @@ model AirlineConnectorSettings {
   enabled             Boolean    @default(false)
   encryptedUsername   String?    // Admin sync account
   encryptedPassword   String?    // Admin sync account
-  syncIntervalMinutes Int? // null = manual only. 120 = every 2 hours, 1440 = daily.
-  dailyRunAtUtc       String? // "00:00" style, used when syncIntervalMinutes is null and a fixed daily time is wanted
-  connectionStatus    String     @default("NOT_CONFIGURED") // NOT_CONFIGURED | CONNECTED | ERROR
+
+  // === SYNC SCHEDULE ===
+  syncIntervalMinutes Int?       // 15, 30, 60, 120, 1440, etc. (NULL = manual only)
+  dailyRunAtUtc       String?    // "00:00", "12:00", etc.
+
+  // === AUTH FAILURE TRACKING ===
+  authFailureCount    Int?       @default(0)
+  authFailureSince    DateTime?
+  authCooldownUntil   DateTime?
+  passwordUpdatedAt   DateTime?  // Triggers cooldown clear
+
+  // === RETRY BEHAVIOR CONFIG ===
+  maxRetryAttempts    Int        @default(3)
+  baseRetryDelayMs    Int        @default(1000)
+
+  // === PERFORMANCE CONFIG ===
+  syncTimeoutSeconds  Int        @default(60)   // Max time to spend on one airline
+  maxConcurrentSyncs  Int        @default(3)    // Per scheduler run
+
+  // === COOLDOWN CONFIG ===
+  authCooldownMinutes Int        @default(300)  // 5 hours, configurable
+  networkErrorBackoffMinutes Int @default(5)    // Retry network errors after 5 min
+  portalErrorBackoffMinutes  Int @default(30)   // Retry portal errors after 30 min
+
+  // === METADATA ===
+  connectionStatus    String     @default("NOT_CONFIGURED")
   lastTestedAt        DateTime?
   updatedAt           DateTime   @updatedAt
   createdAt           DateTime   @default(now())
@@ -112,15 +175,72 @@ model AirlineConnectorSettings {
 // Retrieved, Balance Saved, Logout, Errors — one row per event, per run.
 model AirlineSyncLog {
   id        String     @id @default(cuid())
-  airline   AirlineKey
-  runId     String // groups all log lines for a single sync attempt
-  step      String // e.g. LOGIN_STARTED, LOGIN_SUCCESS, NAVIGATION, BALANCE_RETRIEVED, BALANCE_SAVED, LOGOUT, ERROR
+  runId     String
+  airline   AirlineKey?
+
+  step      String     // e.g. LOGIN_STARTED, LOGIN_SUCCESS, BALANCE_RETRIEVED, ERROR
   message   String
   level     String     @default("info") // info | warn | error
+
+  // === ERROR DETAILS ===
+  errorCategory ErrorCategory?
+  errorCode     String?
+
   createdAt DateTime   @default(now())
+
+  run AirlineSyncRun @relation(fields: [runId], references: [runId])
 
   @@index([airline, runId])
   @@map("airline_sync_logs")
+}
+
+// Aggregates one sync run (all airlines in that run).
+// Groups all log lines and results for a single sync orchestration.
+model AirlineSyncRun {
+  id            String   @id @default(cuid())
+  runId         String   @unique
+
+  // === WHEN & WHO ===
+  trigger       SyncTrigger
+  initiatedBy   String?  // "admin@example.com" or "scheduler"
+  startedAt     DateTime @default(now())
+  completedAt   DateTime?
+  durationMs    Int?     // Computed on completion
+
+  // === RESULTS SUMMARY ===
+  totalAirlines     Int
+  successfulCount   Int     @default(0)
+  failedCount       Int     @default(0)
+  skippedCount      Int     @default(0)  // Due to cooldown or disabled
+
+  // === ERROR BREAKDOWN ===
+  authFailureCount  Int     @default(0)
+  networkFailureCount Int   @default(0)
+  portalFailureCount Int    @default(0)
+  unknownFailureCount Int   @default(0)
+
+  // === CONCURRENCY INFO ===
+  parallelism       Int     @default(1)
+
+  createdAt    DateTime   @default(now())
+
+  logs AirlineSyncLog[]
+
+  @@map("airline_sync_runs")
+}
+
+// Global and per-module configuration (configurable without code changes).
+model AppConfig {
+  id        String @id @default(cuid())
+  module    String // "airline-connectors"
+  key       String // "authCooldownMinutes", "defaultSyncInterval", etc.
+  value     String // JSON stringified
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@unique([module, key])
+  @@map("app_config")
 }
 
 // ─── AI Travel Assistant (chat bubble) ───
@@ -254,11 +374,28 @@ model SalesReport {
   createdAt    DateTime          @default(now())
   verifiedAt   DateTime?
 
+  // NEW FIELDS - PHASE 1: Airline detection & tracking
+  airlineDetectedBy      String?     // Method: "MANUAL" | "CONTENT" | "FORMAT" | "METADATA" | "VISION"
+  detectionConfidence    Float?      // 0-1 confidence score
+  detectionReasoning     String[]    // Why this airline was detected (for debugging)
+  fileHash               String?     // SHA-256 hex (for exact duplicate detection)
+  originalFilename       String?     // Original uploaded filename
+  fileSize               Int?        // Bytes (to track large files)
+  importedAt             DateTime?   // When user uploaded this file
+  importedBy             String?     // Firebase UID
+  supersededById         String?     // If overwritten, which report replaced this
+  supersededAt           DateTime?   // When it was superseded
+  supersededBy           String?     // User ID who approved supersession
+
   staffSales   StaffSales[]
   transactions SalesTransaction[]
   tickets      SalesTicket[]
+  analytics    SalesReportAnalytics?
 
-  @@index([airline, reportDate])
+  @@index([airline, reportDate, status])
+  @@index([fileHash])
+  @@index([importedAt])
+  @@index([supersededById])
   @@map("sales_reports")
 }
 
@@ -318,12 +455,121 @@ model SalesTicket {
   reasonIfExcluded String?
   createdAt        DateTime   @default(now())
 
+  // NEW FIELDS - PHASE 1: Enhanced metrics for analytics
+  grossSalesAmount   Decimal? @db.Decimal(14, 2)  // Before deductions
+  netSalesAmount     Decimal? @db.Decimal(14, 2)  // After deductions
+  commission         Decimal? @db.Decimal(14, 2)
+  refundAmount       Decimal? @db.Decimal(14, 2)
+  admAmount          Decimal? @db.Decimal(14, 2)
+  bspAmount          Decimal? @db.Decimal(14, 2)
+
   report SalesReport @relation(fields: [reportId], references: [id])
 
   @@index([airline, date])
   @@index([staff])
   @@index([reportId])
   @@map("sales_tickets")
+}
+
+// ─── NEW PHASE 1: Sales Analytics Tables ───
+// Pre-calculated KPI summary per report for fast dashboard queries
+model SalesReportAnalytics {
+  id                    String      @id @default(cuid())
+  reportId              String      @unique
+  airline               AirlineKey
+  reportDate            String      // "DD/MM/YYYY"
+  reportingPeriod       String?     // e.g., "Jul 2024"
+  reportingPeriodStart  String?     // Start date of period
+  reportingPeriodEnd    String?     // End date of period
+
+  // Executive KPIs - All required for dashboard
+  totalTicketsIssued    Int         // PT count (included)
+  totalTicketsVoided    Int         // Voided tickets
+  totalVoidAmount       Decimal @db.Decimal(14, 2)
+  totalCreditAmount     Decimal @db.Decimal(14, 2)
+  totalDebitAmount      Decimal @db.Decimal(14, 2)
+  grossSalesAmount      Decimal @db.Decimal(14, 2)  // Before deductions
+  netSalesAmount        Decimal @db.Decimal(14, 2)  // After deductions
+  totalCommission       Decimal @db.Decimal(14, 2)
+
+  // Airline-specific metrics (optional)
+  bspValues             Decimal? @db.Decimal(14, 2)
+  refundValues          Decimal? @db.Decimal(14, 2)
+  admValues             Decimal? @db.Decimal(14, 2)
+
+  createdAt             DateTime    @default(now())
+
+  report                SalesReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([airline, reportDate])
+  @@index([airline, reportingPeriodStart, reportingPeriodEnd])
+  @@map("sales_report_analytics")
+}
+
+// Track report supersessions and maintain audit trail
+model ReportDuplicateHistory {
+  id                    String      @id @default(cuid())
+  originalReportId      String      // Report that was replaced
+  supersededById        String?     // Which report replaced it (null if discarded)
+  airline               AirlineKey
+  reportDate            String      // "DD/MM/YYYY"
+
+  // Status and tracking
+  originalStatus        SalesReportStatus  // PENDING_VERIFICATION or SAVED
+  replacedAt            DateTime?   // When replacement happened
+  replacedBy            String?     // User ID who approved
+  replacementReason     String?     // Why it was replaced
+
+  createdAt             DateTime    @default(now())
+
+  @@index([airline, reportDate])
+  @@index([originalReportId])
+  @@index([supersededById])
+  @@map("report_duplicate_history")
+}
+
+// Denormalized daily staff metrics for fast staff analytics queries
+model StaffDailyPerformance {
+  id                    String      @id @default(cuid())
+  date                  String      // "DD/MM/YYYY"
+  airline               AirlineKey
+  staffName             String      // Resolved display name (e.g., "FLORENCE")
+
+  // Metrics (calculated from SalesTicket)
+  ticketsIssued         Int         // Count of tickets
+  salesAmount           Decimal @db.Decimal(14, 2)
+  commission            Decimal @db.Decimal(14, 2)
+  voidAmount            Decimal @db.Decimal(14, 2)
+  creditAmount          Decimal @db.Decimal(14, 2)
+
+  createdAt             DateTime    @default(now())
+
+  @@unique([date, airline, staffName])
+  @@index([airline, date])
+  @@index([staffName, date])
+  @@index([date])  // For "top staff today" queries
+  @@map("staff_daily_performance")
+}
+
+// Daily airline totals for trend analysis
+model AirlineDailyMetrics {
+  id                    String      @id @default(cuid())
+  date                  String      // "DD/MM/YYYY"
+  airline               AirlineKey
+
+  // Totals (calculated from reports)
+  totalSales            Decimal @db.Decimal(14, 2)
+  totalTickets          Int
+  totalVoids            Int
+  totalVoidAmount       Decimal @db.Decimal(14, 2)
+  netSales              Decimal @db.Decimal(14, 2)
+
+  createdAt             DateTime    @default(now())
+
+  @@unique([date, airline])
+  @@index([airline, date])
+  @@index([date])  // For "today's totals by airline"
+  @@map("airline_daily_metrics")
 }
 
 // ─── Book-on-Hold jobs ───

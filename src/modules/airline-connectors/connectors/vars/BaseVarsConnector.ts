@@ -38,12 +38,26 @@ export abstract class BaseVarsConnector extends BaseConnector {
   readonly airline: AirlineKey;
   readonly displayName: string;
   private readonly loginUrl: string;
+  protected lastDialogMessage: string | null = null;
 
   constructor(config: VarsConnectorConfig) {
     super();
     this.airline = config.airline;
     this.displayName = config.displayName;
     this.loginUrl = config.loginUrl;
+  }
+
+  async connect(): Promise<void> {
+    await super.connect();
+    // Override the dialog handler to capture message for login failure detection
+    const context = this.page?.context();
+    if (context) {
+      context.on("dialog", (dialog) => {
+        this.lastDialogMessage = dialog.message();
+        this.logger?.log("DIALOG", `Dialog captured: "${dialog.message()}"`, "info");
+        dialog.dismiss().catch(() => {});
+      });
+    }
   }
 
   async login(credentials: DecryptedCredentials): Promise<void> {

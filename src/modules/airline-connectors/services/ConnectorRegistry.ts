@@ -55,4 +55,9 @@ export const ConnectorRegistry = {
   isImplemented(airline: string): airline is AirlineKey {
     return airline in factories;
   },
+
+  getDisplayName(airline: AirlineKey): string {
+    const instance = factories[airline]();
+    return instance.displayName;
+  },
 };
