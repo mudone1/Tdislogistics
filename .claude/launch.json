@@ -5,7 +5,11 @@
       "name": "tdis-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 3000
+      "port": 3000,
+      "autoPort": true,
+      "env": {
+        "NEXT_DIST_DIR": ".next-session2"
+      }
     }
   ]
 }

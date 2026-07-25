@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateReport } from "@/modules/sales-reporting/reporting/ReportGenerator";
+import { generateReport, processMonthlyUpload, isMonthlyUpload, parseFiles } from "@/modules/sales-reporting/reporting/ReportGenerator";
 import { detectAirline, type DetectionMethod } from "@/modules/sales-reporting/services/AirlineDetectionService";
 import { AIRLINE_RULE_KEYS, type AirlineRuleKey } from "@/modules/sales-reporting/core/types";
 
@@ -63,12 +63,24 @@ export async function POST(req: Request) {
       detection = { method: result.method, confidence: result.confidence, reasoning: result.reasoning };
     }
 
-    const summary = await generateReport(airline, files, {
+    const options = {
       createdBy: typeof createdBy === "string" ? createdBy : undefined,
       importedBy: typeof importedBy === "string" ? importedBy : undefined,
       detection,
-    });
-    return NextResponse.json(summary);
+    };
+
+    // Parse once up front so a monthly-vs-daily decision doesn't force a
+    // second (and for screenshots, re-run-the-expensive-vision-call) parse
+    // of the same files.
+    const preParsed = await parseFiles(files);
+
+    if (isMonthlyUpload(preParsed.rows)) {
+      const summary = await processMonthlyUpload(airline, files, options, preParsed);
+      return NextResponse.json({ ...summary, isMonthly: true });
+    }
+
+    const summary = await generateReport(airline, files, options, preParsed);
+    return NextResponse.json({ ...summary, isMonthly: false });
   } catch (err) {
     console.error("[sales-reports/generate] failed:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

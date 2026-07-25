@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { formatNaira } from "@/lib/utils";
-import { salesReportAirlineLabel, formatDDMMYYYY } from "@/lib/salesReportAirlines";
+import { salesReportAirlineLabel } from "@/lib/salesReportAirlines";
 
 type Preset = "today" | "week" | "month" | "lastMonth";
 
@@ -22,26 +22,48 @@ function startOfWeek(d: Date): Date {
   return start;
 }
 
-function resolvePreset(preset: Preset): { dateFrom: string; dateTo: string } {
+// Presets are just a quick way to FILL the date pickers below, not a
+// separate mode — the user can still hand-adjust either date afterward.
+function resolvePreset(preset: Preset): { dateFrom: Date; dateTo: Date } {
   const now = new Date();
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
   switch (preset) {
     case "today":
-      return { dateFrom: formatDDMMYYYY(today), dateTo: formatDDMMYYYY(today) };
+      return { dateFrom: today, dateTo: today };
     case "week":
-      return { dateFrom: formatDDMMYYYY(startOfWeek(today)), dateTo: formatDDMMYYYY(today) };
+      return { dateFrom: startOfWeek(today), dateTo: today };
     case "lastMonth": {
       const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
       const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0));
-      return { dateFrom: formatDDMMYYYY(start), dateTo: formatDDMMYYYY(end) };
+      return { dateFrom: start, dateTo: end };
     }
     case "month":
     default: {
       const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-      return { dateFrom: formatDDMMYYYY(start), dateTo: formatDDMMYYYY(today) };
+      return { dateFrom: start, dateTo: today };
     }
   }
+}
+
+// Native <input type="date"> works in "YYYY-MM-DD" (ISO); every
+// sales-reporting API works in "DD/MM/YYYY" — convert at the boundary.
+function toISOInputValue(d: Date): string {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
+function isoToDDMMYYYY(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+// Coarser granularity for longer ranges keeps the trend chart readable —
+// a 6-month daily chart would be an unreadable wall of bars.
+function granularityForRange(fromISO: string, toISO: string): "daily" | "weekly" | "monthly" {
+  const days = (new Date(toISO).getTime() - new Date(fromISO).getTime()) / 86_400_000;
+  if (days <= 14) return "daily";
+  if (days <= 120) return "weekly";
+  return "monthly";
 }
 
 interface ExecutiveKPIs {
@@ -88,9 +110,19 @@ async function fetchJson<T>(url: string): Promise<T> {
   return data as T;
 }
 
+const DEFAULT_RANGE = resolvePreset("month");
+
 export default function SalesAnalyticsSection() {
-  const [preset, setPreset] = useState<Preset>("month");
-  const { dateFrom, dateTo } = useMemo(() => resolvePreset(preset), [preset]);
+  const [dateFromISO, setDateFromISO] = useState(() => toISOInputValue(DEFAULT_RANGE.dateFrom));
+  const [dateToISO, setDateToISO] = useState(() => toISOInputValue(DEFAULT_RANGE.dateTo));
+  const dateFrom = useMemo(() => isoToDDMMYYYY(dateFromISO), [dateFromISO]);
+  const dateTo = useMemo(() => isoToDDMMYYYY(dateToISO), [dateToISO]);
+
+  function applyPreset(preset: Preset): void {
+    const { dateFrom: from, dateTo: to } = resolvePreset(preset);
+    setDateFromISO(toISOInputValue(from));
+    setDateToISO(toISOInputValue(to));
+  }
 
   const [kpi, setKpi] = useState<ExecutiveKPIs | null>(null);
   const [airlines, setAirlines] = useState<AirlineMetric[]>([]);
@@ -105,7 +137,7 @@ export default function SalesAnalyticsSection() {
     setLoading(true);
     setError(null);
 
-    const granularity = preset === "today" ? "daily" : preset === "week" ? "daily" : "weekly";
+    const granularity = granularityForRange(dateFromISO, dateToISO);
     const qs = `dateFrom=${dateFrom}&dateTo=${dateTo}`;
 
     Promise.all([
@@ -133,7 +165,7 @@ export default function SalesAnalyticsSection() {
     return () => {
       cancelled = true;
     };
-  }, [dateFrom, dateTo, preset]);
+  }, [dateFrom, dateTo, dateFromISO, dateToISO]);
 
   const maxTrendSales = Math.max(1, ...trend.map((p) => p.sales));
 
@@ -141,20 +173,34 @@ export default function SalesAnalyticsSection() {
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
       <div className="section-title">Sales Analytics</div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {(Object.keys(PRESET_LABELS) as Preset[]).map((p) => (
-          <button
-            key={p}
-            onClick={() => setPreset(p)}
-            style={
-              preset === p
-                ? { background: "var(--navy, #1e3a5f)", color: "white", borderColor: "var(--navy, #1e3a5f)" }
-                : undefined
-            }
-          >
-            {PRESET_LABELS[p]}
-          </button>
-        ))}
+      <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <label style={{ fontSize: 12, color: "var(--gray-400)" }}>
+            From{" "}
+            <input
+              type="date"
+              value={dateFromISO}
+              max={dateToISO}
+              onChange={(e) => e.target.value && setDateFromISO(e.target.value)}
+            />
+          </label>
+          <label style={{ fontSize: 12, color: "var(--gray-400)" }}>
+            To{" "}
+            <input
+              type="date"
+              value={dateToISO}
+              min={dateFromISO}
+              onChange={(e) => e.target.value && setDateToISO(e.target.value)}
+            />
+          </label>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          {(Object.keys(PRESET_LABELS) as Preset[]).map((p) => (
+            <button key={p} onClick={() => applyPreset(p)}>
+              {PRESET_LABELS[p]}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && (

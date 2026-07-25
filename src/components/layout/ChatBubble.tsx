@@ -48,7 +48,7 @@ interface ChatMessage {
   legs?: FlightLeg[];
   showCards?: boolean;
   imageBlob?: Blob;
-  salesReport?: { reportId: string; status: "pending" | "saved" | "discarded"; duplicateMatch?: DuplicateMatchInfo };
+  salesReport?: { reportId: string; status: "pending" | "saved" | "discarded" };
   booking?: BookingState;
 }
 
@@ -334,8 +334,11 @@ export default function ChatBubble() {
   );
 
   // Builds the chat message for a successfully generated (PENDING_VERIFICATION)
-  // report — shared by both the auto-detected and manually-named-airline
-  // paths so the duplicate-warning/review UI is identical either way.
+  // daily report — shared by both the auto-detected and manually-named-
+  // airline paths so the review UI is identical either way. Saving this
+  // report automatically replaces any existing SAVED report for the same
+  // airline/date server-side (see ReportGenerator.confirmReport) — no
+  // separate overwrite choice needed, just an informational heads-up.
   function renderGeneratedReport(data: {
     reportId: string;
     reportText: string;
@@ -354,7 +357,7 @@ export default function ChatBubble() {
         : "";
     const duplicateNote =
       data.isDuplicate && data.duplicateMatch
-        ? `\n\n⚠️ Possible duplicate: an existing saved report for ${data.duplicateMatch.existingReport.airline} on ${data.duplicateMatch.existingReport.date} has ${data.duplicateMatch.existingReport.totals.sales.toLocaleString()} in sales (${Math.round(data.duplicateMatch.matchScore * 100)}% match). Choose "Overwrite Existing" below to replace it, or "Save Anyway" if this is genuinely a different report.`
+        ? `\n\nℹ️ There's already a saved report for ${data.duplicateMatch.existingReport.airline} on ${data.duplicateMatch.existingReport.date} (${data.duplicateMatch.existingReport.totals.sales.toLocaleString()} in sales). Saving this will automatically replace it.`
         : "";
 
     setMessages((m: ChatMessage[]) => [
@@ -363,13 +366,36 @@ export default function ChatBubble() {
         id: idCounter++,
         role: "assistant",
         text: `${data.reportText}${needsReviewNote}${unknownStaffNote}${duplicateNote}\n\nPlease verify this report. Reply Save if everything is correct, or Discard to cancel.`,
-        salesReport: {
-          reportId: data.reportId,
-          status: "pending",
-          duplicateMatch: data.isDuplicate ? data.duplicateMatch : undefined,
-        },
+        salesReport: { reportId: data.reportId, status: "pending" },
       },
     ]);
+  }
+
+  // A monthly upload skips the review/Save step entirely server-side —
+  // every date in the file is already parsed, saved, and (if it collided
+  // with an existing date) superseded by the time this response comes
+  // back. This just reports what happened; there's nothing left to
+  // confirm or discard.
+  function renderMonthlyUploadSummary(data: {
+    airline: string;
+    totalDatesProcessed: number;
+    datesOverwritten: string[];
+    totalGrandTotal: number;
+    totalTickets: number;
+    perDate: { reportDate: string; grandTotal: number; ticketCount: number; wasOverwrite: boolean; needsReview: boolean }[];
+  }): void {
+    const label = SALES_REPORT_AIRLINES.find((a) => a.key === data.airline)?.label ?? data.airline;
+    const flaggedDays = data.perDate.filter((d) => d.needsReview);
+    const lines = [
+      `Detected a monthly ${label} report — processed ${data.totalDatesProcessed} day(s) automatically, no review needed.`,
+      `Total: ${data.totalGrandTotal.toLocaleString()} across ${data.totalTickets} tickets.`,
+      data.datesOverwritten.length > 0 ? `Replaced existing saved reports for: ${data.datesOverwritten.join(", ")}.` : null,
+      flaggedDays.length > 0
+        ? `⚠️ ${flaggedDays.length} day(s) had low-confidence parsing and may be worth a manual look: ${flaggedDays.map((d) => d.reportDate).join(", ")}.`
+        : null,
+    ].filter(Boolean);
+
+    setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: lines.join("\n") }]);
   }
 
   // Manual/confirmed-airline path — used once the airline is already known,
@@ -384,7 +410,8 @@ export default function ChatBubble() {
       const res = await fetch("/api/sales-reports/generate", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      renderGeneratedReport(data);
+      if (data.isMonthly) renderMonthlyUploadSummary(data);
+      else renderGeneratedReport(data);
     } catch (err) {
       console.error("[assistant] sales report generation failed:", err);
       const reason = err instanceof Error ? err.message : String(err);
@@ -450,7 +477,8 @@ export default function ChatBubble() {
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      renderGeneratedReport(data);
+      if (data.isMonthly) renderMonthlyUploadSummary(data);
+      else renderGeneratedReport(data);
     } catch (err) {
       console.error("[assistant] sales report generation failed:", err);
       const reason = err instanceof Error ? err.message : String(err);
@@ -489,23 +517,17 @@ export default function ChatBubble() {
     ]);
   }
 
-  async function saveSalesReport(m: ChatMessage, opts?: { overwrite?: boolean }): Promise<void> {
+  async function saveSalesReport(m: ChatMessage): Promise<void> {
     if (!m.salesReport) return;
     setReportBusy((b) => ({ ...b, [m.id]: "saving" }));
     try {
-      const body: { verifiedBy: string; overwriteExisting?: { existingReportId: string; reason: string } } = {
-        verifiedBy: identity?.displayName || identity?.sessionKey || "chat",
-      };
-      if (opts?.overwrite && m.salesReport.duplicateMatch) {
-        body.overwriteExisting = {
-          existingReportId: m.salesReport.duplicateMatch.existingReport.id,
-          reason: "Flagged as a duplicate during chat upload; user chose to overwrite.",
-        };
-      }
+      // The server auto-supersedes any existing SAVED report for the same
+      // airline/date on its own (see ReportGenerator.confirmReport) — no
+      // overwrite choice to pass here.
       const res = await fetch(`/api/sales-reports/${m.salesReport.reportId}/confirm`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ verifiedBy: identity?.displayName || identity?.sessionKey || "chat" }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -821,20 +843,9 @@ function describeHttpError(status: number): string {
                   )}
                   {m.salesReport?.status === "pending" && (
                     <div className="chat-bubble-msg-actions">
-                      {m.salesReport.duplicateMatch ? (
-                        <>
-                          <button onClick={() => saveSalesReport(m, { overwrite: true })} disabled={!!reportBusy[m.id]}>
-                            {reportBusy[m.id] === "saving" ? "Saving…" : "Overwrite Existing"}
-                          </button>
-                          <button onClick={() => saveSalesReport(m)} disabled={!!reportBusy[m.id]}>
-                            {reportBusy[m.id] === "saving" ? "Saving…" : "Save Anyway"}
-                          </button>
-                        </>
-                      ) : (
-                        <button onClick={() => saveSalesReport(m)} disabled={!!reportBusy[m.id]}>
-                          {reportBusy[m.id] === "saving" ? "Saving…" : "Save Report"}
-                        </button>
-                      )}
+                      <button onClick={() => saveSalesReport(m)} disabled={!!reportBusy[m.id]}>
+                        {reportBusy[m.id] === "saving" ? "Saving…" : "Save Report"}
+                      </button>
                       <button onClick={() => discardSalesReport(m)} disabled={!!reportBusy[m.id]}>
                         {reportBusy[m.id] === "discarding" ? "Discarding…" : "Discard"}
                       </button>
