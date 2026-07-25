@@ -29,6 +29,17 @@ interface BookingState {
   error?: { message: string; detail: string | null };
 }
 
+interface DuplicateMatchInfo {
+  matchScore: number;
+  existingReport: {
+    id: string;
+    date: string;
+    airline: string;
+    totals: { sales: number; tickets: number; voids: number };
+    savedAt: string;
+  };
+}
+
 interface ChatMessage {
   id: number;
   role: "user" | "assistant";
@@ -37,7 +48,7 @@ interface ChatMessage {
   legs?: FlightLeg[];
   showCards?: boolean;
   imageBlob?: Blob;
-  salesReport?: { reportId: string; status: "pending" | "saved" | "discarded" };
+  salesReport?: { reportId: string; status: "pending" | "saved" | "discarded"; duplicateMatch?: DuplicateMatchInfo };
   booking?: BookingState;
 }
 
@@ -141,6 +152,10 @@ export default function ChatBubble() {
   // names the airline (or cancels) — while set, the next typed message is
   // interpreted as an airline answer instead of a flight-search query.
   const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null);
+  // Set only when the server's AirlineDetectionService returned a 70-89%
+  // guess (see attemptGenerateOrDetect) — lets the next "yes" reply confirm
+  // that specific guess instead of requiring the airline to be re-typed.
+  const [pendingDetection, setPendingDetection] = useState<{ key: string; label: string; confidence: number } | null>(null);
   const [generatingReport, setGeneratingReport] = useState<boolean>(false);
   const [reportBusy, setReportBusy] = useState<Record<number, "saving" | "discarding" | undefined>>({});
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -318,33 +333,58 @@ export default function ChatBubble() {
     [sending, pending, identity, refresh, prefetchQuoteImage, pollBookingJob]
   );
 
+  // Builds the chat message for a successfully generated (PENDING_VERIFICATION)
+  // report — shared by both the auto-detected and manually-named-airline
+  // paths so the duplicate-warning/review UI is identical either way.
+  function renderGeneratedReport(data: {
+    reportId: string;
+    reportText: string;
+    needsReview: boolean;
+    confidence: number;
+    unknownStaff: string[];
+    isDuplicate: boolean;
+    duplicateMatch?: DuplicateMatchInfo;
+  }): void {
+    const needsReviewNote = data.needsReview
+      ? `\n\n⚠️ Confidence ${Math.round(data.confidence * 100)}% — please double-check before saving.`
+      : "";
+    const unknownStaffNote =
+      data.unknownStaff?.length > 0
+        ? `\n\nUnrecognized staff codes (won't block saving, but worth naming in Admin → Sales Reports next time): ${data.unknownStaff.join(", ")}`
+        : "";
+    const duplicateNote =
+      data.isDuplicate && data.duplicateMatch
+        ? `\n\n⚠️ Possible duplicate: an existing saved report for ${data.duplicateMatch.existingReport.airline} on ${data.duplicateMatch.existingReport.date} has ${data.duplicateMatch.existingReport.totals.sales.toLocaleString()} in sales (${Math.round(data.duplicateMatch.matchScore * 100)}% match). Choose "Overwrite Existing" below to replace it, or "Save Anyway" if this is genuinely a different report.`
+        : "";
+
+    setMessages((m: ChatMessage[]) => [
+      ...m,
+      {
+        id: idCounter++,
+        role: "assistant",
+        text: `${data.reportText}${needsReviewNote}${unknownStaffNote}${duplicateNote}\n\nPlease verify this report. Reply Save if everything is correct, or Discard to cancel.`,
+        salesReport: {
+          reportId: data.reportId,
+          status: "pending",
+          duplicateMatch: data.isDuplicate ? data.duplicateMatch : undefined,
+        },
+      },
+    ]);
+  }
+
+  // Manual/confirmed-airline path — used once the airline is already known,
+  // either because the user typed it or confirmed a detection guess.
   async function handleGenerateReport(file: File, airlineKey: string, airlineLabel: string): Promise<void> {
     setGeneratingReport(true);
     try {
       const form = new FormData();
       form.set("airline", airlineKey);
       form.append("files", file);
+      form.set("createdBy", identity?.displayName || identity?.sessionKey || "chat");
       const res = await fetch("/api/sales-reports/generate", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-
-      const needsReviewNote = data.needsReview
-        ? `\n\n⚠️ Confidence ${Math.round(data.confidence * 100)}% — please double-check before saving.`
-        : "";
-      const unknownStaffNote =
-        data.unknownStaff?.length > 0
-          ? `\n\nUnrecognized staff codes (won't block saving, but worth naming in Admin → Sales Reports next time): ${data.unknownStaff.join(", ")}`
-          : "";
-
-      setMessages((m: ChatMessage[]) => [
-        ...m,
-        {
-          id: idCounter++,
-          role: "assistant",
-          text: `${data.reportText}${needsReviewNote}${unknownStaffNote}\n\nPlease verify this report. Reply Save if everything is correct, or Discard to cancel.`,
-          salesReport: { reportId: data.reportId, status: "pending" },
-        },
-      ]);
+      renderGeneratedReport(data);
     } catch (err) {
       console.error("[assistant] sales report generation failed:", err);
       const reason = err instanceof Error ? err.message : String(err);
@@ -361,6 +401,68 @@ export default function ChatBubble() {
     }
   }
 
+  // First attempt: call /generate WITHOUT an airline, letting the server's
+  // AirlineDetectionService decide. A confident detection (>=90%) generates
+  // the report outright in one round trip; anything less comes back as a
+  // 422 with the detection result, which we turn into either a quick
+  // yes/no confirm (70-89%) or a from-scratch pick (<70%, or no guess at
+  // all) — matching the confidence tiers the service itself defines.
+  async function attemptGenerateOrDetect(file: File, inputLabel: string): Promise<void> {
+    setGeneratingReport(true);
+    try {
+      const form = new FormData();
+      form.append("files", file);
+      form.set("createdBy", identity?.displayName || identity?.sessionKey || "chat");
+      const res = await fetch("/api/sales-reports/generate", { method: "POST", body: form });
+
+      if (res.status === 422) {
+        const data = await res.json().catch(() => null);
+        const detection = data?.detection;
+
+        if (detection?.airline && detection.requiresConfirmation) {
+          const label = SALES_REPORT_AIRLINES.find((a) => a.key === detection.airline)?.label ?? detection.airline;
+          const pct = Math.round((detection.confidence ?? 0) * 100);
+          setPendingUploadFile(file);
+          setPendingDetection({ key: detection.airline, label, confidence: detection.confidence });
+          setMessages((m: ChatMessage[]) => [
+            ...m,
+            {
+              id: idCounter++,
+              role: "assistant",
+              text: `I believe this ${inputLabel} is for ${label} (${pct}% confidence). Reply "yes" to continue, name the correct airline, or "cancel".`,
+            },
+          ]);
+          return;
+        }
+
+        setPendingUploadFile(file);
+        setPendingDetection(null);
+        setMessages((m: ChatMessage[]) => [
+          ...m,
+          {
+            id: idCounter++,
+            role: "assistant",
+            text: `Got it — which airline is this ${inputLabel} for? Aero, Airpeace, Ibom, or Arik? (Reply "cancel" to skip this upload.)`,
+          },
+        ]);
+        return;
+      }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      renderGeneratedReport(data);
+    } catch (err) {
+      console.error("[assistant] sales report generation failed:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      setMessages((m: ChatMessage[]) => [
+        ...m,
+        { id: idCounter++, role: "assistant", text: `Couldn't generate that report just now.${errorContactNote(reason)}` },
+      ]);
+    } finally {
+      setGeneratingReport(false);
+    }
+  }
+
   function handleFileSelected(e: ChangeEvent<HTMLInputElement>): void {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-selecting the same file later
@@ -370,19 +472,10 @@ export default function ChatBubble() {
 
     const kind = detectAttachmentKind(file);
     // Excel (.xls/.xlsx) and screenshots (images) both go through the exact
-    // same flow now — ask which airline, then generate. Excel parses
-    // directly; screenshots are read by a vision model server-side.
+    // same flow now. Excel parses directly; screenshots are read by a
+    // vision model server-side.
     if (kind === "excel" || kind === "image") {
-      setPendingUploadFile(file);
-      const inputLabel = kind === "image" ? "screenshot" : "sales report";
-      setMessages((m: ChatMessage[]) => [
-        ...m,
-        {
-          id: idCounter++,
-          role: "assistant",
-          text: `Got it — which airline is this ${inputLabel} for? Aero, Airpeace, Ibom, or Arik? (Reply "cancel" to skip this upload.)`,
-        },
-      ]);
+      attemptGenerateOrDetect(file, kind === "image" ? "screenshot" : "sales report");
       return;
     }
 
@@ -396,14 +489,23 @@ export default function ChatBubble() {
     ]);
   }
 
-  async function saveSalesReport(m: ChatMessage): Promise<void> {
+  async function saveSalesReport(m: ChatMessage, opts?: { overwrite?: boolean }): Promise<void> {
     if (!m.salesReport) return;
     setReportBusy((b) => ({ ...b, [m.id]: "saving" }));
     try {
+      const body: { verifiedBy: string; overwriteExisting?: { existingReportId: string; reason: string } } = {
+        verifiedBy: identity?.displayName || identity?.sessionKey || "chat",
+      };
+      if (opts?.overwrite && m.salesReport.duplicateMatch) {
+        body.overwriteExisting = {
+          existingReportId: m.salesReport.duplicateMatch.existingReport.id,
+          reason: "Flagged as a duplicate during chat upload; user chose to overwrite.",
+        };
+      }
       const res = await fetch(`/api/sales-reports/${m.salesReport.reportId}/confirm`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ verifiedBy: identity?.displayName || identity?.sessionKey || "chat" }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
@@ -442,11 +544,24 @@ export default function ChatBubble() {
       const file = pendingUploadFile;
       if (/^cancel$/i.test(text)) {
         setPendingUploadFile(null);
+        setPendingDetection(null);
         setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }, { id: idCounter++, role: "assistant", text: "Cancelled that upload." }]);
         return;
       }
-      const airline = matchSalesReportAirline(text);
+
       setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
+
+      // Confirming a detection guess ("yes") re-uses that guess directly
+      // rather than requiring the airline to be re-typed.
+      if (pendingDetection && /^(yes|y|correct|confirm)$/i.test(text)) {
+        const detection = pendingDetection;
+        setPendingUploadFile(null);
+        setPendingDetection(null);
+        handleGenerateReport(file, detection.key, detection.label);
+        return;
+      }
+
+      const airline = matchSalesReportAirline(text);
       if (!airline) {
         setMessages((m: ChatMessage[]) => [
           ...m,
@@ -455,6 +570,7 @@ export default function ChatBubble() {
         return;
       }
       setPendingUploadFile(null);
+      setPendingDetection(null);
       handleGenerateReport(file, airline.key, airline.label);
       return;
     }
@@ -705,9 +821,20 @@ function describeHttpError(status: number): string {
                   )}
                   {m.salesReport?.status === "pending" && (
                     <div className="chat-bubble-msg-actions">
-                      <button onClick={() => saveSalesReport(m)} disabled={!!reportBusy[m.id]}>
-                        {reportBusy[m.id] === "saving" ? "Saving…" : "Save Report"}
-                      </button>
+                      {m.salesReport.duplicateMatch ? (
+                        <>
+                          <button onClick={() => saveSalesReport(m, { overwrite: true })} disabled={!!reportBusy[m.id]}>
+                            {reportBusy[m.id] === "saving" ? "Saving…" : "Overwrite Existing"}
+                          </button>
+                          <button onClick={() => saveSalesReport(m)} disabled={!!reportBusy[m.id]}>
+                            {reportBusy[m.id] === "saving" ? "Saving…" : "Save Anyway"}
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => saveSalesReport(m)} disabled={!!reportBusy[m.id]}>
+                          {reportBusy[m.id] === "saving" ? "Saving…" : "Save Report"}
+                        </button>
+                      )}
                       <button onClick={() => discardSalesReport(m)} disabled={!!reportBusy[m.id]}>
                         {reportBusy[m.id] === "discarding" ? "Discarding…" : "Discard"}
                       </button>
@@ -763,7 +890,15 @@ function describeHttpError(status: number): string {
               </button>
               <input
                 type="text"
-                placeholder={pendingUploadFile ? "Which airline? (Aero, Airpeace, Ibom, Arik)" : pending ? "Return date…" : "Type a route and date…"}
+                placeholder={
+                  pendingDetection
+                    ? `Yes for ${pendingDetection.label}, or name the airline…`
+                    : pendingUploadFile
+                    ? "Which airline? (Aero, Airpeace, Ibom, Arik)"
+                    : pending
+                    ? "Return date…"
+                    : "Type a route and date…"
+                }
                 value={input}
                 onChange={(e: ChangeEvent<HTMLInputElement>) => setInput(e.target.value)}
                 onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => e.key === "Enter" && send()}
