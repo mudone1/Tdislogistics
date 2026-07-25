@@ -256,6 +256,12 @@ export default function FloatingChatShell({
   );
 
   // ── FAB dragging (mouse + touch), with edge-snap and click-to-open ─
+  // Plain pointer events only — NOT Framer's `drag` prop. Framer's drag
+  // positions the element via its own internal transform, independent of
+  // the left/top style we set from `fab` state; the two fight each other
+  // and the button visually snaps back after release. Writing directly to
+  // the DOM during the move (fast, no re-render) and committing a single
+  // setFab on release keeps one source of truth for position at all times.
   const onFabPointerDown = useCallback(
     (e: ReactPointerEvent) => {
       const btn = fabRef.current;
@@ -263,13 +269,19 @@ export default function FloatingChatShell({
 
       e.preventDefault();
       e.stopPropagation();
+      btn.setPointerCapture(e.pointerId);
 
       const r = btn.getBoundingClientRect();
       const sx = e.clientX;
       const sy = e.clientY;
-      const startX = fab?.x ?? r.left;
-      const startY = fab?.y ?? r.top;
+      const startX = r.left;
+      const startY = r.top;
       let moved = false;
+      let finalX = startX;
+      let finalY = startY;
+
+      btn.style.transition = "none";
+      btn.style.cursor = "grabbing";
 
       const move = (ev: PointerEvent) => {
         const dx = ev.clientX - sx;
@@ -278,17 +290,19 @@ export default function FloatingChatShell({
         if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
           moved = true;
         }
+        if (!moved) return;
 
-        if (moved) {
-          const newX = clamp(startX + dx, 0, vp.w - FAB_SIZE);
-          const newY = clamp(startY + dy, 0, vp.h - FAB_SIZE);
-          setFab({ x: newX, y: newY });
-        }
+        finalX = clamp(startX + dx, 0, vp.w - FAB_SIZE);
+        finalY = clamp(startY + dy, 0, vp.h - FAB_SIZE);
+        btn.style.left = `${finalX}px`;
+        btn.style.top = `${finalY}px`;
       };
 
       const up = () => {
         document.removeEventListener("pointermove", move);
         document.removeEventListener("pointerup", up);
+        btn.style.transition = "";
+        btn.style.cursor = "grab";
 
         if (!moved) {
           onOpen();
@@ -296,23 +310,23 @@ export default function FloatingChatShell({
         }
 
         // Snap to nearest vertical edge after drag
-        if (fab) {
-          const distToLeft = fab.x;
-          const distToRight = vp.w - (fab.x + FAB_SIZE);
-          const snapX =
-            distToLeft < distToRight
-              ? EDGE_MARGIN
-              : vp.w - FAB_SIZE - EDGE_MARGIN;
+        const distToLeft = finalX;
+        const distToRight = vp.w - (finalX + FAB_SIZE);
+        const snapX =
+          distToLeft < distToRight ? EDGE_MARGIN : vp.w - FAB_SIZE - EDGE_MARGIN;
+        const snapY = clamp(finalY, EDGE_MARGIN, vp.h - FAB_SIZE - EDGE_MARGIN);
 
-          const newY = clamp(fab.y, EDGE_MARGIN, vp.h - FAB_SIZE - EDGE_MARGIN);
-          setFab({ x: snapX, y: newY });
-        }
+        // Write the resting position directly so there's no flash before
+        // React re-renders with the same value from state.
+        btn.style.left = `${snapX}px`;
+        btn.style.top = `${snapY}px`;
+        setFab({ x: snapX, y: snapY });
       };
 
       document.addEventListener("pointermove", move);
       document.addEventListener("pointerup", up);
     },
-    [vp.w, vp.h, onOpen, setFab, fab]
+    [vp.w, vp.h, onOpen, setFab]
   );
 
   // ── Overlay (Document Picture-in-Picture) ─────────────────────────
@@ -416,34 +430,7 @@ export default function FloatingChatShell({
               height: FAB_SIZE,
               cursor: "grab",
             }}
-            drag
-            dragMomentum={false}
-            dragElastic={0}
-            onDragStart={() => {
-              if (fabRef.current) fabRef.current.style.cursor = "grabbing";
-            }}
-            onDragEnd={(event, info) => {
-              if (fabRef.current) fabRef.current.style.cursor = "grab";
-              const newX = clamp(fab!.x + info.offset.x, 0, vp.w - FAB_SIZE);
-              const newY = clamp(fab!.y + info.offset.y, 0, vp.h - FAB_SIZE);
-
-              // Snap to nearest edge
-              const distToLeft = newX;
-              const distToRight = vp.w - (newX + FAB_SIZE);
-              const snapX =
-                distToLeft < distToRight
-                  ? EDGE_MARGIN
-                  : vp.w - FAB_SIZE - EDGE_MARGIN;
-
-              const snapY = clamp(newY, EDGE_MARGIN, vp.h - FAB_SIZE - EDGE_MARGIN);
-              setFab({ x: snapX, y: snapY });
-            }}
-            onClick={(e) => {
-              if (!fab) return;
-              // Only trigger open if we didn't drag
-              const moved = Math.abs((e.currentTarget as HTMLElement).getBoundingClientRect().left - (fab.x || vp.w - FAB_SIZE - 24)) > 4;
-              if (!moved) onOpen();
-            }}
+            onPointerDown={onFabPointerDown}
             aria-label="Open AI Operations Assistant"
             title="Click to open • Drag to move"
             initial={{ opacity: 0, scale: 0.6 }}
