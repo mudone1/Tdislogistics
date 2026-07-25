@@ -964,28 +964,31 @@ input:focus, select:focus { box-shadow: 0 0 0 3px rgba(24,79,115,0.10); }
 .breadcrumb-current { color: var(--navy-dark); font-weight: 700; }
 @media (max-width: 900px) { .breadcrumb { margin-bottom: 10px; } }
 
-.chat-bubble-fab {
+/* ═══════════════════════════════════════════════════
+   FLOATING CHAT SHELL (AI Operations Assistant)
+   Class names here must match FloatingChatShell.tsx
+   exactly (tdis-chat-*) — that component is the only
+   thing that renders them. A fixed position + z-index
+   above everything else is what makes this a true
+   overlay: it never participates in page layout, so it
+   can never push, resize, or shift page content.
+═══════════════════════════════════════════════════ */
+
+.tdis-chat-fab {
   position: fixed;
-  bottom: 24px;
-  right: 24px;
-  width: 56px; height: 56px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--navy-dark), var(--navy-light));
   color: var(--gold-light);
   border: 2px solid rgba(196,154,42,0.3);
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 8px 28px rgba(18,59,88,0.25), 0 0 0 0 rgba(196,154,42,0.1);
-  cursor: grab;
-  z-index: 500;
+  box-shadow: 0 8px 28px rgba(18,59,88,0.25);
+  z-index: 2000;
   transition: transform 0.25s cubic-bezier(.34,1.56,.64,1), box-shadow 0.3s ease, border-color 0.3s ease;
-  position: relative;
-  font-size: 22px;
-  font-weight: 700;
   user-select: none;
   touch-action: none;
+  padding: 0;
 }
-
-.chat-bubble-fab::before {
+.tdis-chat-fab::before {
   content: '';
   position: absolute;
   inset: -6px;
@@ -993,65 +996,99 @@ input:focus, select:focus { box-shadow: 0 0 0 3px rgba(24,79,115,0.10); }
   border: 2px dashed rgba(196,154,42,0.2);
   opacity: 0;
   transition: opacity 0.3s ease;
-  animation: none;
 }
-
-.chat-bubble-fab:hover {
-  transform: scale(1.1);
-  cursor: grab;
+.tdis-chat-fab:hover {
+  transform: scale(1.08);
   box-shadow: 0 10px 32px rgba(18,59,88,0.3), 0 0 0 2px rgba(196,154,42,0.2);
   border-color: rgba(196,154,42,0.5);
 }
-
-.chat-bubble-fab:hover::before {
-  opacity: 1;
-  animation: fabGlow 1.5s ease-in-out infinite;
-}
-
-.chat-bubble-fab:active {
-  cursor: grabbing;
-  transform: scale(0.98);
+.tdis-chat-fab:hover::before { opacity: 1; animation: fabGlow 1.5s ease-in-out infinite; }
+.tdis-chat-fab:active {
+  transform: scale(0.96);
   box-shadow: 0 4px 16px rgba(18,59,88,0.2), 0 0 0 4px rgba(196,154,42,0.15);
 }
 
 @keyframes fabGlow {
-  0%, 100% {
-    transform: scale(1);
-    border-color: rgba(196,154,42,0.2);
-  }
-  50% {
-    transform: scale(1.15);
-    border-color: rgba(196,154,42,0.4);
-  }
+  0%, 100% { transform: scale(1); border-color: rgba(196,154,42,0.2); }
+  50% { transform: scale(1.15); border-color: rgba(196,154,42,0.4); }
 }
 
-.chat-bubble-panel {
+/* ── Chat window: floating overlay, never affects page layout ── */
+.tdis-chat-window {
   position: fixed;
-  bottom: 92px;
-  right: 24px;
-  width: 340px;
-  max-width: calc(100vw - 32px);
-  height: 460px;
-  max-height: calc(100vh - 140px);
+  z-index: 2000;
   background: white;
-  border-radius: 16px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 24px 64px rgba(18,59,88,0.28), 0 2px 8px rgba(18,59,88,0.12);
   border: 1px solid var(--gray-200);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  z-index: 500;
 }
-.chat-bubble-header {
-  background: var(--navy-dark);
+.tdis-chat-window.is-mobile,
+.tdis-chat-window.mode-fullscreen,
+.tdis-chat-window.dock-left,
+.tdis-chat-window.dock-right {
+  border: none;
+}
+
+.tdis-chat-header {
+  flex-shrink: 0;
+  background: linear-gradient(90deg, var(--navy-dark) 0%, #1b2260 100%);
   color: white;
   padding: 12px 14px;
   display: flex; align-items: center; justify-content: space-between;
-  font-size: 13px; font-weight: 700;
+  gap: 10px;
+  user-select: none;
 }
-.chat-bubble-header span { display: flex; align-items: center; gap: 6px; }
-.chat-bubble-header button { background: none; border: none; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 14px; }
-.chat-bubble-header button:first-child { font-size: 11px; font-weight: 600; }
+.tdis-chat-title { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 700; }
+.tdis-chat-header-actions { display: flex; align-items: center; gap: 6px; }
+
+.tdis-chat-headerbtn {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.14);
+  color: rgba(255,255,255,0.85);
+  border-radius: 7px;
+  padding: 0 9px;
+  height: 26px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.tdis-chat-headerbtn:hover { background: rgba(255,255,255,0.18); border-color: rgba(196,154,42,0.4); color: white; }
+
+.tdis-chat-controls { display: flex; align-items: center; gap: 4px; }
+.tdis-chat-controls button {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.14);
+  color: rgba(255,255,255,0.85);
+  border-radius: 7px;
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.tdis-chat-controls button:hover { background: rgba(255,255,255,0.18); border-color: rgba(196,154,42,0.4); color: white; }
+.tdis-chat-controls button.active { background: var(--gold-light); border-color: var(--gold-light); color: var(--navy-dark); }
+
+/* ── Resize handles (floating, undocked mode only) ── */
+.tdis-chat-resize { position: absolute; z-index: 1; }
+.tdis-chat-resize.r-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.tdis-chat-resize.r-s { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.tdis-chat-resize.r-e { top: 8px; bottom: 8px; right: -3px; width: 6px; cursor: ew-resize; }
+.tdis-chat-resize.r-w { top: 8px; bottom: 8px; left: -3px; width: 6px; cursor: ew-resize; }
+.tdis-chat-resize.r-ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+.tdis-chat-resize.r-nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+.tdis-chat-resize.r-se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
+.tdis-chat-resize.r-sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+
+/* ── Picture-in-Picture portal target ── */
+.tdis-chat-pip-root { display: flex; flex-direction: column; height: 100vh; }
+body.tdis-pip-body { margin: 0; background: white; }
 
 .chat-bubble-history {
   flex: 1;
@@ -1257,8 +1294,3 @@ input:focus, select:focus { box-shadow: 0 0 0 3px rgba(24,79,115,0.10); }
   cursor: pointer;
 }
 .chat-bubble-input-row button:disabled { opacity: 0.5; cursor: default; }
-
-@media (max-width: 480px) {
-  .chat-bubble-panel { right: 16px; left: 16px; width: auto; }
-  .chat-bubble-fab { right: 16px; bottom: 16px; }
-}

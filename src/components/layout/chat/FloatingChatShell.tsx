@@ -162,6 +162,18 @@ export default function FloatingChatShell({
     };
   }, [pipWin]);
 
+  // On mobile the chat covers the full screen, so the page behind it is
+  // invisible anyway — lock body scroll while it's open so an errant swipe
+  // doesn't rubber-band the page underneath and break the "native app" feel.
+  useEffect(() => {
+    if (!isMobile || !open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isMobile, open]);
+
   const geometry = computeGeometry({ isMobile, dock, mode, rect, vp });
 
   // ── Window dragging (via the header) ──────────────────────────────
@@ -403,7 +415,13 @@ export default function FloatingChatShell({
           {headerExtras}
           {!pipWin && controls}
           {pipWin && (
-            <button type="button" onClick={closeOverlay} aria-label="Bring chat back into the app" title="Bring back into app">
+            <button
+              type="button"
+              className="tdis-chat-headerbtn"
+              onClick={closeOverlay}
+              aria-label="Bring chat back into the app"
+              title="Bring back into app"
+            >
               ⤓
             </button>
           )}
@@ -460,10 +478,10 @@ export default function FloatingChatShell({
             aria-label="AI Operations Assistant"
             tabIndex={-1}
             onKeyDown={onWindowKeyDown}
-            initial={{ opacity: 0, scale: 0.96, y: 12 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            initial={isMobile ? { opacity: 0, y: 48 } : { opacity: 0, scale: 0.96, y: 12 }}
+            animate={isMobile ? { opacity: 1, y: 0 } : { opacity: 1, scale: 1, y: 0 }}
+            exit={isMobile ? { opacity: 0, y: 48 } : { opacity: 0, scale: 0.96, y: 12 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
           >
             {body}
             {showResizeHandles &&
@@ -497,32 +515,41 @@ function computeGeometry({
   rect: Rect;
   vp: { w: number; h: number };
 }): CSSProperties {
+  // `position: fixed` here is belt-and-suspenders — the .tdis-chat-window
+  // CSS class already declares it — but setting it inline too guarantees
+  // this overlay can never be pulled into normal document flow (and start
+  // pushing page content) even if a class name or stylesheet load order
+  // issue slips in again.
+  const base = { position: "fixed" as const };
+
   if (isMobile) {
-    return { left: 8, top: 8, width: vp.w - 16, height: vp.h - 16, borderRadius: 14 };
+    // True full-bleed on mobile — this is meant to feel like opening a
+    // native messaging app, not a floating card with margins.
+    return { ...base, left: 0, top: 0, width: vp.w, height: vp.h, borderRadius: 0 };
   }
   if (mode === "fullscreen") {
-    return { left: 0, top: 0, width: vp.w, height: vp.h, borderRadius: 0 };
+    return { ...base, left: 0, top: 0, width: vp.w, height: vp.h, borderRadius: 0 };
   }
   if (mode === "maximized") {
     const w = Math.min(1040, vp.w - 48);
     const h = Math.min(780, vp.h - 48);
-    return { left: (vp.w - w) / 2, top: (vp.h - h) / 2, width: w, height: h };
+    return { ...base, left: (vp.w - w) / 2, top: (vp.h - h) / 2, width: w, height: h };
   }
   if (dock === "left") {
-    return { left: 0, top: 0, width: clamp(rect.w, MIN_W, vp.w * 0.6), height: vp.h, borderRadius: 0 };
+    return { ...base, left: 0, top: 0, width: clamp(rect.w, MIN_W, vp.w * 0.6), height: vp.h, borderRadius: 0 };
   }
   if (dock === "right") {
     const w = clamp(rect.w, MIN_W, vp.w * 0.6);
-    return { left: vp.w - w, top: 0, width: w, height: vp.h, borderRadius: 0 };
+    return { ...base, left: vp.w - w, top: 0, width: w, height: vp.h, borderRadius: 0 };
   }
   if (dock === "bottom") {
     const w = clamp(rect.w, MIN_W, vp.w - 32);
     const h = clamp(rect.h, MIN_H, vp.h - 32);
-    return { left: vp.w - w - 16, top: vp.h - h - 16, width: w, height: h };
+    return { ...base, left: vp.w - w - 16, top: vp.h - h - 16, width: w, height: h };
   }
   const w = clamp(rect.w, MIN_W, vp.w - 16);
   const h = clamp(rect.h, MIN_H, vp.h - 16);
-  return { left: clamp(rect.x, 0, vp.w - w), top: clamp(rect.y, 0, vp.h - h), width: w, height: h };
+  return { ...base, left: clamp(rect.x, 0, vp.w - w), top: clamp(rect.y, 0, vp.h - h), width: w, height: h };
 }
 
 function WindowControls({
