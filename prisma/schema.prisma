@@ -82,7 +82,6 @@ model AirlineWallet {
 
   history  AirlineBalanceHistory[]
   settings AirlineConnectorSettings?
-  syncLogs AirlineSyncLog[]
 
   @@map("airline_wallets")
 }
@@ -101,7 +100,7 @@ model AirlineBalanceHistory {
   currency     String       @default("NGN")
 
   // === SYNC METADATA ===
-  runId        String       // Group all airlines from one sync run
+  runId        String?      // Group all airlines from one sync run
   retrievedAt  DateTime     @default(now())
   syncStatus   SyncStatus
   connector    String       // e.g., "AirPeaceConnector"
@@ -502,7 +501,6 @@ model SalesReportAnalytics {
 
   report                SalesReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
-  @@unique([reportId])
   @@index([airline, reportDate])
   @@index([airline, reportingPeriodStart, reportingPeriodEnd])
   @@map("sales_report_analytics")
