@@ -1020,6 +1020,7 @@ input:focus, select:focus { box-shadow: 0 0 0 3px rgba(24,79,115,0.10); }
   background: white;
   box-shadow: 0 24px 64px rgba(18,59,88,0.28), 0 2px 8px rgba(18,59,88,0.12);
   border: 1px solid var(--gray-200);
+  border-radius: var(--radius);
   display: flex;
   flex-direction: column;
   overflow: hidden;
