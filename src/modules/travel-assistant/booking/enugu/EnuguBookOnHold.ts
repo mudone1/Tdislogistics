@@ -172,9 +172,11 @@ export async function bookEnuguAirOnHold(
       .first()
       .waitFor({ state: "visible", timeout: 30000 });
 
-    // Click the final Confirm/Submit button to actually complete the booking
+    // Click the final Confirm/Submit button to actually complete the booking —
+    // not required: some flights land straight on Manage My Booking (PNR
+    // already visible in the wait above) with no further step here.
     console.log("[enugu-booking] confirming booking submission");
-    await clickNext(page, "confirmation-summary");
+    await clickNext(page, "confirmation-summary", { required: false });
 
     // Wait for the final success page
     await page
@@ -268,7 +270,8 @@ async function selectCheapestFare(
     });
 }
 
-async function clickNext(page: import("playwright").Page, stage: string): Promise<void> {
+async function clickNext(page: import("playwright").Page, stage: string, opts?: { required?: boolean }): Promise<void> {
+  const required = opts?.required ?? true;
   const next = page
     .locator('button, a, input[type="submit"], input[type="button"]')
     .filter({ hasText: /^next$/i })
@@ -300,6 +303,19 @@ async function clickNext(page: import("playwright").Page, stage: string): Promis
           .slice(0, 30)
       );
       console.log(`DIAGNOSTIC [enugu-booking] stage="${stage}" no Next control found among: ${JSON.stringify(candidates)}`);
+      // Confirmed via a real run: after "payment-details" submits the hold,
+      // some flights land directly on the Manage My Booking page (PNR
+      // already visible — see the caller's success-text wait right before
+      // this call) with no further confirm step, while others show one
+      // more "Next" here. Since we only reach "confirmation-summary" after
+      // that PNR/Manage-Booking text already matched, treat a missing Next
+      // there as "already done," not a failure — the booking is real either
+      // way, and reporting it as failed here was actively wrong: it told
+      // the user their booking didn't go through when it had.
+      if (!required) {
+        console.log(`[enugu-booking] no further Next at stage="${stage}" — booking already confirmed, continuing`);
+        return;
+      }
       throw err;
     }
   }
