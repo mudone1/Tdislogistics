@@ -10,6 +10,18 @@ import { chromium } from "playwright";
 const LOGIN_URL = "https://booking.enuguairlines.com/vars/public/CustomerPanels/AgentLoginBS.aspx";
 const REQUIREMENTS_URL = "https://booking.enuguairlines.com/vars/public/CustomerPanels/requirementsBS.aspx";
 const LOGGED_IN_MARKER = "text=/Logged in as:/i";
+// Public "Manage My Booking" lookup (Surname + Booking Reference, no agent
+// login needed) — reached from enuguairlines.com's "Check In|Manage
+// Booking" toggle, which embeds this exact page in an iframe. This is the
+// independent ground truth for whether a PNR is real: confirmed via a real
+// run that a fabricated/invalid reference returns the literal text
+// "Booking not found!" here, while the in-flow agent-session page after
+// submitting a hold can land on what LOOKS like a booking-management
+// screen (same nav chrome: My Booking / Passenger Details / Change
+// Flight / Book Extras / Log Out) without an actual booking having been
+// created — that's exactly what happened once trusting that page alone.
+const MMB_URL = "https://booking.enuguairlines.com/vars/public/CustomerPanels/MmbLoginBS.aspx";
+const BOOKING_NOT_FOUND_MARKER = /booking not found/i;
 
 export interface BookOnHoldCredentials {
   username: string;
@@ -194,9 +206,58 @@ export async function bookEnuguAirOnHold(
     // Best-effort — a screenshot failure must never turn a real successful
     // hold into a failed job, so swallow and fall back to null.
     const screenshot = await page.screenshot({ fullPage: true }).catch(() => null);
-    return parseConfirmation(raw, screenshot);
+    const result = parseConfirmation(raw, screenshot);
+
+    // Independent verification, not just trusting the in-flow page — see
+    // the MMB_URL comment above for exactly why that page alone isn't
+    // trustworthy (confirmed via a real run: it can show booking-management
+    // nav chrome with no actual booking behind it).
+    console.log(`[enugu-booking] verifying PNR "${result.pnr}" via public Manage My Booking lookup`);
+    const verified = result.pnr ? await verifyBookingReference(context, result.pnr, request.passenger.lastName) : false;
+    if (!verified) {
+      throw new Error(
+        result.pnr
+          ? `Booking submission could not be verified — Enugu Air's Manage My Booking lookup reports no booking found for reference "${result.pnr}" / surname "${request.passenger.lastName}". The hold likely did not complete.`
+          : "Booking submission produced no recognizable booking reference — the hold likely did not complete."
+      );
+    }
+    console.log(`[enugu-booking] PNR "${result.pnr}" verified`);
+    return result;
   } finally {
     await browser.close().catch(() => {});
+  }
+}
+
+// Confirms a PNR is real via the public Manage My Booking lookup (Surname +
+// Booking Reference, no agent login needed) rather than trusting whatever
+// page the in-flow agent session happened to land on. Runs in a fresh page
+// in the same browser context so it's closed along with everything else.
+async function verifyBookingReference(
+  context: import("playwright").BrowserContext,
+  pnr: string,
+  surname: string
+): Promise<boolean> {
+  const page = await context.newPage();
+  try {
+    await page.goto(MMB_URL, { waitUntil: "domcontentloaded" });
+    await page.locator("#txtSurname").fill(surname);
+    await page.locator("#txtPNR").fill(pnr);
+    await page.locator("#btnOk").click();
+    // Same non-submit #btnOk / async-postback pattern as the agent login —
+    // there's no confirmed "found" marker to wait on (only the negative
+    // "Booking not found!" case is verified), so wait for the postback's
+    // network activity to settle rather than a fixed sleep.
+    await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+    const bodyText = await page.locator("body").innerText().catch(() => "");
+    return !BOOKING_NOT_FOUND_MARKER.test(bodyText);
+  } catch (err) {
+    // A verification-mechanism failure (network hiccup, page structure
+    // change) must never silently report a fabricated success — only an
+    // actual pass through the "not found" check counts as verified.
+    console.error(`[enugu-booking] PNR verification threw, treating as unverified: ${err}`);
+    return false;
+  } finally {
+    await page.close().catch(() => {});
   }
 }
 
