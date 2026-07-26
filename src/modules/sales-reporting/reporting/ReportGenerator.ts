@@ -8,7 +8,7 @@ import { StaffAliasRepository } from "../staff/StaffAliasRepository";
 import { renderReportText } from "./ReportTextRenderer";
 import { scoreConfidence } from "./ConfidenceScorer";
 import { checkDuplicate, recordSupersession, type DuplicateMatch } from "../services/DuplicateCheckService";
-import type { AirlineRuleKey } from "../core/types";
+import type { AirlineRuleKey, RawTransactionRow } from "../core/types";
 import type { DetectionMethod } from "../services/AirlineDetectionService";
 
 const AIRLINE_LABELS: Record<AirlineRuleKey, string> = {
@@ -69,6 +69,57 @@ function hashFiles(files: UploadedFile[]): string {
   return hash.digest("hex");
 }
 
+// Shared by both the daily and monthly upload paths — turns the uploaded
+// files into one merged row list. Excel parses directly; screenshots go
+// to the vision model together as ONE report (a long report split across
+// several images must be merged before rule processing, not parsed
+// image-by-image).
+export async function parseFiles(files: UploadedFile[]): Promise<{ rows: RawTransactionRow[]; warnings: string[] }> {
+  const excelFiles = files.filter((f) => fileKind(f) === "EXCEL");
+  const screenshotFiles = files.filter((f) => fileKind(f) === "SCREENSHOT");
+
+  const rows: RawTransactionRow[] = [];
+  const warnings: string[] = [];
+
+  for (const file of excelFiles) {
+    const parsed = parseExcelBuffer(file.buffer);
+    rows.push(...parsed.rows);
+    warnings.push(...parsed.warnings.map((w) => `${file.name}: ${w}`));
+  }
+
+  if (screenshotFiles.length > 0) {
+    const parsed = await parseScreenshotBuffers(
+      screenshotFiles.map((f) => ({ name: f.name, buffer: f.buffer, mimeType: f.mimeType ?? "image/png" }))
+    );
+    rows.push(...parsed.rows);
+    warnings.push(...parsed.warnings);
+  }
+
+  return { rows, warnings };
+}
+
+// A monthly export contains rows spanning more than one calendar date; a
+// daily export is (per business practice) always one day's transactions.
+// Two or more distinct dates among the parsed rows is treated as monthly
+// — a single stray misdated row isn't enough on its own since
+// detectReportDate's mode-based logic already tolerates that for the
+// daily path, but this check runs on the RAW distinct-date count instead
+// of a mode, since a monthly file's dates are all real, not noise.
+export function distinctDates(rows: RawTransactionRow[]): string[] {
+  const dates = new Set<string>();
+  for (const r of rows) if (r.date) dates.add(r.date);
+  return Array.from(dates).sort((a, b) => parseDDMMYYYY(a) - parseDDMMYYYY(b));
+}
+
+export function isMonthlyUpload(rows: RawTransactionRow[]): boolean {
+  return distinctDates(rows).length > 1;
+}
+
+function parseDDMMYYYY(d: string): number {
+  const [day, month, year] = d.split("/").map(Number);
+  return Date.UTC(year, month - 1, day);
+}
+
 // "DD/MM/YYYY" for whichever date appears most often across the parsed
 // rows — a single upload is always one day's transactions in practice,
 // but taking the mode (rather than just the first row) is cheap
@@ -95,34 +146,17 @@ function detectReportDate(dates: (string | null)[]): string {
 export async function generateReport(
   airline: AirlineRuleKey,
   files: UploadedFile[],
-  options?: GenerateReportOptions
+  options?: GenerateReportOptions,
+  // Set by the route when it already parsed the files itself to decide
+  // monthly vs daily — re-parsing here would re-run the (expensive,
+  // Groq-vision-backed) screenshot path a second time.
+  preParsed?: { rows: RawTransactionRow[]; warnings: string[] }
 ): Promise<GeneratedReportSummary> {
   const createdBy = options?.createdBy;
   await StaffAliasRepository.ensureSeeded();
   const knownAliases = await StaffAliasRepository.listAll();
 
-  const excelFiles = files.filter((f) => fileKind(f) === "EXCEL");
-  const screenshotFiles = files.filter((f) => fileKind(f) === "SCREENSHOT");
-
-  const allRows = [];
-  const allWarnings: string[] = [];
-
-  for (const file of excelFiles) {
-    const parsed = parseExcelBuffer(file.buffer);
-    allRows.push(...parsed.rows);
-    allWarnings.push(...parsed.warnings.map((w) => `${file.name}: ${w}`));
-  }
-
-  // All screenshots go to the vision model together as ONE report — a long
-  // report split across several images must be merged before rule
-  // processing (per spec), not parsed image-by-image.
-  if (screenshotFiles.length > 0) {
-    const parsed = await parseScreenshotBuffers(
-      screenshotFiles.map((f) => ({ name: f.name, buffer: f.buffer, mimeType: f.mimeType ?? "image/png" }))
-    );
-    allRows.push(...parsed.rows);
-    allWarnings.push(...parsed.warnings);
-  }
+  const { rows: allRows, warnings: allWarnings } = preParsed ?? (await parseFiles(files));
 
   const unknownStaff = new Set<string>();
   const resolve = (rawCode: string): string => {
@@ -232,30 +266,196 @@ export async function generateReport(
   };
 }
 
+export interface DailyProcessResult {
+  reportDate: string;
+  reportId: string;
+  grandTotal: number;
+  ticketCount: number;
+  wasOverwrite: boolean;
+  needsReview: boolean;
+  confidence: number;
+}
+
+export interface MonthlyUploadSummary {
+  airline: AirlineRuleKey;
+  totalDatesProcessed: number;
+  datesOverwritten: string[];
+  totalGrandTotal: number;
+  totalTickets: number;
+  perDate: DailyProcessResult[];
+  warnings: string[];
+}
+
+// A monthly upload skips the PENDING_VERIFICATION/human-review step
+// entirely, per product decision: rows are split by date, each date is
+// classified through the SAME rule engine as a daily upload, and saved
+// directly as SAVED — immediately reflected in the analytics rollups, no
+// "Reply Save" step. A date that already has a SAVED report is
+// superseded automatically, same "always overwrite, never ask" rule as
+// confirmReport's daily path.
+export async function processMonthlyUpload(
+  airline: AirlineRuleKey,
+  files: UploadedFile[],
+  options?: GenerateReportOptions,
+  preParsed?: { rows: RawTransactionRow[]; warnings: string[] }
+): Promise<MonthlyUploadSummary> {
+  await StaffAliasRepository.ensureSeeded();
+  const knownAliases = await StaffAliasRepository.listAll();
+
+  const { rows: allRows, warnings } = preParsed ?? (await parseFiles(files));
+  const dates = distinctDates(allRows);
+
+  const unknownStaff = new Set<string>();
+  const resolve = (rawCode: string): string => {
+    const resolution = resolveStaffName(rawCode, knownAliases);
+    if (!resolution.isKnown) unknownStaff.add(resolution.rawCode);
+    return resolution.displayName;
+  };
+
+  const fileHash = hashFiles(files);
+  const primaryFile = files[0];
+  const totalFileSize = files.reduce((sum, f) => sum + f.buffer.byteLength, 0);
+  const attributedTo = options?.createdBy || options?.importedBy || "monthly-upload";
+
+  const perDate: DailyProcessResult[] = [];
+  const datesOverwritten: string[] = [];
+
+  for (const date of dates) {
+    const dayRows = allRows.filter((r) => r.date === date);
+    const dayRawCodes = new Set(dayRows.map((r) => normalizeRawCode(r.user)));
+
+    const result = applyRules(airline, dayRows, resolve);
+    const reportText = renderReportText(AIRLINE_LABELS[airline], date, result.staffTotals, result.transactions);
+    const dayUnknownStaff = Array.from(unknownStaff).filter((code) => dayRawCodes.has(code));
+    const confidence = scoreConfidence(result.transactions, result.grandTotal, dayUnknownStaff, warnings.length);
+
+    const existingSaved = await prisma.salesReport.findFirst({
+      where: { airline, reportDate: date, status: "SAVED" },
+    });
+
+    const created = await prisma.$transaction(async (tx) => {
+      const report = await tx.salesReport.create({
+        data: {
+          airline,
+          reportDate: date,
+          grandTotal: result.grandTotal,
+          confidence: confidence.score,
+          reportText,
+          sourceFiles: files.map((f) => ({ name: f.name, kind: fileKind(f) })),
+          rulesVersion: "v1",
+          createdBy: options?.createdBy,
+          status: "SAVED",
+          verifiedBy: attributedTo,
+          verifiedAt: new Date(),
+          airlineDetectedBy: options?.detection?.method,
+          detectionConfidence: options?.detection?.confidence,
+          detectionReasoning: options?.detection?.reasoning ?? [],
+          fileHash,
+          originalFilename: primaryFile?.name,
+          fileSize: totalFileSize,
+          importedAt: new Date(),
+          importedBy: options?.importedBy,
+        },
+      });
+
+      await tx.staffSales.createMany({
+        data: result.staffTotals.map((s) => ({
+          reportId: report.id,
+          staffName: s.staffName,
+          amount: s.amount,
+          transactionCount: s.transactionCount,
+        })),
+      });
+
+      await tx.salesTransaction.createMany({
+        data: result.transactions.map((t) => ({
+          reportId: report.id,
+          staffName: t.staffName,
+          amount: t.amount,
+          paymentType: t.paymentTypeLabel,
+          mcoReference: t.mcoReference,
+          pnr: t.pnr,
+          user: normalizeRawCode(t.user),
+          rawRecord: t.raw,
+          status: t.status,
+        })),
+      });
+
+      const ticketRows = result.transactions.filter((t) => t.kind === "PT");
+      await tx.salesTicket.createMany({
+        data: ticketRows.map((t) => ({
+          reportId: report.id,
+          airline,
+          date: t.date ?? date,
+          staff: t.staffName,
+          pnr: t.pnr,
+          mcoReference: t.mcoReference,
+          ticketValue: t.amount,
+          paymentType: t.paymentTypeLabel,
+          status: t.status,
+          included: t.included,
+          reasonIfExcluded: t.included ? null : t.status,
+        })),
+      });
+
+      return report;
+    });
+
+    if (existingSaved) {
+      datesOverwritten.push(date);
+      await recordSupersession(existingSaved.id, created.id, attributedTo, "Automatically superseded by monthly bulk upload.");
+    }
+
+    // Best-effort, matching confirmReport's own contract — the day's
+    // report is already SAVED regardless of whether this succeeds.
+    await syncDenormalizedAnalytics(created.id);
+
+    perDate.push({
+      reportDate: date,
+      reportId: created.id,
+      grandTotal: result.grandTotal,
+      ticketCount: result.ticketCount,
+      wasOverwrite: existingSaved != null,
+      needsReview: confidence.needsReview,
+      confidence: confidence.score,
+    });
+  }
+
+  return {
+    airline,
+    totalDatesProcessed: perDate.length,
+    datesOverwritten,
+    totalGrandTotal: perDate.reduce((sum, d) => sum + d.grandTotal, 0),
+    totalTickets: perDate.reduce((sum, d) => sum + d.ticketCount, 0),
+    perDate,
+    warnings,
+  };
+}
+
 // Called only after a human explicitly confirms ("Reply Save"). Any
 // staff-name corrections supplied at that point are learned permanently
 // (StaffAliasRepository) AND applied retroactively to this specific
 // report's own rows before it's marked SAVED — otherwise the very first
 // report that taught the system a mapping would still show the old guess.
+//
+// Per product decision: uploading/saving a report for a date that
+// already has a SAVED report always overwrites it automatically — no
+// separate "Overwrite / Save Anyway" choice. This looks up any existing
+// SAVED report for the same airline+date itself; the caller doesn't pass
+// anything special to trigger it.
 export async function confirmReport(
   reportId: string,
   verifiedBy: string,
-  staffCorrections?: Record<string, string>,
-  overwriteExisting?: { existingReportId: string; reason?: string }
+  staffCorrections?: Record<string, string>
 ): Promise<GeneratedReportSummary> {
   const report = await prisma.salesReport.findUniqueOrThrow({ where: { id: reportId } });
   if (report.status === "SAVED") {
     throw new Error(`Report ${reportId} was already saved.`);
   }
 
-  if (overwriteExisting) {
-    const existing = await prisma.salesReport.findUniqueOrThrow({ where: { id: overwriteExisting.existingReportId } });
-    if (existing.airline !== report.airline || existing.reportDate !== report.reportDate) {
-      throw new Error(
-        `Report ${overwriteExisting.existingReportId} is not a match for this report's airline/date — refusing to supersede.`
-      );
-    }
-  }
+  const existingSaved = await prisma.salesReport.findFirst({
+    where: { airline: report.airline, reportDate: report.reportDate, status: "SAVED", id: { not: reportId } },
+  });
 
   if (staffCorrections && Object.keys(staffCorrections).length > 0) {
     const transactions = await prisma.salesTransaction.findMany({ where: { reportId } });
@@ -320,8 +520,8 @@ export async function confirmReport(
     include: { staffSales: true, transactions: true },
   });
 
-  if (overwriteExisting) {
-    await recordSupersession(overwriteExisting.existingReportId, reportId, verifiedBy, overwriteExisting.reason);
+  if (existingSaved) {
+    await recordSupersession(existingSaved.id, reportId, verifiedBy, "Automatically superseded — a newer upload for the same airline/date was saved.");
   }
 
   // Best-effort: the report is already SAVED at this point regardless of
@@ -362,7 +562,7 @@ export async function confirmReport(
 // netSalesAmount both hold that same figure and totalCommission is 0 until
 // those rules exist. "Voided" maps to CANCELLED_BY_RT (a PT cancelled by a
 // matching RT row) — the closest existing concept to a void in this domain.
-async function syncDenormalizedAnalytics(reportId: string): Promise<void> {
+export async function syncDenormalizedAnalytics(reportId: string): Promise<void> {
   const report = await prisma.salesReport.findUniqueOrThrow({ where: { id: reportId } });
   const tickets = await prisma.salesTicket.findMany({ where: { reportId } });
   const transactions = await prisma.salesTransaction.findMany({ where: { reportId } });
