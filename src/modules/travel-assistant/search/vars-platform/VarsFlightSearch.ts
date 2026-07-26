@@ -13,6 +13,23 @@ import type { FareClassOption, FlightOption, FlightSearchQuery, FlightSearchResu
 // if a date is unreachable (e.g. no schedule that far out).
 const MAX_DAY_FORWARD_CLICKS = 60;
 
+// Backstop against the caller (a Vercel function with a 60s hard ceiling —
+// confirmed live via a production 504 with "Task timed out after 60
+// seconds" on /api/assistant/quote) getting killed with zero response. Each
+// forward-page attempt can legitimately wait up to 5s for its debounced
+// postback (see below) — 60 attempts x 5s would be 300s worst case, so
+// MAX_DAY_FORWARD_CLICKS alone doesn't bound wall-clock time. This deadline
+// does: it comfortably covers the observed happy path (a real date 5 days
+// out resolved in one ~5-12s forward-page attempt) while guaranteeing this
+// function fails fast, well inside the 60s budget, for a date genuinely
+// beyond an airline's published schedule.
+// Left as headroom below 60s: the forward-paging phase this deadline bounds
+// is followed by a one-time (at most 15s) wait for the target tab's click to
+// land, plus ~11-13s of surrounding form-fill/submit/extraction overhead
+// (measured live) — 20s + 15s + 13s ≈ 48s, leaving margin under the 60s
+// ceiling for network jitter and connector-service cold starts.
+const DATE_NAVIGATION_DEADLINE_MS = 20000;
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // Resource types that never affect the booking data we scrape — blocking
@@ -189,8 +206,14 @@ export async function searchVarsPlatformFlights(
 
 async function navigateToDate(page: Page, targetDateISO: string, logTag: string): Promise<void> {
   const targetLabel = toDayTabLabel(targetDateISO);
+  const deadline = Date.now() + DATE_NAVIGATION_DEADLINE_MS;
 
   for (let i = 0; i < MAX_DAY_FORWARD_CLICKS; i++) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Gave up navigating to date tab "${targetLabel}" after ${DATE_NAVIGATION_DEADLINE_MS}ms (${i} forward-page attempts) — bailing out early to stay inside the caller's function timeout`
+      );
+    }
     const tab = page.locator(`a.dayTab[data-newday="${targetLabel}"]`);
     if ((await tab.count().catch(() => 0)) > 0) {
       console.log(`[${logTag}] found date tab for ${targetLabel}, selecting`);
