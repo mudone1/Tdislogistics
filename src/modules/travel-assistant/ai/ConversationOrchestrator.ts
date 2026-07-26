@@ -1,4 +1,4 @@
-import { groqJsonCompletion, type GroqMessage } from "./groqClient";
+import { openaiJsonCompletion, type OpenAIMessage } from "./openaiClient";
 import { SYSTEM_PROMPT } from "./systemPrompt";
 import { STAFF_KNOWLEDGE } from "./staffProfiles";
 import { ChatMemoryRepository } from "../storage/ChatMemoryRepository";
@@ -6,6 +6,7 @@ import { FlightSearchHistoryRepository } from "../storage/FlightSearchHistoryRep
 import { NotificationRepository } from "../storage/NotificationRepository";
 import { formatLeg, formatRouteHeader } from "../formatting/formatFlightResults";
 import { startBookOnHold } from "../booking/startBookOnHold";
+import { ENUGU_SUPPORTED_TITLES } from "../booking/vars-platform/VarsBookOnHold";
 import { handleQuery as handleSalesReportQuery } from "../orchestration/SalesReportAssistant";
 import type {
   AssistantTurn,
@@ -54,6 +55,7 @@ const EMPTY_SLOTS: ConversationSlots = {
   pendingReturnTimeOptions: null,
   selectedDepartureTime: null,
   selectedReturnTime: null,
+  pendingTitleConfirmation: null,
 };
 
 const REQUIRED_SEARCH_SLOTS = ["origin", "destination", "date"] as const;
@@ -343,12 +345,12 @@ async function runIntentDetection(
   slots: ConversationSlots,
   priorMessages: { role: string; text: string }[]
 ): Promise<AssistantTurn> {
-  const history: GroqMessage[] = priorMessages.map((m) => ({
+  const history: OpenAIMessage[] = priorMessages.map((m) => ({
     role: m.role === "USER" ? "user" : "assistant",
     content: m.text,
   }));
 
-  const messages: GroqMessage[] = [
+  const messages: OpenAIMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "system", content: STAFF_KNOWLEDGE },
     {
@@ -361,7 +363,7 @@ async function runIntentDetection(
     { role: "user", content: message },
   ];
 
-  const raw = await groqJsonCompletion(messages);
+  const raw = await openaiJsonCompletion(messages);
   const parsed = JSON.parse(raw) as Partial<AssistantTurn>;
 
   return {
@@ -381,6 +383,7 @@ async function runIntentDetection(
       passengerLastName: parsed.entities?.passengerLastName ?? null,
       passengerPhone: parsed.entities?.passengerPhone ?? null,
       passengerEmail: parsed.entities?.passengerEmail ?? null,
+      passengerGenderGuess: parsed.entities?.passengerGenderGuess ?? null,
     },
     missingRequiredSlots: parsed.missingRequiredSlots ?? [],
     reply: parsed.reply ?? "Sorry, could you rephrase that?",
@@ -502,6 +505,82 @@ function resetBookingSlots(slots: ConversationSlots): void {
   slots.pendingReturnTimeOptions = null;
   slots.selectedDepartureTime = null;
   slots.selectedReturnTime = null;
+  slots.pendingTitleConfirmation = null;
+}
+
+// Resolves a raw passenger title/first-name pair into a title Enugu Air's
+// booking form actually accepts, without ever discarding what the customer
+// gave or silently guessing wrong on a passenger's travel document. Three
+// cases:
+// 1. A supported title (Mr/Mrs/Ms/Dr/Miss/Mstr/Prof/Rev) was given — done,
+//    no-op (this also makes the function safe to call on every turn: once
+//    resolved, it stays resolved).
+// 2. No title, or an UNSUPPORTED honorific (Chief/Honourable/Barrister/
+//    Pastor/etc.) was given — fold it into firstName to preserve the
+//    customer's identity (e.g. "Honourable John Brian" -> firstName
+//    "Honourable John", lastName "Brian"), then pick Mr/Miss from the
+//    gender guess IF confident.
+// 3. Not confident (name is unisex/uncommon/ambiguous, or no guess was
+//    supplied) — never guess. Set pendingTitleConfirmation so
+//    handleBookOnHold asks and waits, same pattern as flight-time
+//    disambiguation.
+function resolvePendingPassengerTitle(
+  slots: ConversationSlots,
+  genderGuess: "male" | "female" | "unsure" | null
+): void {
+  if (!slots.passengerFirstName || slots.pendingTitleConfirmation) return;
+
+  const rawTitle = slots.passengerTitle;
+  if (rawTitle && (ENUGU_SUPPORTED_TITLES as readonly string[]).some((t) => t.toLowerCase() === rawTitle.toLowerCase())) {
+    return; // already a real, usable title
+  }
+
+  const effectiveFirstName = rawTitle ? `${rawTitle} ${slots.passengerFirstName}`.trim() : slots.passengerFirstName;
+
+  if (genderGuess === "male") {
+    slots.passengerTitle = "Mr";
+    slots.passengerFirstName = effectiveFirstName;
+  } else if (genderGuess === "female") {
+    slots.passengerTitle = "Miss";
+    slots.passengerFirstName = effectiveFirstName;
+  } else {
+    slots.passengerTitle = null;
+    slots.pendingTitleConfirmation = { firstName: effectiveFirstName, lastName: slots.passengerLastName ?? "" };
+  }
+}
+
+const TITLE_CONFIRMATION_WORDS: Record<string, (typeof ENUGU_SUPPORTED_TITLES)[number]> = {
+  mr: "Mr",
+  mrs: "Mrs",
+  ms: "Ms",
+  miss: "Miss",
+  dr: "Dr",
+  doctor: "Dr",
+  prof: "Prof",
+  professor: "Prof",
+  rev: "Rev",
+  reverend: "Rev",
+  mstr: "Mstr",
+  master: "Mstr",
+  male: "Mr",
+  man: "Mr",
+  he: "Mr",
+  him: "Mr",
+  female: "Miss",
+  woman: "Miss",
+  she: "Miss",
+  her: "Miss",
+};
+
+// Parses the customer's answer to "please confirm the passenger's preferred
+// title or gender" into one of Enugu's supported titles. Returns null if the
+// reply doesn't clearly say — the caller re-asks rather than guessing.
+function matchTitleConfirmation(rawMessage: string): (typeof ENUGU_SUPPORTED_TITLES)[number] | null {
+  const words = rawMessage.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+  for (const word of words) {
+    if (TITLE_CONFIRMATION_WORDS[word]) return TITLE_CONFIRMATION_WORDS[word];
+  }
+  return null;
 }
 
 // Matches a free-text reply against a list of candidate departure times
@@ -597,6 +676,32 @@ async function handleBookOnHold(
     await ChatMemoryRepository.updateSlots(sessionId, slots);
     await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
     return { reply };
+  }
+
+  // Passenger title/gender resolution — must happen (and block progress,
+  // same as flight-time disambiguation below) BEFORE collectBookingGaps,
+  // since that check doesn't look at title at all and would otherwise let
+  // an unresolved/ambiguous title silently fall through to a hardcoded
+  // "Mr" default at booking time.
+  if (slots.pendingTitleConfirmation) {
+    const resolved = matchTitleConfirmation(rawMessage);
+    if (!resolved) {
+      const reply = "Please confirm the passenger's preferred title or gender.";
+      await ChatMemoryRepository.updateSlots(sessionId, slots);
+      await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+      return { reply };
+    }
+    slots.passengerTitle = resolved;
+    slots.passengerFirstName = slots.pendingTitleConfirmation.firstName;
+    slots.pendingTitleConfirmation = null;
+  } else {
+    resolvePendingPassengerTitle(slots, turn.entities.passengerGenderGuess);
+    if (slots.pendingTitleConfirmation) {
+      const reply = "Please confirm the passenger's preferred title or gender.";
+      await ChatMemoryRepository.updateSlots(sessionId, slots);
+      await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+      return { reply };
+    }
   }
 
   // If a previous turn asked which departure time the user wants, this
