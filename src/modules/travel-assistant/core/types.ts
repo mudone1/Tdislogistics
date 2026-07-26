@@ -68,6 +68,13 @@ export interface ConversationSlots {
   passengerLastName: string | null;
   passengerPhone: string | null;
   passengerEmail: string | null;
+  // Book-on-Hold flight disambiguation: set when a leg's search turned up
+  // more than one flight and the assistant is waiting on the user to pick
+  // one. Cleared once resolved into selectedDepartureTime/selectedReturnTime.
+  pendingDepartureTimeOptions: string[] | null;
+  pendingReturnTimeOptions: string[] | null;
+  selectedDepartureTime: string | null;
+  selectedReturnTime: string | null;
 }
 
 export interface ChatEntities {

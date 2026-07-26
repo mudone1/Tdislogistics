@@ -625,6 +625,13 @@ model BookingJob {
   lastName      String
   phone         String?
   email         String?
+  // Which specific flight to book on each leg, when that leg's route/date
+  // has more than one — resolved by the chat before the job is created
+  // (search count -> ask the user if needed). Null means "known to have
+  // exactly one flight" (or the disambiguation check itself failed and the
+  // automation falls back to its default first-panel behavior).
+  preferredDepartureTime String?
+  preferredReturnTime    String?
 
   // Result (populated on SUCCESS)
   pnr           String?

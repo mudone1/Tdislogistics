@@ -270,6 +270,8 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
     departureDate: job.departureDate,
     returnDate: job.returnDate ?? undefined,
     fareClassPreference,
+    preferredDepartureTime: job.preferredDepartureTime ?? undefined,
+    preferredReturnTime: job.preferredReturnTime ?? undefined,
     passenger: {
       title: job.title,
       firstName: job.firstName,

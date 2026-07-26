@@ -58,14 +58,17 @@ export interface BookOnHoldRequest {
   // guess or fall back to Enugu's names, since picking the wrong classband
   // could silently select a more expensive fare.
   fareClassPreference: [string, string];
-  // When the route/date has more than one flight, the caller must resolve
-  // that ambiguity (see searchVarsPlatformFlights in VarsFlightSearch.ts to
-  // discover the options, and prompt the user) before calling this
-  // function — supplying the exact departure time (as shown on the fare
-  // page, e.g. "08:45") selects that specific flight's panel instead of
-  // defaulting to the first one found. Omit only when the route/date is
-  // already known to have exactly one flight.
+  // When a leg's route/date has more than one flight, the caller must
+  // resolve that ambiguity (see searchVarsPlatformFlights in
+  // VarsFlightSearch.ts to discover the options, and prompt the user)
+  // before calling this function — supplying the exact departure time (as
+  // shown on the fare page, e.g. "08:45") selects that specific flight's
+  // panel instead of defaulting to the first one found. Omit only when
+  // that leg's route/date is already known to have exactly one flight.
+  // Two separate fields because a round trip's outbound and return legs
+  // are independent searches that can each have their own ambiguity.
   preferredDepartureTime?: string;
+  preferredReturnTime?: string;
   passenger: BookOnHoldPassenger;
 }
 
@@ -149,7 +152,11 @@ export async function bookVarsPlatformOnHold(
     const legCount = request.returnDate ? 2 : 1;
     await page.locator(".tab-pane.active .flt-panel").first().waitFor({ state: "visible", timeout: 15000 });
     for (let leg = 0; leg < legCount; leg++) {
-      await selectCheapestFare(page, leg, request.fareClassPreference, request.preferredDepartureTime, logTag);
+      // leg 0 is outbound, leg 1 (round trip only) is the return — each is
+      // an independent search with its own possible ambiguity, so each
+      // gets its own preferred time rather than reusing one value for both.
+      const preferredTime = leg === 0 ? request.preferredDepartureTime : request.preferredReturnTime;
+      await selectCheapestFare(page, leg, request.fareClassPreference, preferredTime, logTag);
     }
 
     await clickNext(page, "fare-selection", logTag);

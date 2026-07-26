@@ -26,6 +26,12 @@ export interface StartBookOnHoldInput {
   lastName: string;
   phone: string;
   email: string;
+  // Which specific flight to book on each leg, when the route/date has more
+  // than one — resolved upstream (search count -> ask the user if needed)
+  // before this is called. Omit only when that leg is already known to
+  // have exactly one flight.
+  preferredDepartureTime?: string | null;
+  preferredReturnTime?: string | null;
   createdBy?: string | null;
 }
 
@@ -54,6 +60,8 @@ export async function startBookOnHold(input: StartBookOnHoldInput): Promise<Star
     lastName: input.lastName,
     phone: input.phone,
     email: input.email,
+    preferredDepartureTime: input.preferredDepartureTime ?? null,
+    preferredReturnTime: input.preferredReturnTime ?? null,
     createdBy: input.createdBy ?? null,
   });
 
