@@ -11,18 +11,20 @@ import {
 // same booking engine.
 const LOGIN_URL = "https://customer3.videcom.com/RanoAir/VARS/Public/CustomerPanels/AgentLoginBS.aspx";
 const REQUIREMENTS_URL = "https://customer3.videcom.com/RanoAir/VARS/Public/CustomerPanels/requirementsBS.aspx";
-// Not independently confirmed — inferred from the same CustomerPanels path
-// pattern. Verify against a real run before relying on this for PNR
-// verification.
+// Confirmed live: exact same #txtSurname/#txtPNR/#btnOk fields as Enugu Air,
+// and a bogus lookup returns "Booking not found!" matching the shared
+// BOOKING_NOT_FOUND_MARKER regex in VarsBookOnHold.ts.
 const MMB_URL = "https://customer3.videcom.com/RanoAir/VARS/Public/CustomerPanels/MmbLoginBS.aspx";
 
-// UNVERIFIED beyond login: the login DOM (#txtSineCode/#txtPassword/#btnOk)
-// is confirmed identical to Enugu Air's (see RanoConnector.ts), but the
-// booking-flow selectors this module depends on — fare classband names,
-// passenger form field ids, payment options — have not been checked
-// against a real Rano Air search/booking run. Do not treat a successful
-// type-check as evidence this works; it needs its own live verification
-// pass (same kind of check done for Enugu Air) before use.
+// Verified live end-to-end up to (not including) final submission: fare
+// selection uses United's whole-card-click mechanism (card gains
+// "panel-active"), but Rano only ever offers a single "Economy" classband
+// per flight — no Promo/Saver split — so its FARE_CLASS_PREFERENCE entry in
+// connector-service/src/server.ts is ["Economy", "Economy"]. Passenger form
+// field ids (passenger1firstname/lastname/mobilephonenumber/emailaddress/
+// emailaddressverification/specialservicerequest0) and the payment radio
+// group (optpaymentformofpayment, including "NoPaymentRequered" for Book
+// Now Pay Later) are identical to United Nigeria's.
 export async function bookRanoAirOnHold(
   credentials: BookOnHoldCredentials,
   request: BookOnHoldRequest

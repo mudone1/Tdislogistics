@@ -187,6 +187,9 @@ const BOOK_ON_HOLD_HANDLERS: Record<string, typeof bookEnuguAirOnHold> = {
 const FARE_CLASS_PREFERENCE: Partial<Record<string, [string, string]>> = {
   ENUGU: ["Economy Promo", "Economy Saver"],
   UNITED: ["Economy Promo", "Economy Saver"],
+  // Rano Air only offers a single "Economy" classband per flight (confirmed
+  // via live search across every ABV destination) — no Promo/Saver split.
+  RANO: ["Economy", "Economy"],
 };
 
 // Job-based Book-on-Hold. Unlike the old fire-and-forget version, the
