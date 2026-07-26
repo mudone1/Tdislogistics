@@ -98,7 +98,10 @@ export async function bookVarsPlatformOnHold(
 
   try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    context.on("dialog", (dialog) => dialog.dismiss().catch(() => {}));
+    context.on("dialog", (dialog) => {
+      console.log(`[${logTag}] dialog appeared: "${dialog.message()}"`);
+      dialog.dismiss().catch(() => {});
+    });
     const page = await context.newPage();
 
     // --- Login (identical mechanism across every VARS airline) ---
@@ -139,11 +142,23 @@ export async function bookVarsPlatformOnHold(
       }
     );
 
-    await page
-      .locator('button, a, input[type="submit"], input[type="button"]')
-      .filter({ hasText: /^continue$/i })
-      .first()
-      .click();
+    // Two different search-form URLs across VARS deployments use two
+    // different submit controls for the exact same #Origin/#Destination/
+    // #departuredate form fields: CustomerPanels/requirementsBS.aspx has a
+    // "Continue" button, while the real agent-portal entry point
+    // (Dashboard.aspx -> "Standard Booking" -> agentSearch.aspx — the one
+    // that actually surfaces the password-gated "Book Now, Pay Later"
+    // accordion below, confirmed live) has a "#refineSearchButton" instead.
+    const refineButton = page.locator("#refineSearchButton");
+    if (await refineButton.count().catch(() => 0)) {
+      await refineButton.first().click();
+    } else {
+      await page
+        .locator('button, a, input[type="submit"], input[type="button"]')
+        .filter({ hasText: /^continue$/i })
+        .first()
+        .click();
+    }
     await page.waitForURL(/FlightCal\.aspx/i, { timeout: 20000 }).catch(() => {
       /* some VARS deployments don't change the URL for this step — proceed and let the panel wait below fail loudly if it truly didn't navigate */
     });
@@ -197,18 +212,63 @@ export async function bookVarsPlatformOnHold(
     await page.locator("#passenger1emailaddressverification").fill(request.passenger.email);
     await page.locator("#passenger1specialservicerequest0").click();
 
-    // The "Book Now, Pay Later" radio shares its id/name with every other
-    // payment option (a VARS repeater control quirk) — a plain .click()
-    // was confirmed NOT to stick during manual verification, so set
-    // checked + dispatch change directly instead.
-    await page.evaluate(() => {
-      const radios = document.querySelectorAll<HTMLInputElement>('input[name="optpaymentformofpayment"]');
-      const hold = Array.from(radios).find((r) => r.value === "BuyNowPayLater");
-      if (!hold) throw new Error('"Book Now, Pay Later" option not found on payment page');
-      hold.checked = true;
-      hold.dispatchEvent(new Event("click", { bubbles: true }));
-      hold.dispatchEvent(new Event("change", { bubbles: true }));
+    // The payment section is a Bootstrap accordion (#pay-accordion) of
+    // payment-option panels (Invoice/Pay Now/Book Now Pay Later — the
+    // underlying radio VALUE strings are airline-specific, e.g. Enugu uses
+    // "BuyNowPayLater" while United/Rano use "NoPaymentRequered" for the
+    // same hold option — so match by the stable, airline-independent panel
+    // heading TEXT instead). The radio input itself is CSS-hidden
+    // (zero-size) with no wrapping <label> — confirmed live that the real,
+    // human-facing control is the ".panel-heading" above it, and clicking
+    // it (a genuine click, not the radio) reveals a REQUIRED
+    // "#txtAgentPassword" field that must be filled with the agent's own
+    // login password before the hold can actually be submitted. Skipping
+    // this (as an earlier version of this code did, via direct
+    // radio.checked + dispatchEvent) submitted with that field empty —
+    // functionally created a real PNR in one live test, but does not match
+    // the actual portal flow and risks breaking if that leniency is ever
+    // tightened server-side.
+    // The heading click TOGGLES the panel (Bootstrap accordion) — if
+    // "Book Now, Pay Later" already happens to be the default-expanded
+    // option (confirmed live it isn't always "Invoice" by default, unlike
+    // the one case this was first verified against), clicking it again
+    // would COLLAPSE it and hide the password field instead of revealing
+    // it. Only click if the field isn't already visible.
+    const passwordField = page.locator("#txtAgentPassword");
+    if (!(await passwordField.isVisible().catch(() => false))) {
+      await page
+        .locator(".panel-heading", { hasText: /book now,?\s*pay later/i })
+        .first()
+        .click();
+      await passwordField.waitFor({ state: "visible", timeout: 10000 });
+    }
+    await passwordField.fill(credentials.password);
+
+    // The heading click above only expands/collapses the accordion panel —
+    // confirmed live it does NOT also select the underlying radio (the
+    // submit call came back "ErrorMsg":"Select Form Of Payment" even with
+    // the panel expanded and password filled). Explicitly set the radio
+    // within that same panel, same direct-state-set approach as before
+    // (plain .click() doesn't reliably stick on this CSS-hidden control),
+    // but scoped to whichever radio lives inside the "Book Now, Pay Later"
+    // panel rather than a hardcoded value string — airline-specific values
+    // (Enugu: "BuyNowPayLater", United/Rano: "NoPaymentRequered") would
+    // otherwise need per-airline hardcoding here.
+    const radioSet = await page.evaluate(() => {
+      const heading = Array.from(document.querySelectorAll<HTMLElement>(".panel-heading")).find((el) =>
+        /book now,?\s*pay later/i.test(el.textContent ?? "")
+      );
+      const panel = heading?.closest(".panel");
+      const radio = panel?.querySelector<HTMLInputElement>('input[name="optpaymentformofpayment"]');
+      if (!radio) return false;
+      radio.checked = true;
+      radio.dispatchEvent(new Event("click", { bubbles: true }));
+      radio.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
     });
+    if (!radioSet) {
+      throw new Error('Could not find the "Book Now, Pay Later" payment radio to select');
+    }
 
     await page.evaluate(() => {
       const tnc = document.getElementById("chkAgreeTermsAndConditions") as HTMLInputElement | null;
@@ -216,14 +276,52 @@ export async function bookVarsPlatformOnHold(
     });
 
     // --- Submit the hold ---
+    // The submit click triggers a PaymentWS.asmx/ValidateBooking call that
+    // reports success/failure with a real (if sometimes generic) message —
+    // e.g. "Select Form Of Payment" caught a missing radio selection, and
+    // "Validation Failed<br/>Surname ... invalid" caught a bad passenger
+    // name during live testing. Surface that message on failure instead of
+    // only finding out 30s later that the confirmation page never showed.
     console.log(`[${logTag}] submitting hold`);
+    let validationError: string | null = null;
+    const validationListener = async (res: import("playwright").Response) => {
+      if (!/ValidateBooking/i.test(res.url())) return;
+      try {
+        const data = JSON.parse(await res.text());
+        const payload = data.d ?? data;
+        if (payload?.Result && payload.Result !== "OK") {
+          validationError = payload.ErrorMsg || payload.PassengerDetailsErrorMsg || payload.PaymentDetailsErrorMsg || "Unknown validation error";
+        }
+      } catch {
+        /* non-JSON or unexpected shape — let the confirmation-page wait below report the failure */
+      }
+    };
+    page.on("response", validationListener);
     await clickNext(page, "payment-details", logTag);
+    await page.waitForTimeout(2000);
+    page.off("response", validationListener);
+    if (validationError) {
+      throw new Error(`Booking validation failed: ${validationError}`);
+    }
 
     // Wait for the confirmation summary page to appear
     await page
       .locator("text=/PNR|Booking Reference|TTL Payment Instructions|Manage My Booking/i")
       .first()
-      .waitFor({ state: "visible", timeout: 30000 });
+      .waitFor({ state: "visible", timeout: 30000 })
+      .catch(async (err) => {
+        const diagnostic = await page.evaluate(() => ({
+          url: window.location.href,
+          visibleButtons: Array.from(
+            document.querySelectorAll<HTMLElement>('button, a, input[type="submit"], input[type="button"]')
+          )
+            .map((el) => (el.textContent ?? (el as HTMLInputElement).value ?? "").trim())
+            .filter(Boolean),
+          bodyText: document.body.innerText.replace(/\s+/g, " ").trim().slice(0, 1500),
+        }));
+        console.error(`[${logTag}] confirmation page never appeared. DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
+        throw err;
+      });
 
     // Click the final Confirm/Submit button to actually complete the booking —
     // not required: some flights land straight on Manage My Booking (PNR
