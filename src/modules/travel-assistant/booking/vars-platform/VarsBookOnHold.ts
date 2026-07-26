@@ -168,8 +168,19 @@ export async function bookVarsPlatformOnHold(
     const removeButtons = page.locator(".RemoveProductButton2");
     const removeCount = await removeButtons.count();
     for (let i = 0; i < removeCount; i++) {
+      // Confirmed via a real run (United Nigeria): a loading spinner
+      // ("#spinnerModal.in") can intercept the click here even though the
+      // button itself is visible/enabled — wait for it to clear both
+      // before and after, and don't let one failed removal (still
+      // best-effort — a leftover add-on isn't worth aborting the booking
+      // over) abort the loop.
+      await page.locator("#spinnerModal.in").waitFor({ state: "hidden", timeout: 10000 }).catch(() => {});
       // Always click index 0 — each removal re-renders the list and shifts indices.
-      await removeButtons.first().click();
+      await removeButtons
+        .first()
+        .click({ timeout: 10000 })
+        .catch((err) => console.warn(`[${logTag}] remove-product click ${i} failed, continuing: ${err}`));
+      await page.locator("#spinnerModal.in").waitFor({ state: "hidden", timeout: 10000 }).catch(() => {});
       await page.waitForTimeout(300);
     }
 
