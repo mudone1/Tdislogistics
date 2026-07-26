@@ -172,11 +172,21 @@ const BOOK_ON_HOLD_HANDLERS: Record<string, typeof bookEnuguAirOnHold> = {
 
 // Fare classband names are airline-specific and not guessable — using the
 // wrong airline's names could silently select an unintended (and more
-// expensive) fare. Only Enugu Air's have been confirmed against a real
-// booking; an airline with no entry here fails clearly before any
-// automation runs, rather than falling back to Enugu's names.
+// expensive) fare. An airline with no entry here fails clearly before any
+// automation runs, rather than falling back to another airline's names.
+//
+// UNITED confirmed via live DOM inspection of a real logged-in session
+// (2026-07-26): "Economy Promo" and "Economy Saver" both genuinely exist
+// as classband names on United Nigeria's fare page too — same white-label
+// VARS platform, apparently the same standard fare-tier naming. The
+// classband-panel *click mechanism* differs from Enugu's though (see
+// VarsBookOnHold.ts's selectCheapestFare) — that part is now handled, but
+// the actual final submission (payment -> PNR -> Manage My Booking
+// verification) has not yet been run end-to-end for United, only up to
+// and including the payment page's field/radio structure.
 const FARE_CLASS_PREFERENCE: Partial<Record<string, [string, string]>> = {
   ENUGU: ["Economy Promo", "Economy Saver"],
+  UNITED: ["Economy Promo", "Economy Saver"],
 };
 
 // Job-based Book-on-Hold. Unlike the old fire-and-forget version, the
