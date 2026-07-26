@@ -37,8 +37,17 @@ export interface BookOnHoldCredentials {
   password: string;
 }
 
+// Confirmed against Enugu Air's real passenger-title <select> options (the
+// selectOption({ label }) call below throws if the label doesn't exist on
+// that dropdown) — assumed, not yet independently verified, for the other
+// VARS airlines sharing this same engine. The caller must resolve any other
+// honorific (a supported-title check + gender-based fallback, or merging it
+// into the passenger's name) before calling in — see
+// ConversationOrchestrator.ts's passenger-title resolution.
+export const ENUGU_SUPPORTED_TITLES = ["Mr", "Mrs", "Ms", "Dr", "Miss", "Mstr", "Prof", "Rev"] as const;
+
 export interface BookOnHoldPassenger {
-  title: string; // "Mr" | "Mrs" | "Ms" | "Dr" | "Miss" | "Mstr" | "Prof" | "Rev"
+  title: string; // one of ENUGU_SUPPORTED_TITLES above
   firstName: string;
   lastName: string;
   mobileNumber: string; // local format, no leading 0 or country code — the +234 prefix is fixed on the form

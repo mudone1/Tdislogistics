@@ -75,6 +75,14 @@ export interface ConversationSlots {
   pendingReturnTimeOptions: string[] | null;
   selectedDepartureTime: string | null;
   selectedReturnTime: string | null;
+  // Set when the passenger's title couldn't be confidently resolved (no
+  // title given and the first name's gender is ambiguous/unisex/uncommon,
+  // or an unsupported honorific like "Chief"/"Honourable" was given and
+  // folded into firstName) — the assistant is waiting on the user to
+  // confirm title/gender before booking can proceed. firstName here is
+  // already the resolved value (with any unsupported honorific merged in);
+  // cleared once resolved into passengerTitle.
+  pendingTitleConfirmation: { firstName: string; lastName: string } | null;
 }
 
 export interface ChatEntities {
@@ -92,6 +100,12 @@ export interface ChatEntities {
   passengerLastName: string | null;
   passengerPhone: string | null;
   passengerEmail: string | null;
+  // Only meaningful when passengerTitle is null (no title/honorific was
+  // given at all) — the LLM's best guess at the passenger's gender from
+  // their first name, used to pick a title without asking. "unsure" (or
+  // null) means the name is ambiguous/unisex/uncommon enough that the
+  // assistant must ask rather than guess.
+  passengerGenderGuess: "male" | "female" | "unsure" | null;
 }
 
 export interface AssistantTurn {

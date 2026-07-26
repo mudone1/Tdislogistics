@@ -28,11 +28,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ reply: 'Send me a route and a date, e.g. "Enugu ABV-LOS today".' });
   }
 
-  // LLM-backed conversational path — used whenever GROQ_API_KEY is
+  // LLM-backed conversational path — used whenever OPENAI_API_KEY is
   // configured and the caller identifies its session. Falls through to the
   // original deterministic parser below otherwise, so nothing breaks for
   // callers that predate this or when the key isn't set.
-  if (process.env.GROQ_API_KEY && body.sessionKey) {
+  if (process.env.OPENAI_API_KEY && body.sessionKey) {
     try {
       const result = await handleAssistantMessage({
         sessionKey: body.sessionKey,

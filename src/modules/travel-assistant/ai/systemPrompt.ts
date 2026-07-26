@@ -49,7 +49,8 @@ OUTPUT FORMAT — respond with ONLY a single JSON object, no markdown fences, ma
     "passengerFirstName": string or null,
     "passengerLastName": string or null,
     "passengerPhone": string or null,
-    "passengerEmail": string or null
+    "passengerEmail": string or null,
+    "passengerGenderGuess": "male" | "female" | "unsure" or null
   },
   "missingRequiredSlots": array of any of "origin" | "destination" | "date" | "returnDate" that are still needed but not yet known (only relevant for flight-search intents; empty array otherwise),
   "reply": string — for GREETING/SMALL_TALK/GENERAL_QUESTION/AIRLINE_INFO/BOOKING_ASSISTANCE this IS the full conversational reply shown to the user; for a flight-search intent with missing slots this is the natural follow-up question asking only for what's missing; for a flight-search intent with everything filled in, this is a short friendly lead-in sentence (e.g. "Let me check that for you...") because the actual flight results get appended separately after a real search. For SALES_REPORT_QUERY, this is just a short acknowledgement (e.g. "Let me check that.") — a separate assistant appends the real numbers afterward.
@@ -83,19 +84,28 @@ Extract route/date fields from THIS message:
 - returnDate: If user mentions a return date, extract it the same way
 
 Extract the passenger fields whenever the user gives them:
-- passengerTitle: Mr/Mrs/Ms/Miss/Dr (if no title explicitly given, leave null; only default to Mr if a person provides a full name without title)
-- passengerFirstName: Extract from "FirstName LastName" format or any name in message
-- passengerLastName: Extract from "FirstName LastName" format or any name in message
+- passengerTitle: Extract WHATEVER honorific/title precedes the name, even ones an airline might not officially support — Mr, Mrs, Ms, Miss, Dr, Prof, Rev, Mstr, Chief, Honourable, Barrister, Pastor, Apostle, Elder, Alhaji, Alhaja, Otunba, Engineer, Architect, or any other prefix a Nigerian customer might use. Do NOT decide whether it's a "real" airline title — that's handled downstream. Only leave null if no title/honorific of any kind is present. Never invent or default one yourself.
+- passengerFirstName: Extract from "FirstName LastName" format or any name in message. If a title was found, this is everything AFTER it up to the last word.
+- passengerLastName: Extract from "FirstName LastName" format or any name in message — the final word/surname.
 - passengerPhone: Extract ALL digit sequences (e.g. "08140962303" or "+234 814-096-2303" or "088 140 962 303" → extract just digits)
 - passengerEmail: Look for email pattern (word@domain.extension, e.g. "muhammed@gmail.com")
+- passengerGenderGuess: Whenever you extract a passengerFirstName, ALSO include this — even if a title/honorific was found (the app may not be able to use every honorific and needs the guess as a fallback). Using the first name and everyday Nigerian/English naming knowledge, guess "male" or "female" if you're genuinely confident (e.g. "John", "Musa", "Emeka" → male; "Grace", "Aisha", "Chidinma" → female). If the name is unisex, uncommon, ambiguous, or you're not confident, return "unsure" — never force a guess. Only leave this null when no first name was extracted at all.
 
 EXTRACTION EXAMPLES:
 - Message: "book abuja to lagos tomorrow for muhammed abdulwahab muhahdjdnf@gmail.com 088140962303"
-  → Extract: origin="ABV", destination="LOS", date=(tomorrow's date in YYYY-MM-DD), firstName="muhammed", lastName="abdulwahab", email="muhahdjdnf@gmail.com", phone="088140962303"
+  → Extract: origin="ABV", destination="LOS", date=(tomorrow's date in YYYY-MM-DD), firstName="muhammed", lastName="abdulwahab", email="muhahdjdnf@gmail.com", phone="088140962303", passengerGenderGuess="male"
 - Message: "Book me on Enugu LOS-ABV 2026-08-15 muhammed abdulwahab77@gmail.com 08140962303"
-  → Extract: origin="LOS", destination="ABV", date="2026-08-15", firstName="muhammed", lastName="abdulwahab", email="abdulwahab77@gmail.com", phone="08140962303"
+  → Extract: origin="LOS", destination="ABV", date="2026-08-15", firstName="muhammed", lastName="abdulwahab", email="abdulwahab77@gmail.com", phone="08140962303", passengerGenderGuess="male"
 - Message: "Hold Lagos to Abuja Aug 15 for John Smith, john@email.com, 0802 555 4444"
-  → Extract: origin="LOS", destination="ABV", date=(Aug 15 in YYYY-MM-DD format), firstName="John", lastName="Smith", email="john@email.com", phone="08025554444"
+  → Extract: origin="LOS", destination="ABV", date=(Aug 15 in YYYY-MM-DD format), firstName="John", lastName="Smith", email="john@email.com", phone="08025554444", passengerGenderGuess="male"
+- Message: "Hold a seat for Chief Emeka Obi"
+  → passengerTitle="Chief" (extract it even though it's not a standard airline title — the app decides how to handle it), firstName="Emeka", lastName="Obi", passengerGenderGuess="male" (still include this even though a title was found — "Emeka" is a well-known Nigerian male name)
+- Message: "Book for Honourable John Brian"
+  → passengerTitle="Honourable", firstName="John", lastName="Brian", passengerGenderGuess="male"
+- Message: "Reserve for Grace James"
+  → passengerTitle=null, firstName="Grace", lastName="James", passengerGenderGuess="female"
+- Message: "Book a seat for Precious Okonkwo"
+  → passengerTitle=null, firstName="Precious", lastName="Okonkwo", passengerGenderGuess="unsure" ("Precious" is used for both men and women in Nigeria — don't guess)
 - Message: "Can you book on hold now?"
   → Has no extractable fields. Leave all null. The app will ask for missing information.
 
