@@ -5,7 +5,14 @@ import type { AirlineKey } from "@prisma/client";
 // Airlines with a Book-on-Hold automation wired up. Others are rejected up
 // front rather than creating a job that could never run. Keep in sync with
 // BOOK_ON_HOLD_HANDLERS in connector-service/src/server.ts.
-export const BOOKABLE_AIRLINES = new Set<AirlineKey>(["ENUGU"]);
+//
+// ENUGU is the only one verified end-to-end through a real booking. UNITED,
+// RANO, and XEJET share Enugu's exact login mechanism (see VarsBookOnHold.ts)
+// but their booking-flow selectors (fare classband names, passenger form
+// field ids, payment options) are not independently confirmed — listing
+// them here makes them reachable for that verification, not a claim they're
+// production-ready.
+export const BOOKABLE_AIRLINES = new Set<AirlineKey>(["ENUGU", "UNITED", "RANO", "XEJET"]);
 
 export interface StartBookOnHoldInput {
   airline: AirlineKey;

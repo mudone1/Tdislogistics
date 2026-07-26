@@ -11,6 +11,9 @@ import { searchUnitedNigeriaFlights } from "../../src/modules/travel-assistant/s
 import { searchXeJetFlights } from "../../src/modules/travel-assistant/search/xejet/XeJetSearch";
 import { searchRanoAirFlights } from "../../src/modules/travel-assistant/search/rano/RanoAirSearch";
 import { bookEnuguAirOnHold } from "../../src/modules/travel-assistant/booking/enugu/EnuguBookOnHold";
+import { bookUnitedNigeriaOnHold } from "../../src/modules/travel-assistant/booking/united/UnitedBookOnHold";
+import { bookRanoAirOnHold } from "../../src/modules/travel-assistant/booking/rano/RanoBookOnHold";
+import { bookXeJetOnHold } from "../../src/modules/travel-assistant/booking/xejet/XeJetBookOnHold";
 import { BookingJobRepository } from "../../src/modules/travel-assistant/storage/BookingJobRepository";
 import { categorizeBookingError } from "../../src/modules/travel-assistant/booking/categorizeBookingError";
 import { decryptSecret } from "../../src/modules/airline-connectors/services/CredentialService";
@@ -162,6 +165,18 @@ app.post("/internal/travel-assistant/search", async (req, res) => {
 
 const BOOK_ON_HOLD_HANDLERS: Record<string, typeof bookEnuguAirOnHold> = {
   ENUGU: bookEnuguAirOnHold,
+  UNITED: bookUnitedNigeriaOnHold,
+  RANO: bookRanoAirOnHold,
+  XEJET: bookXeJetOnHold,
+};
+
+// Fare classband names are airline-specific and not guessable — using the
+// wrong airline's names could silently select an unintended (and more
+// expensive) fare. Only Enugu Air's have been confirmed against a real
+// booking; an airline with no entry here fails clearly before any
+// automation runs, rather than falling back to Enugu's names.
+const FARE_CLASS_PREFERENCE: Partial<Record<string, [string, string]>> = {
+  ENUGU: ["Economy Promo", "Economy Saver"],
 };
 
 // Job-based Book-on-Hold. Unlike the old fire-and-forget version, the
@@ -198,6 +213,14 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
   if (!handler) {
     await BookingJobRepository.markFailed(jobId, "UNKNOWN", `"${airline}" has no book-on-hold automation implemented`, 0);
     res.status(404).json({ error: `"${airline}" has no book-on-hold automation implemented` });
+    return;
+  }
+
+  const fareClassPreference = FARE_CLASS_PREFERENCE[airline];
+  if (!fareClassPreference) {
+    const message = `"${airline}" has no verified fare classband names configured — refusing to guess and risk selecting the wrong fare`;
+    await BookingJobRepository.markFailed(jobId, "UNKNOWN", message, 0);
+    res.status(422).json({ error: message });
     return;
   }
 
@@ -246,9 +269,7 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
     destination: job.destination,
     departureDate: job.departureDate,
     returnDate: job.returnDate ?? undefined,
-    // Not stored on the job — same two bands the old endpoint defaulted to;
-    // the automation picks whichever is cheaper per leg.
-    fareClassPreference: ["Economy Promo", "Economy Saver"],
+    fareClassPreference,
     passenger: {
       title: job.title,
       firstName: job.firstName,
