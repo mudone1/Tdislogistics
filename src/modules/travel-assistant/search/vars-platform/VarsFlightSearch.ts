@@ -194,21 +194,78 @@ async function navigateToDate(page: Page, targetDateISO: string, logTag: string)
     const tab = page.locator(`a.dayTab[data-newday="${targetLabel}"]`);
     if ((await tab.count().catch(() => 0)) > 0) {
       console.log(`[${logTag}] found date tab for ${targetLabel}, selecting`);
+      // Same async-postback lag as the forward-page control below, and
+      // confirmed live to be genuinely slow here (12s+ in one observed
+      // run) — a fixed 800ms sleep, and even an 8s wait for the tab's
+      // "tab-active" class, both returned before the flight listing
+      // itself had actually re-rendered, so extraction silently read the
+      // PREVIOUS date's flights. Snapshot the current panel content
+      // first, click, then wait for that content to genuinely change
+      // rather than trusting any fixed timeout or a class flag that
+      // doesn't reliably track the real re-render.
+      const beforeContent = await page.locator(".flt-panel").first().textContent().catch(() => null);
       await tab.first().evaluate((el) => (el as HTMLElement).click());
-      await page.waitForTimeout(800);
+      const changed = await page
+        .waitForFunction(
+          (prev) => document.querySelector(".flt-panel")?.textContent !== prev,
+          beforeContent,
+          { timeout: 15000 }
+        )
+        .then(() => true)
+        .catch(() => false);
+      if (!changed) {
+        throw new Error(
+          `Clicked date tab "${targetLabel}" but the flight listing never updated within 15s — would have silently booked/searched the wrong date`
+        );
+      }
       return;
     }
 
     console.log(`[${logTag}] "${targetLabel}" not visible yet, paging forward (attempt ${i + 1})`);
     const forwardArrow = page.locator("button.dayForward:not(.hidden-lg)").first();
-    if ((await forwardArrow.count().catch(() => 0)) === 0) break;
+    if ((await forwardArrow.count().catch(() => 0)) === 0) {
+      throw new Error(
+        `No forward control left to reach "${targetLabel}" — this airline's schedule may not extend that far out`
+      );
+    }
+
+    // Confirmed via a real run (United Nigeria): this control debounces or
+    // cancels its own in-flight update if clicked again before the
+    // previous click's async postback actually finishes — three rapid
+    // clicks on a fixed 800ms sleep each landed mid-flight and produced NO
+    // visible change in the tab strip at all, then a fourth click (given
+    // time to settle) suddenly revealed several additional days at once.
+    // Wait for the currently-last tab's date to actually change before
+    // treating this click as done, instead of trusting a fixed sleep —
+    // that mismatch was silently burning through attempts without ever
+    // registering real progress, and in one observed case exhausted all
+    // 60 without ever reaching the target date.
+    const lastTabBefore = await page.locator("a.dayTab").last().getAttribute("data-newday").catch(() => null);
     await forwardArrow.evaluate((el) => (el as HTMLElement).click());
-    await page.waitForTimeout(800);
+    await page
+      .waitForFunction(
+        (prev) => {
+          const tabs = document.querySelectorAll("a.dayTab");
+          const last = tabs[tabs.length - 1];
+          return !!last && last.getAttribute("data-newday") !== prev;
+        },
+        lastTabBefore,
+        { timeout: 5000 }
+      )
+      .catch(() => {
+        /* no visible change within 5s on this attempt — fine, the next
+           loop iteration re-checks from scratch and may just need another
+           click (or may finally land on one already in flight) */
+      });
   }
 
-  console.log(
-    `[${logTag}] gave up looking for "${targetLabel}" after ${MAX_DAY_FORWARD_CLICKS} page attempts - using whatever date is currently selected`
-  );
+  // Reaching here after the fix above is genuinely abnormal (a real page
+  // change, or a route with no schedule that far out) — silently
+  // returning flight options for whatever date happened to be selected
+  // instead would mean a caller (chat search, and now the booking
+  // disambiguation flow that feeds a real booking) could act on the wrong
+  // date without ever being told. Fail loud instead.
+  throw new Error(`Could not find date tab "${targetLabel}" after ${MAX_DAY_FORWARD_CLICKS} forward-page attempts`);
 }
 
 function toDayTabLabel(dateISO: string): string {
