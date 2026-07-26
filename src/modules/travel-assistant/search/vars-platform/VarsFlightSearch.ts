@@ -13,6 +13,24 @@ import type { FareClassOption, FlightOption, FlightSearchQuery, FlightSearchResu
 // if a date is unreachable (e.g. no schedule that far out).
 const MAX_DAY_FORWARD_CLICKS = 60;
 
+// Backstop against the caller (a Vercel function with a 60s hard ceiling —
+// confirmed live via a production 504 with "Task timed out after 60
+// seconds" on /api/assistant/quote) getting killed with zero response. Each
+// forward-page attempt can legitimately wait up to 5s for its debounced
+// postback (see below) — 60 attempts x 5s would be 300s worst case, so
+// MAX_DAY_FORWARD_CLICKS alone doesn't bound wall-clock time. This deadline
+// does: it comfortably covers the observed happy path (a real date 5 days
+// out resolved in one ~5-12s forward-page attempt) while guaranteeing this
+// function fails fast, well inside the 60s budget, for a date genuinely
+// beyond an airline's published schedule.
+// Left as headroom below 60s: the forward-paging phase this deadline bounds
+// is followed by up to 3 target-tab click attempts (12s + 6s + 6s = 24s
+// worst case — see navigateToDate), plus ~11-13s of surrounding
+// form-fill/submit/extraction overhead (measured live) — 15s + 24s + 13s ≈
+// 52s, leaving real margin under the 60s ceiling for network jitter and
+// connector-service cold starts.
+const DATE_NAVIGATION_DEADLINE_MS = 15000;
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // Resource types that never affect the booking data we scrape — blocking
@@ -189,8 +207,14 @@ export async function searchVarsPlatformFlights(
 
 async function navigateToDate(page: Page, targetDateISO: string, logTag: string): Promise<void> {
   const targetLabel = toDayTabLabel(targetDateISO);
+  const deadline = Date.now() + DATE_NAVIGATION_DEADLINE_MS;
 
   for (let i = 0; i < MAX_DAY_FORWARD_CLICKS; i++) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Gave up navigating to date tab "${targetLabel}" after ${DATE_NAVIGATION_DEADLINE_MS}ms (${i} forward-page attempts) — bailing out early to stay inside the caller's function timeout`
+      );
+    }
     const tab = page.locator(`a.dayTab[data-newday="${targetLabel}"]`);
     if ((await tab.count().catch(() => 0)) > 0) {
       console.log(`[${logTag}] found date tab for ${targetLabel}, selecting`);
@@ -199,23 +223,45 @@ async function navigateToDate(page: Page, targetDateISO: string, logTag: string)
       // run) — a fixed 800ms sleep, and even an 8s wait for the tab's
       // "tab-active" class, both returned before the flight listing
       // itself had actually re-rendered, so extraction silently read the
-      // PREVIOUS date's flights. Snapshot the current panel content
-      // first, click, then wait for that content to genuinely change
-      // rather than trusting any fixed timeout or a class flag that
-      // doesn't reliably track the real re-render.
-      const beforeContent = await page.locator(".flt-panel").first().textContent().catch(() => null);
-      await tab.first().evaluate((el) => (el as HTMLElement).click());
-      const changed = await page
-        .waitForFunction(
-          (prev) => document.querySelector(".flt-panel")?.textContent !== prev,
-          beforeContent,
-          { timeout: 15000 }
-        )
-        .then(() => true)
-        .catch(() => false);
-      if (!changed) {
+      // PREVIOUS date's flights.
+      //
+      // A plain "did the content change at all" check (an earlier version
+      // of this fix) is NOT sufficient — confirmed live and reproduced
+      // twice against Enugu Air: the panel's content can visibly change
+      // (satisfying a diff check) while still displaying the PREVIOUS
+      // date's flights, because an earlier in-flight postback for the old
+      // date can resolve and overwrite the DOM after the new request
+      // started, clobbering it back to stale-but-different content. Wait
+      // instead for the panel to contain the target day/month text itself
+      // (e.g. "31 Jul", matching the format flight rows actually render —
+      // see extractFlightOptions' parseResultRow), and scope to the same
+      // ".tab-pane.active .flt-panel" the rest of this module reads from,
+      // not an unscoped ".flt-panel" that could match a different tab's
+      // (possibly hidden, never-updating) panel.
+      // A stale in-flight postback can clobber the DOM right after landing,
+      // right back to the previous date's content — confirmed live
+      // (reproduced 3x against Enugu Air) that a single click-and-wait can
+      // still end up showing the previous date even with the content-match
+      // check above. Re-click up to twice more if that happens; each retry
+      // gets a shorter window since it's recovering from a known bad state
+      // rather than waiting out a first-time postback.
+      const dayMonth = targetLabel.replace(/\s+\d{4}$/, ""); // "31 Jul 2026" -> "31 Jul"
+      let landed = false;
+      for (let attempt = 0; attempt < 3 && !landed; attempt++) {
+        await tab.first().evaluate((el) => (el as HTMLElement).click());
+        landed = await page
+          .waitForFunction(
+            (needle) => (document.querySelector(".tab-pane.active .flt-panel")?.textContent ?? "").includes(needle),
+            dayMonth,
+            { timeout: attempt === 0 ? 12000 : 6000 }
+          )
+          .then(() => true)
+          .catch(() => false);
+        if (!landed) console.log(`[${logTag}] tab "${targetLabel}" didn't stick (attempt ${attempt + 1}/3), retrying`);
+      }
+      if (!landed) {
         throw new Error(
-          `Clicked date tab "${targetLabel}" but the flight listing never updated within 15s — would have silently booked/searched the wrong date`
+          `Clicked date tab "${targetLabel}" 3x but the flight listing never showed "${dayMonth}" — would have silently booked/searched the wrong date`
         );
       }
       return;
