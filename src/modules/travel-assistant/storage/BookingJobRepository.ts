@@ -20,6 +20,8 @@ export interface CreateBookingJobInput {
   lastName: string;
   phone?: string | null;
   email?: string | null;
+  preferredDepartureTime?: string | null;
+  preferredReturnTime?: string | null;
   createdBy?: string | null;
 }
 
@@ -58,6 +60,8 @@ export const BookingJobRepository = {
         lastName: input.lastName,
         phone: input.phone ?? null,
         email: input.email ?? null,
+        preferredDepartureTime: input.preferredDepartureTime ?? null,
+        preferredReturnTime: input.preferredReturnTime ?? null,
         createdBy: input.createdBy ?? null,
       },
     });

@@ -50,6 +50,10 @@ const EMPTY_SLOTS: ConversationSlots = {
   passengerLastName: null,
   passengerPhone: null,
   passengerEmail: null,
+  pendingDepartureTimeOptions: null,
+  pendingReturnTimeOptions: null,
+  selectedDepartureTime: null,
+  selectedReturnTime: null,
 };
 
 const REQUIRED_SEARCH_SLOTS = ["origin", "destination", "date"] as const;
@@ -494,6 +498,84 @@ function resetBookingSlots(slots: ConversationSlots): void {
   slots.passengerLastName = null;
   slots.passengerPhone = null;
   slots.passengerEmail = null;
+  slots.pendingDepartureTimeOptions = null;
+  slots.pendingReturnTimeOptions = null;
+  slots.selectedDepartureTime = null;
+  slots.selectedReturnTime = null;
+}
+
+// Matches a free-text reply against a list of candidate departure times
+// (e.g. "08:45"). Tries, in order: an exact/substring time match after
+// stripping non-digit noise (so "8:45am", "the 08:45 one" both match
+// "08:45"), then an ordinal/position word ("first", "second", "1", "2").
+// Returns null if nothing in the message plausibly picks one option.
+function matchTimeSelection(message: string, options: string[]): string | null {
+  const normalized = (s: string) => s.replace(/[^\d:]/g, "");
+  const msgNormalized = normalized(message);
+  const byTime = options.find((opt) => msgNormalized.includes(normalized(opt)));
+  if (byTime) return byTime;
+
+  const ordinalWords = ["first", "second", "third", "fourth", "fifth", "sixth"];
+  const lower = message.toLowerCase();
+  for (let i = 0; i < options.length; i++) {
+    if (lower.includes(ordinalWords[i]) || lower.includes(`${i + 1}${i === 0 ? "st" : i === 1 ? "nd" : i === 2 ? "rd" : "th"}`)) {
+      return options[i];
+    }
+    // Bare digit only when unambiguous — a lone "1"/"2" etc. surrounded by
+    // word boundaries, not part of a longer number (which would more likely
+    // be a mistyped time).
+    if (new RegExp(`(?<!\\d)${i + 1}(?!\\d)`).test(message) && options.length <= 9) {
+      return options[i];
+    }
+  }
+  return null;
+}
+
+interface LegFlightChoiceOutcome {
+  // Non-null when the caller should respond with this instead of
+  // proceeding — either an error/no-flights message, or an ambiguity
+  // question (pendingOptions will be set in that case).
+  reply: string | null;
+  pendingOptions: string[] | null;
+  // The resolved departure time when exactly one flight was found. Also
+  // legitimately null (with reply also null) when the disambiguation
+  // search itself failed — see the comment at the call site for why that
+  // proceeds rather than blocks.
+  time: string | null;
+}
+
+// Turns a leg's flight-count into the right outcome: exactly one flight ->
+// use it silently, zero -> tell the user, more than one -> ask which. A
+// search failure returns "nothing to ask, nothing resolved" rather than
+// blocking the booking on a check that itself errored.
+function resolveLegFlightChoice(
+  search: FlightSearchResult & { error?: string },
+  leg: "outbound" | "return"
+): LegFlightChoiceOutcome {
+  if (search.error) {
+    console.warn(`[travel-assistant] ${leg} disambiguation search failed, proceeding without a preferred time: ${search.error}`);
+    return { reply: null, pendingOptions: null, time: null };
+  }
+
+  const times = search.options.map((o) => o.departureTime).filter((t): t is string => !!t);
+  if (times.length === 0) {
+    const legNote = leg === "return" ? " for the return leg" : "";
+    return {
+      reply: `I couldn't find any Enugu Air flights${legNote} for that route and date. Want to try a different date?`,
+      pendingOptions: null,
+      time: null,
+    };
+  }
+  if (times.length === 1) {
+    return { reply: null, pendingOptions: null, time: times[0] };
+  }
+
+  const legNote = leg === "return" ? "the return leg" : "your journey";
+  return {
+    reply: `I found multiple flights for ${legNote}.\nAvailable departure times are:\n${times.map((t) => `• ${t}`).join("\n")}\nWhich departure time would you prefer?`,
+    pendingOptions: times,
+    time: null,
+  };
 }
 
 // Drives the Book-on-Hold conversation: gather route + passenger details over
@@ -517,6 +599,34 @@ async function handleBookOnHold(
     return { reply };
   }
 
+  // If a previous turn asked which departure time the user wants, this
+  // message is most likely answering that — try to resolve it before
+  // falling through to the general gap-collection below (departure time
+  // isn't one of collectBookingGaps' fields, so that check alone would
+  // never notice we're still waiting on an answer here).
+  if (slots.pendingDepartureTimeOptions && !slots.selectedDepartureTime) {
+    const matched = matchTimeSelection(rawMessage, slots.pendingDepartureTimeOptions);
+    if (!matched) {
+      const reply = `I didn't catch which one — available departure times are:\n${slots.pendingDepartureTimeOptions.map((t) => `• ${t}`).join("\n")}\nWhich would you like?`;
+      await ChatMemoryRepository.updateSlots(sessionId, slots);
+      await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+      return { reply };
+    }
+    slots.selectedDepartureTime = matched;
+    slots.pendingDepartureTimeOptions = null;
+  }
+  if (slots.isRoundTrip && slots.pendingReturnTimeOptions && !slots.selectedReturnTime) {
+    const matched = matchTimeSelection(rawMessage, slots.pendingReturnTimeOptions);
+    if (!matched) {
+      const reply = `And for the return leg — available departure times are:\n${slots.pendingReturnTimeOptions.map((t) => `• ${t}`).join("\n")}\nWhich would you like?`;
+      await ChatMemoryRepository.updateSlots(sessionId, slots);
+      await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+      return { reply };
+    }
+    slots.selectedReturnTime = matched;
+    slots.pendingReturnTimeOptions = null;
+  }
+
   const gaps = collectBookingGaps(slots);
   if (gaps.length > 0) {
     const reply = buildBookingClarifyingQuestion(gaps);
@@ -529,6 +639,40 @@ async function handleBookOnHold(
     const reply = "The booking service isn't configured yet — ask an admin to check CONNECTOR_SERVICE_URL.";
     await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
     return { reply };
+  }
+
+  // Every route/date/passenger slot is filled, but we don't yet know which
+  // specific flight to book on each leg — check before triggering the
+  // multi-minute automation, rather than letting it silently pick whatever
+  // panel happens to be first. Uses the same public search connector-service
+  // already exposes for regular flight-search chat queries (callSearch,
+  // below) — no separate mechanism needed for this.
+  if (!slots.selectedDepartureTime) {
+    const outbound = await callSearch("ENUGU", slots.origin!, slots.destination!, slots.date!);
+    const outcome = resolveLegFlightChoice(outbound, "outbound");
+    if (outcome.reply) {
+      if (outcome.pendingOptions) slots.pendingDepartureTimeOptions = outcome.pendingOptions;
+      else resetBookingSlots(slots);
+      await ChatMemoryRepository.updateSlots(sessionId, slots);
+      await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", outcome.reply);
+      return { reply: outcome.reply };
+    }
+    // outcome.time is null either when exactly one flight was found (use
+    // it) or when the disambiguation search itself failed (proceed without
+    // a preference rather than blocking the booking on a check that erred).
+    if (outcome.time) slots.selectedDepartureTime = outcome.time;
+  }
+  if (slots.isRoundTrip && !slots.selectedReturnTime) {
+    const inbound = await callSearch("ENUGU", slots.destination!, slots.origin!, slots.returnDate!);
+    const outcome = resolveLegFlightChoice(inbound, "return");
+    if (outcome.reply) {
+      if (outcome.pendingOptions) slots.pendingReturnTimeOptions = outcome.pendingOptions;
+      else resetBookingSlots(slots);
+      await ChatMemoryRepository.updateSlots(sessionId, slots);
+      await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", outcome.reply);
+      return { reply: outcome.reply };
+    }
+    if (outcome.time) slots.selectedReturnTime = outcome.time;
   }
 
   const paxName = [slots.passengerTitle, slots.passengerFirstName, slots.passengerLastName]
@@ -550,6 +694,8 @@ async function handleBookOnHold(
     lastName: slots.passengerLastName!,
     phone: normalizePhone(slots.passengerPhone!)!, // validated non-null by collectBookingGaps
     email: slots.passengerEmail!,
+    preferredDepartureTime: slots.selectedDepartureTime,
+    preferredReturnTime: slots.selectedReturnTime,
     createdBy: sessionKey,
   });
 
