@@ -367,32 +367,44 @@ async function selectCheapestFare(
     throw new Error(`Neither of ${fareClasses.join(", ")} is available on leg ${legIndex}`);
   }
 
-  // Confirmed via a real run: "Select this fare" is a custom toggle span
-  // (sibling "Selected"/radio-icon spans swap visibility via a "hidden"
-  // class) with a zero-size layout box of its own — same underlying
-  // pattern as the Return/OneWay and payment-method controls elsewhere in
-  // this flow. Playwright's real-mouse-click actionability check fails on
-  // it, but the click handler is bound above the text node, so dispatching
-  // the event directly via JS works reliably (same fix already proven for
-  // those other two controls).
+  // Two confirmed-different selection mechanisms across VARS deployments:
+  // Enugu Air uses a "Select this fare" custom toggle span (sibling
+  // "Selected"/radio-icon spans swap visibility via a "hidden" class) with
+  // a zero-size layout box of its own — Playwright's real-mouse-click
+  // actionability check fails on it, but the click handler is bound above
+  // the text node, so dispatching the event directly via JS works
+  // reliably. United Nigeria's deployment has no such inner element at
+  // all (confirmed via live DOM inspection) — there, the classband-panel
+  // itself is the click target (it's tabindex="0", i.e. built to be
+  // focusable/clickable as a whole unit), gaining a "panel-active" class
+  // on click. Try Enugu's mechanism first since it's the one proven
+  // through an actual completed booking; fall back to United's.
   const clicked = await panel.evaluate((panelEl, band) => {
     const card = panelEl.querySelector<HTMLElement>(`[data-classband="${band}"]`);
-    const selectEl = card?.querySelector<HTMLElement>(".flight-class-select-fare-text");
-    if (!selectEl) return false;
-    selectEl.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    if (!card) return false;
+    const selectEl = card.querySelector<HTMLElement>(".flight-class-select-fare-text");
+    if (selectEl) {
+      selectEl.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      return true;
+    }
+    card.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     return true;
   }, cheaperBand);
 
   if (!clicked) {
-    throw new Error(`"${cheaperBand}" fare card found but its select element is missing on leg ${legIndex}`);
+    throw new Error(`"${cheaperBand}" fare card not found on leg ${legIndex}`);
   }
 
-  await panel
-    .locator(`[data-classband="${cheaperBand}"] .flight-class-selected-text`)
-    .waitFor({ state: "visible", timeout: 8000 })
-    .catch(() => {
-      /* best-effort confirmation — some deployments may not toggle this class */
-    });
+  // Best-effort confirmation — whichever signal this deployment actually
+  // uses (Enugu's toggled span, or United's "panel-active" class on the
+  // card itself). Non-blocking either way: a deployment using neither just
+  // times out and proceeds, same as before.
+  await Promise.race([
+    panel.locator(`[data-classband="${cheaperBand}"] .flight-class-selected-text`).waitFor({ state: "visible", timeout: 8000 }),
+    panel.locator(`[data-classband="${cheaperBand}"].panel-active`).waitFor({ state: "attached", timeout: 8000 }),
+  ]).catch(() => {
+    /* best-effort confirmation — some deployments may not signal selection this way */
+  });
 }
 
 async function clickNext(
