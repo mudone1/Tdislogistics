@@ -10,6 +10,10 @@ node_modules/
 # production
 /build
 connector-service/dist/
+whatsapp-service/dist/
+
+# WhatsApp session credentials — treat like a secret, never commit
+whatsapp-service/auth_info/
 
 # env
 .env*.local
