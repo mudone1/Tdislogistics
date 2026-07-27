@@ -292,6 +292,9 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
       mobileNumber: job.phone ?? "",
       email: job.email ?? "",
     },
+    additionalPassengers: Array.isArray(job.additionalPassengers)
+      ? (job.additionalPassengers as { title: string; firstName: string; lastName: string }[])
+      : undefined,
   })
     .then(async (result) => {
       const durationMs = Date.now() - startedAt;

@@ -20,6 +20,10 @@ export interface CreateBookingJobInput {
   lastName: string;
   phone?: string | null;
   email?: string | null;
+  // Passengers beyond the lead one above, same PNR, sharing the lead
+  // passenger's phone/email (see the Prisma column comment). Omit for a
+  // single-passenger hold.
+  additionalPassengers?: { title: string; firstName: string; lastName: string }[];
   preferredDepartureTime?: string | null;
   preferredReturnTime?: string | null;
   createdBy?: string | null;
@@ -60,6 +64,7 @@ export const BookingJobRepository = {
         lastName: input.lastName,
         phone: input.phone ?? null,
         email: input.email ?? null,
+        additionalPassengers: input.additionalPassengers?.length ? input.additionalPassengers : undefined,
         preferredDepartureTime: input.preferredDepartureTime ?? null,
         preferredReturnTime: input.preferredReturnTime ?? null,
         createdBy: input.createdBy ?? null,

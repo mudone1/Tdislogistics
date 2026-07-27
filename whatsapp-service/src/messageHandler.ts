@@ -45,6 +45,21 @@ function mentionsBot(text: string): boolean {
   return buildTriggerPattern().test(text);
 }
 
+// Cheap, deterministic pre-check for "this looks like a booking request" —
+// mirrors the same booking-verb + passenger-detail co-occurrence rule
+// systemPrompt.ts's BOOK_ON_HOLD classifier uses server-side, but runs here
+// client-side so a "Copy" acknowledgement can go out THE INSTANT the
+// message arrives, before the real (LLM-backed) assistant call — which can
+// take many seconds — even starts. Never blocks anything: a false positive
+// just means an extra "Copy" ahead of what turns out to be a flight search.
+const BOOKING_VERB_PATTERN = /\b(book|hold|reserve)\b/i;
+const EMAIL_PATTERN = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+const PHONE_PATTERN = /\+?[\d][\d\s-]{8,17}\d/;
+
+function looksLikeBookingRequest(text: string): boolean {
+  return BOOKING_VERB_PATTERN.test(text) && (EMAIL_PATTERN.test(text) || PHONE_PATTERN.test(text));
+}
+
 // Decides whether to respond at all, and if so, forwards the (trigger-
 // stripped) message to the same assistant the browser chat uses, replies
 // in the same WhatsApp chat, and — if a Book-on-Hold was started — kicks
@@ -62,6 +77,13 @@ export async function handleIncomingMessage(msg: IncomingMessage, sender: Messag
 
   const sessionKey = `whatsapp:${msg.chatId}`;
   const reply = async (text: string) => sender.sendText(msg.chatId, text);
+
+  // Immediate acknowledgement — sent right away, before any real processing,
+  // so a booking request never sits in silence waiting on the assistant
+  // call. The typing indicator below then covers the rest of the wait.
+  if (looksLikeBookingRequest(message)) {
+    await reply("Copy").catch((err) => console.error(`[whatsapp] ack send failed for chat ${msg.chatId}:`, err));
+  }
 
   // "Typing…" from the moment we start working on a reply until it's
   // actually sent — covers both the initial assistant call (a flight

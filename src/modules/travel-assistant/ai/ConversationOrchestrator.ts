@@ -63,6 +63,8 @@ const EMPTY_SLOTS: ConversationSlots = {
   selectedDepartureTime: null,
   selectedReturnTime: null,
   pendingTitleConfirmation: null,
+  additionalPassengers: null,
+  pendingAdditionalTitleConfirmations: null,
 };
 
 const REQUIRED_SEARCH_SLOTS = ["origin", "destination", "date"] as const;
@@ -414,6 +416,7 @@ async function runIntentDetection(
       passengerPhone: parsed.entities?.passengerPhone ?? null,
       passengerEmail: parsed.entities?.passengerEmail ?? null,
       passengerGenderGuess: parsed.entities?.passengerGenderGuess ?? null,
+      additionalPassengers: parsed.entities?.additionalPassengers ?? null,
     },
     missingRequiredSlots: parsed.missingRequiredSlots ?? [],
     reply: parsed.reply ?? "Sorry, could you rephrase that?",
@@ -451,6 +454,40 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   if (e.passengerLastName?.trim()) slots.passengerLastName = e.passengerLastName.trim();
   if (e.passengerPhone?.trim()) slots.passengerPhone = e.passengerPhone.trim();
   if (e.passengerEmail?.trim()) slots.passengerEmail = e.passengerEmail.trim();
+  // Additional passengers (multi-passenger PNR) — only ever populated once,
+  // from the same message that named the lead passenger; not merged
+  // incrementally field-by-field like the lead passenger's own slots above.
+  // Title is resolved right here (same logic as the lead passenger's
+  // resolvePendingPassengerTitle below): a supported title is kept as-is; no
+  // title/an unsupported one is folded into the first name and defaulted
+  // from a confident gender guess; anything still ambiguous is queued into
+  // pendingAdditionalTitleConfirmations for handleBookOnHold to ask about,
+  // one at a time, rather than ever guessing.
+  if (!slots.additionalPassengers && e.additionalPassengers?.length) {
+    const resolved: { firstName: string; lastName: string; title: string | null }[] = [];
+    const pending: { index: number; firstName: string; lastName: string }[] = [];
+    e.additionalPassengers
+      .filter((p) => p.firstName?.trim() && p.lastName?.trim())
+      .forEach((p, index) => {
+        const lastName = p.lastName.trim();
+        const rawTitle = p.title?.trim() || null;
+        if (rawTitle && (ENUGU_SUPPORTED_TITLES as readonly string[]).some((t) => t.toLowerCase() === rawTitle.toLowerCase())) {
+          resolved.push({ firstName: p.firstName.trim(), lastName, title: rawTitle });
+          return;
+        }
+        const effectiveFirstName = rawTitle ? `${rawTitle} ${p.firstName.trim()}`.trim() : p.firstName.trim();
+        if (p.genderGuess === "male") {
+          resolved.push({ firstName: effectiveFirstName, lastName, title: "Mr" });
+        } else if (p.genderGuess === "female") {
+          resolved.push({ firstName: effectiveFirstName, lastName, title: "Miss" });
+        } else {
+          resolved.push({ firstName: effectiveFirstName, lastName, title: null });
+          pending.push({ index, firstName: effectiveFirstName, lastName });
+        }
+      });
+    slots.additionalPassengers = resolved;
+    if (pending.length) slots.pendingAdditionalTitleConfirmations = pending;
+  }
 
   // Reproduced live: the LLM occasionally comes back with route/date
   // extracted but passenger email/phone left null even though the raw
@@ -575,6 +612,8 @@ function resetBookingSlots(slots: ConversationSlots): void {
   slots.selectedDepartureTime = null;
   slots.selectedReturnTime = null;
   slots.pendingTitleConfirmation = null;
+  slots.additionalPassengers = null;
+  slots.pendingAdditionalTitleConfirmations = null;
 }
 
 // Resolves a raw passenger title/first-name pair into a title Enugu Air's
@@ -652,12 +691,52 @@ function matchTitleConfirmation(rawMessage: string): (typeof ENUGU_SUPPORTED_TIT
   return null;
 }
 
+// Parses a single explicit clock time out of free text into a canonical
+// 24-hour "HH:MM" string — 12-hour with am/pm ("4 PM", "4:00 PM", "4pm") or
+// 24-hour with a colon ("16:00"). Bare 4-digit 24-hour ("1600") is only
+// recognized when the WHOLE (trimmed) text is just that number — safe for a
+// standalone reply to "what time?", but scanning it out of arbitrary free
+// text risks false positives (e.g. a 4-digit year like "2026" is also a
+// valid-looking HHMM). Returns null if no unambiguous time is present —
+// never guesses.
+function parseTimeExpression(text: string): string | null {
+  const twelveHour = text.match(/\b(1[0-2]|0?[1-9])(?::([0-5][0-9]))?\s*([ap])\.?m\.?\b/i);
+  if (twelveHour) {
+    let hour = parseInt(twelveHour[1], 10);
+    const minute = twelveHour[2] ?? "00";
+    const isPM = /p/i.test(twelveHour[3]);
+    if (isPM && hour !== 12) hour += 12;
+    if (!isPM && hour === 12) hour = 0;
+    return `${String(hour).padStart(2, "0")}:${minute}`;
+  }
+  const withColon = text.match(/\b([01]?[0-9]|2[0-3]):([0-5][0-9])\b/);
+  if (withColon) return `${withColon[1].padStart(2, "0")}:${withColon[2]}`;
+  const bareFourDigit = text.trim().match(/^([01][0-9]|2[0-3])([0-5][0-9])$/);
+  if (bareFourDigit) return `${bareFourDigit[1]}:${bareFourDigit[2]}`;
+  return null;
+}
+
+// Options are already shown zero-padded (e.g. "08:45"), but normalize
+// defensively so a "H:MM" option would still compare equal to parseTimeExpression's output.
+function normalizeOptionTime(opt: string): string {
+  const m = opt.match(/^(\d{1,2}):(\d{2})$/);
+  return m ? `${m[1].padStart(2, "0")}:${m[2]}` : opt;
+}
+
 // Matches a free-text reply against a list of candidate departure times
-// (e.g. "08:45"). Tries, in order: an exact/substring time match after
-// stripping non-digit noise (so "8:45am", "the 08:45 one" both match
-// "08:45"), then an ordinal/position word ("first", "second", "1", "2").
+// (e.g. "08:45"). Tries, in order: an explicit 12-hour or 24-hour time
+// expression (so "4pm", "4:00 PM", and "16:00" all correctly match an
+// option shown as "16:00"), then a looser exact/substring digit match (so
+// "the 08:45 one" still matches "08:45" even without am/pm), then an
+// ordinal/position word ("first", "second", "1", "2").
 // Returns null if nothing in the message plausibly picks one option.
 function matchTimeSelection(message: string, options: string[]): string | null {
+  const explicit = parseTimeExpression(message);
+  if (explicit) {
+    const byExplicitTime = options.find((opt) => normalizeOptionTime(opt) === explicit);
+    if (byExplicitTime) return byExplicitTime;
+  }
+
   const normalized = (s: string) => s.replace(/[^\d:]/g, "");
   const msgNormalized = normalized(message);
   const byTime = options.find((opt) => msgNormalized.includes(normalized(opt)));
@@ -740,12 +819,14 @@ interface LegFlightChoiceOutcome {
 }
 
 // Turns a leg's flight-count into the right outcome: exactly one flight ->
-// use it silently, zero -> tell the user, more than one -> ask which. A
-// search failure returns "nothing to ask, nothing resolved" rather than
-// blocking the booking on a check that itself errored.
+// use it silently, zero -> tell the user, more than one -> try the
+// departure time the user already stated in their booking request (if any)
+// before asking. A search failure returns "nothing to ask, nothing
+// resolved" rather than blocking the booking on a check that itself errored.
 function resolveLegFlightChoice(
   search: FlightSearchResult & { error?: string },
-  leg: "outbound" | "return"
+  leg: "outbound" | "return",
+  rawMessage: string
 ): LegFlightChoiceOutcome {
   if (search.error) {
     console.warn(`[travel-assistant] ${leg} disambiguation search failed, proceeding without a preferred time: ${search.error}`);
@@ -765,9 +846,21 @@ function resolveLegFlightChoice(
     return { reply: null, pendingOptions: null, time: times[0] };
   }
 
+  // More than one flight — if the user's own booking request already named
+  // an unambiguous departure time (12-hour or 24-hour), use it directly
+  // instead of asking again. Only an explicit clock-time expression counts
+  // here (see parseTimeExpression) — never an ordinal/bare digit, since
+  // scanning those out of a free-text booking sentence (rather than a
+  // direct reply to a shown list) would risk matching an unrelated number.
+  const stated = parseTimeExpression(rawMessage);
+  if (stated) {
+    const match = times.find((t) => normalizeOptionTime(t) === stated);
+    if (match) return { reply: null, pendingOptions: null, time: match };
+  }
+
   const legNote = leg === "return" ? "the return leg" : "your journey";
   return {
-    reply: `I found multiple flights for ${legNote}.\nAvailable departure times are:\n${times.map((t) => `• ${t}`).join("\n")}\nWhich departure time would you prefer?`,
+    reply: `I found multiple flights for ${legNote}.\nAvailable departure times are:\n${times.map((t, i) => `${i + 1}. ${t}`).join("\n")}\nWhich departure time would you prefer? Reply with the number or the time.`,
     pendingOptions: times,
     time: null,
   };
@@ -820,6 +913,32 @@ async function handleBookOnHold(
     }
   }
 
+  // Same title/gender resolution, but for any additional passengers on a
+  // multi-passenger PNR — resolved one at a time (oldest first) so a
+  // multi-passenger booking never piles up several clarifying questions in
+  // a single turn.
+  if (slots.pendingAdditionalTitleConfirmations?.length) {
+    const [current, ...rest] = slots.pendingAdditionalTitleConfirmations;
+    const resolved = matchTitleConfirmation(rawMessage);
+    if (!resolved) {
+      const reply = `Please confirm the preferred title or gender for ${current.firstName} ${current.lastName}.`;
+      await ChatMemoryRepository.updateSlots(sessionId, slots);
+      await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+      return { reply };
+    }
+    if (slots.additionalPassengers?.[current.index]) {
+      slots.additionalPassengers[current.index].title = resolved;
+    }
+    slots.pendingAdditionalTitleConfirmations = rest.length ? rest : null;
+    if (slots.pendingAdditionalTitleConfirmations) {
+      const next = slots.pendingAdditionalTitleConfirmations[0];
+      const reply = `Got it. And for ${next.firstName} ${next.lastName}?`;
+      await ChatMemoryRepository.updateSlots(sessionId, slots);
+      await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+      return { reply };
+    }
+  }
+
   // If a previous turn asked which departure time the user wants, this
   // message is most likely answering that — try to resolve it before
   // falling through to the general gap-collection below (departure time
@@ -828,7 +947,7 @@ async function handleBookOnHold(
   if (slots.pendingDepartureTimeOptions && !slots.selectedDepartureTime) {
     const matched = matchTimeSelection(rawMessage, slots.pendingDepartureTimeOptions);
     if (!matched) {
-      const reply = `I didn't catch which one — available departure times are:\n${slots.pendingDepartureTimeOptions.map((t) => `• ${t}`).join("\n")}\nWhich would you like?`;
+      const reply = `I didn't catch which one — available departure times are:\n${slots.pendingDepartureTimeOptions.map((t, i) => `${i + 1}. ${t}`).join("\n")}\nReply with the number or the time.`;
       await ChatMemoryRepository.updateSlots(sessionId, slots);
       await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
       return { reply };
@@ -839,7 +958,7 @@ async function handleBookOnHold(
   if (slots.isRoundTrip && slots.pendingReturnTimeOptions && !slots.selectedReturnTime) {
     const matched = matchTimeSelection(rawMessage, slots.pendingReturnTimeOptions);
     if (!matched) {
-      const reply = `And for the return leg — available departure times are:\n${slots.pendingReturnTimeOptions.map((t) => `• ${t}`).join("\n")}\nWhich would you like?`;
+      const reply = `And for the return leg — available departure times are:\n${slots.pendingReturnTimeOptions.map((t, i) => `${i + 1}. ${t}`).join("\n")}\nReply with the number or the time.`;
       await ChatMemoryRepository.updateSlots(sessionId, slots);
       await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
       return { reply };
@@ -883,7 +1002,7 @@ async function handleBookOnHold(
           if (outcome.matched) {
             slots.selectedDepartureTime = outcome.matched.departureTime;
           } else {
-            const reply = `I found more than one Enugu Air option from that search — which one?\n${outcome.ambiguousCandidates!.map((t) => `• ${t}`).join("\n")}`;
+            const reply = `I found more than one Enugu Air option from that search — which one?\n${outcome.ambiguousCandidates!.map((t, i) => `${i + 1}. ${t}`).join("\n")}\nReply with the number or the time.`;
             slots.pendingDepartureTimeOptions = outcome.ambiguousCandidates!;
             await ChatMemoryRepository.updateSlots(sessionId, slots);
             await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
@@ -920,7 +1039,7 @@ async function handleBookOnHold(
   // below) — no separate mechanism needed for this.
   if (!slots.selectedDepartureTime) {
     const outbound = await callSearch("ENUGU", slots.origin!, slots.destination!, slots.date!);
-    const outcome = resolveLegFlightChoice(outbound, "outbound");
+    const outcome = resolveLegFlightChoice(outbound, "outbound", rawMessage);
     if (outcome.reply) {
       if (outcome.pendingOptions) slots.pendingDepartureTimeOptions = outcome.pendingOptions;
       else resetBookingSlots(slots);
@@ -935,7 +1054,7 @@ async function handleBookOnHold(
   }
   if (slots.isRoundTrip && !slots.selectedReturnTime) {
     const inbound = await callSearch("ENUGU", slots.destination!, slots.origin!, slots.returnDate!);
-    const outcome = resolveLegFlightChoice(inbound, "return");
+    const outcome = resolveLegFlightChoice(inbound, "return", rawMessage);
     if (outcome.reply) {
       if (outcome.pendingOptions) slots.pendingReturnTimeOptions = outcome.pendingOptions;
       else resetBookingSlots(slots);
@@ -949,6 +1068,8 @@ async function handleBookOnHold(
   const paxName = [slots.passengerTitle, slots.passengerFirstName, slots.passengerLastName]
     .filter(Boolean)
     .join(" ");
+  const otherPaxNames = (slots.additionalPassengers ?? []).map((p) => [p.title, p.firstName, p.lastName].filter(Boolean).join(" "));
+  const paxLine = [paxName, ...otherPaxNames].join(" and ");
   const routeLine = `${slots.origin}→${slots.destination} on ${slots.date}${
     slots.isRoundTrip && slots.returnDate ? `, returning ${slots.returnDate}` : ""
   }`;
@@ -967,6 +1088,11 @@ async function handleBookOnHold(
     email: slots.passengerEmail!,
     preferredDepartureTime: slots.selectedDepartureTime,
     preferredReturnTime: slots.selectedReturnTime,
+    additionalPassengers: slots.additionalPassengers?.map((p) => ({
+      title: p.title ?? "Mr",
+      firstName: p.firstName,
+      lastName: p.lastName,
+    })),
     createdBy: sessionKey,
   });
 
@@ -981,7 +1107,7 @@ async function handleBookOnHold(
     return { reply };
   }
 
-  const reply = `Got it — I'm placing an Enugu Air hold for ${paxName}, ${routeLine}. This takes a minute or two; I'll show the PNR right here as soon as it's done.`;
+  const reply = `Got it — I'm placing an Enugu Air hold for ${paxLine}, ${routeLine}. This takes a minute or two; I'll show the PNR right here as soon as it's done.`;
   await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
   return { reply, bookingJobId: result.jobId };
 }

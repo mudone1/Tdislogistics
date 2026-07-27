@@ -71,6 +71,21 @@ function matchSalesReportAirline(text: string): { key: string; label: string } |
   return match ? { key: match.key, label: match.label } : null;
 }
 
+// Cheap, deterministic pre-check for "this looks like a booking request" —
+// mirrors the same booking-verb + passenger-detail co-occurrence rule
+// systemPrompt.ts's BOOK_ON_HOLD classifier uses server-side, but runs here
+// client-side so an immediate "Copy" acknowledgement bubble can appear the
+// instant the message is sent, before the (LLM-backed) assistant call —
+// which can take many seconds — even resolves. A false positive just means
+// an extra "Copy" ahead of what turns out to be a flight search.
+const BOOKING_VERB_PATTERN = /\b(book|hold|reserve)\b/i;
+const EMAIL_PATTERN = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+const PHONE_PATTERN = /\+?[\d][\d\s-]{8,17}\d/;
+
+function looksLikeBookingRequest(text: string): boolean {
+  return BOOKING_VERB_PATTERN.test(text) && (EMAIL_PATTERN.test(text) || PHONE_PATTERN.test(text));
+}
+
 function detectAttachmentKind(file: File): "excel" | "image" | "other" {
   const name = file.name.toLowerCase();
   if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "excel";
@@ -433,6 +448,12 @@ export default function ChatBubble() {
       if (!text || sending) return undefined;
 
       setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
+      // Immediate acknowledgement — appears right away, before any real
+      // processing, so a booking request never sits in silence waiting on
+      // the assistant call.
+      if (looksLikeBookingRequest(text)) {
+        setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: "Copy" }]);
+      }
       setSending(true);
 
       try {

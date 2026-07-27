@@ -54,6 +54,16 @@ export interface BookOnHoldPassenger {
   email: string;
 }
 
+// A passenger beyond the lead one on a multi-passenger PNR — per explicit
+// product direction, additional passengers share the lead passenger's phone
+// and email rather than supplying their own (this form only ever exposes one
+// contact-details section), so only title/firstName/lastName are needed here.
+export interface AdditionalBookOnHoldPassenger {
+  title: string; // one of ENUGU_SUPPORTED_TITLES above
+  firstName: string;
+  lastName: string;
+}
+
 export interface BookOnHoldRequest {
   origin: string;
   destination: string;
@@ -79,6 +89,12 @@ export interface BookOnHoldRequest {
   preferredDepartureTime?: string;
   preferredReturnTime?: string;
   passenger: BookOnHoldPassenger;
+  // Passengers beyond the lead one, same PNR — each gets their own
+  // title/firstName/lastName, but shares the lead passenger's phone/email
+  // (see AdditionalBookOnHoldPassenger). Omit for a single-passenger hold
+  // (today's default, unchanged). When present, the Adults count on the
+  // search form is set to 1 + this array's length before Search runs.
+  additionalPassengers?: AdditionalBookOnHoldPassenger[];
 }
 
 export interface BookOnHoldResult {
@@ -187,8 +203,58 @@ async function establishSession(
   // Always return with the page already sitting on requirementsUrl, same
   // as the cached-session path above — the caller never needs to know or
   // branch on which path was taken.
-  await page.goto(requirementsUrl, { waitUntil: "domcontentloaded" });
+  //
+  // Confirmed live (Rano Air): a direct goto to the agent-portal
+  // requirements URL without a "VARSSessionID" query param 404s server-side
+  // (redirects to .../CustomerPanels/Requirements.aspx, which doesn't
+  // exist) even with valid session cookies — this deployment's routing
+  // apparently keys off the URL param, not just the cookie, unlike Enugu
+  // Air (no such param at all, works fine without it) and United Nigeria
+  // (has the param post-login but doesn't actually require it). Carrying
+  // forward whatever VARSSessionID the login redirect landed on (present
+  // for United and Rano, absent for Enugu) covers all three without
+  // needing an airline-specific branch here.
+  await page.goto(withCarriedSessionId(requirementsUrl, page.url()), { waitUntil: "domcontentloaded" });
   return { context, page };
+}
+
+// Sets the Adults count on the search form before the initial Search/
+// Continue click — only needed once a booking has more than one passenger
+// (every hold to date has been single-passenger, so this control has never
+// been exercised live). No selector has been independently confirmed yet;
+// this tries the ID/name patterns VARS/Videcom deployments commonly use for
+// a passenger-count control and fails LOUDLY with a diagnostic dump rather
+// than silently proceeding with the form's default of 1 adult while
+// claiming to book more — a wrong silent guess here would risk holding the
+// wrong number of seats for real money.
+async function setAdultsCount(page: import("playwright").Page, adults: number, logTag: string): Promise<void> {
+  if (adults <= 1) return;
+  const candidates = ["#Adults", "#NoOfAdults", "#txtAdults", "#ddlAdults", "select[name='Adults']", "select[name*='dult' i]"];
+  for (const sel of candidates) {
+    const locator = page.locator(sel);
+    if (await locator.count().catch(() => 0)) {
+      await locator.selectOption(String(adults)).catch(() => locator.fill(String(adults)));
+      console.log(`[${logTag}] set adults count to ${adults} via "${sel}"`);
+      return;
+    }
+  }
+  const diagnostic = await page.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLElement>("select, input"))
+      .map((el) => ({ tag: el.tagName, id: el.id, name: (el as HTMLInputElement).name }))
+      .filter((f) => f.id || f.name)
+  );
+  console.error(`DIAGNOSTIC [${logTag}] no Adults control found among: ${JSON.stringify(diagnostic).slice(0, 2000)}`);
+  throw new Error(
+    `${adults} passengers requested but no Adults-count control was found on the search form — this needs a one-time live check of the real field id before multi-passenger bookings can work on this airline.`
+  );
+}
+
+function withCarriedSessionId(targetUrl: string, currentPageUrl: string): string {
+  const sessionId = new URL(currentPageUrl).searchParams.get("VARSSessionID");
+  if (!sessionId) return targetUrl;
+  const url = new URL(targetUrl);
+  if (!url.searchParams.has("VARSSessionID")) url.searchParams.set("VARSSessionID", sessionId);
+  return url.toString();
 }
 
 export async function bookVarsPlatformOnHold(
@@ -237,6 +303,8 @@ export async function bookVarsPlatformOnHold(
         ret: request.returnDate ? dateParts(request.returnDate) : null,
       }
     );
+
+    await setAdultsCount(page, 1 + (request.additionalPassengers?.length ?? 0), logTag);
 
     // Two different search-form URLs across VARS deployments use two
     // different submit controls for the exact same #Origin/#Destination/
@@ -311,6 +379,22 @@ export async function bookVarsPlatformOnHold(
     await page.locator("#passenger1emailaddress").fill(request.passenger.email);
     await page.locator("#passenger1emailaddressverification").fill(request.passenger.email);
     await page.locator("#passenger1specialservicerequest0").click();
+
+    // Additional passengers on the same PNR — same form, indexed fields
+    // (passenger2title/firstname/lastname, passenger3..., following the
+    // confirmed passenger1 naming convention). Per explicit product
+    // direction they share the lead passenger's phone/email above rather
+    // than filling their own, so only title/name fields are touched here.
+    if (request.additionalPassengers?.length) {
+      for (let i = 0; i < request.additionalPassengers.length; i++) {
+        const idx = i + 2;
+        const p = request.additionalPassengers[i];
+        console.log(`[${logTag}] filling passenger ${idx} details`);
+        await page.locator(`#passenger${idx}title`).selectOption({ label: p.title });
+        await page.locator(`#passenger${idx}firstname`).fill(p.firstName);
+        await page.locator(`#passenger${idx}lastname`).fill(p.lastName);
+      }
+    }
 
     // The payment section is a Bootstrap accordion (#pay-accordion) of
     // payment-option panels (Invoice/Pay Now/Book Now Pay Later — the

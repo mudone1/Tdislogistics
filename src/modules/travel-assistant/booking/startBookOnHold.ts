@@ -26,6 +26,10 @@ export interface StartBookOnHoldInput {
   lastName: string;
   phone: string;
   email: string;
+  // Passengers beyond the lead one above, same PNR — they share the lead
+  // passenger's phone/email rather than having their own. Omit for a
+  // single-passenger hold (unchanged default).
+  additionalPassengers?: { title: string; firstName: string; lastName: string }[];
   // Which specific flight to book on each leg, when the route/date has more
   // than one — resolved upstream (search count -> ask the user if needed)
   // before this is called. Omit only when that leg is already known to
@@ -60,6 +64,7 @@ export async function startBookOnHold(input: StartBookOnHoldInput): Promise<Star
     lastName: input.lastName,
     phone: input.phone,
     email: input.email,
+    additionalPassengers: input.additionalPassengers,
     preferredDepartureTime: input.preferredDepartureTime ?? null,
     preferredReturnTime: input.preferredReturnTime ?? null,
     createdBy: input.createdBy ?? null,

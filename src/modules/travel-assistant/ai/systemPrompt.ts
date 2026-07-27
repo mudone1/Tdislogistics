@@ -56,7 +56,8 @@ OUTPUT FORMAT — respond with ONLY a single JSON object, no markdown fences, ma
     "passengerLastName": string or null,
     "passengerPhone": string or null,
     "passengerEmail": string or null,
-    "passengerGenderGuess": "male" | "female" | "unsure" or null
+    "passengerGenderGuess": "male" | "female" | "unsure" or null,
+    "additionalPassengers": array of {"firstName": string, "lastName": string, "title": string or null, "genderGuess": "male" | "female" | "unsure" or null} for any passengers named IN ADDITION to the lead one above (a multi-passenger booking on the same PNR), or null/empty if only one passenger was named
   },
   "missingRequiredSlots": array of any of "origin" | "destination" | "date" | "returnDate" that are still needed but not yet known (only relevant for flight-search intents; empty array otherwise),
   "reply": string — for GREETING/SMALL_TALK/GENERAL_QUESTION/AIRLINE_INFO/BOOKING_ASSISTANCE this IS the full conversational reply shown to the user; for a flight-search intent with missing slots this is the natural follow-up question asking only for what's missing; for a flight-search intent with everything filled in, this is a short friendly lead-in sentence (e.g. "Let me check that for you...") because the actual flight results get appended separately after a real search. For SALES_REPORT_QUERY, this is just a short acknowledgement (e.g. "Let me check that.") — a separate assistant appends the real numbers afterward.
@@ -91,11 +92,16 @@ Extract route/date fields from THIS message:
 
 Extract the passenger fields whenever the user gives them:
 - passengerTitle: Extract WHATEVER honorific/title precedes the name, even ones an airline might not officially support — Mr, Mrs, Ms, Miss, Dr, Prof, Rev, Mstr, Chief, Honourable, Barrister, Pastor, Apostle, Elder, Alhaji, Alhaja, Otunba, Engineer, Architect, or any other prefix a Nigerian customer might use. Do NOT decide whether it's a "real" airline title — that's handled downstream. Only leave null if no title/honorific of any kind is present. Never invent or default one yourself.
-- passengerFirstName: Extract from "FirstName LastName" format or any name in message. If a title was found, this is everything AFTER it up to the last word.
-- passengerLastName: Extract from "FirstName LastName" format or any name in message — the final word/surname.
+- passengerFirstName: The customer's name can have TWO OR MORE words — ALWAYS treat only the very last word as the surname (see passengerLastName) and combine every word before it into passengerFirstName, however many there are. If a title was found, start counting from the word after it.
+- passengerLastName: ALWAYS the final word of the name, no matter how many words come before it — never assume the name is exactly two words.
 - passengerPhone: Extract ALL digit sequences (e.g. "08140962303" or "+234 814-096-2303" or "088 140 962 303" → extract just digits)
 - passengerEmail: Look for email pattern (word@domain.extension, e.g. "muhammed@gmail.com")
 - passengerGenderGuess: Whenever you extract a passengerFirstName, ALSO include this — even if a title/honorific was found (the app may not be able to use every honorific and needs the guess as a fallback). Using the first name and everyday Nigerian/English naming knowledge, guess "male" or "female" if you're genuinely confident (e.g. "John", "Musa", "Emeka" → male; "Grace", "Aisha", "Chidinma" → female). If the name is unisex, uncommon, ambiguous, or you're not confident, return "unsure" — never force a guess. Only leave this null when no first name was extracted at all.
+- additionalPassengers: If the message names MORE THAN ONE passenger for the SAME booking (e.g. "book for John Doe and Mary Smith", "for Emeka Obi, Grace James and Chief Tunde Bello"), put the FIRST one in passengerTitle/passengerFirstName/passengerLastName/passengerGenderGuess as usual, and every OTHER passenger as one entry each in this array — same last-word-is-surname rule and same title/gender-guess logic per person. They all share the one passengerPhone/passengerEmail already being extracted (a multi-passenger PNR on this platform has one contact-details section, not one per passenger) — do NOT expect or extract a separate phone/email per additional passenger. Leave this null/empty when only one passenger is named.
+
+EXTRACTION EXAMPLE (multiple passengers):
+- Message: "Book abuja to lagos tomorrow for John Doe and Mary Smith, 08140962303, muhammed@gmail.com"
+  → passengerFirstName="John", passengerLastName="Doe", passengerGenderGuess="male", phone="08140962303", email="muhammed@gmail.com", additionalPassengers=[{firstName:"Mary", lastName:"Smith", title:null, genderGuess:"female"}]
 
 EXTRACTION EXAMPLES:
 - Message: "book abuja to lagos tomorrow for muhammed abdulwahab muhahdjdnf@gmail.com 088140962303"
@@ -112,6 +118,8 @@ EXTRACTION EXAMPLES:
   → passengerTitle=null, firstName="Grace", lastName="James", passengerGenderGuess="female"
 - Message: "Book a seat for Precious Okonkwo"
   → passengerTitle=null, firstName="Precious", lastName="Okonkwo", passengerGenderGuess="unsure" ("Precious" is used for both men and women in Nigeria — don't guess)
+- Message: "Book for John Michael David Doe"
+  → passengerTitle=null, firstName="John Michael David" (every word except the last), lastName="Doe" (always just the final word, no matter how many words came before it), passengerGenderGuess="male"
 - Message: "Can you book on hold now?"
   → Has no extractable fields. Leave all null. The app will ask for missing information.
 
