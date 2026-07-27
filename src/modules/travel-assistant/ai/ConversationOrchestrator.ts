@@ -8,6 +8,7 @@ import { formatLeg, formatRouteHeader } from "../formatting/formatFlightResults"
 import { startBookOnHold } from "../booking/startBookOnHold";
 import { ENUGU_SUPPORTED_TITLES } from "../booking/vars-platform/VarsBookOnHold";
 import { handleQuery as handleSalesReportQuery } from "../orchestration/SalesReportAssistant";
+import { AirlineAIService } from "../../airline-connectors/services/AirlineAIService";
 import type {
   AssistantTurn,
   ConversationSlots,
@@ -33,6 +34,12 @@ export interface OrchestratorOutput {
   // Set when a Book-on-Hold has just been started — the chat polls
   // GET /api/assistant/book-hold/[id] with this until the job is terminal.
   bookingJobId?: string;
+  // Set when a "balance update" was just triggered — the caller polls
+  // GET /api/assistant/balance-update/status?since=<this> until every
+  // airline's balance has synced more recently than this instant, then
+  // formats and sends the final figures itself (see whatsapp-service's
+  // balanceUpdatePoll.ts for the reference implementation).
+  balanceUpdateTriggeredAt?: string;
 }
 
 const EMPTY_SLOTS: ConversationSlots = {
@@ -90,6 +97,13 @@ function airlinesToQuery(preference: string | null): readonly string[] {
 
 const REFERENCE_ID_PATTERN = /^TDIS-\d{8}-\d{3}$/i;
 
+// A deterministic command phrase, not a natural-language question —
+// matched directly rather than routed through the LLM classifier, so it
+// behaves identically every single time regardless of classification
+// variance. Fires a real sync across every airline connector (not just a
+// read of whatever's currently stored) — see AirlineAIService.
+const BALANCE_UPDATE_PATTERN = /\bbalance\s*update\b/i;
+
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
   const session = await ChatMemoryRepository.getOrCreateSession(
     input.sessionKey,
@@ -113,6 +127,22 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
       `${record.referenceId} — ${formatRouteHeader(record.origin, record.destination, record.date)}\n${formatLeg(result)}`;
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
     return { reply, result };
+  }
+
+  if (BALANCE_UPDATE_PATTERN.test(trimmed)) {
+    await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
+    try {
+      const { triggeredAt } = await AirlineAIService.triggerBalanceUpdate();
+      const reply = "🔄 Syncing every airline now — I'll have fresh balances for you in a moment.";
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply, balanceUpdateTriggeredAt: triggeredAt };
+    } catch (err) {
+      console.error("[travel-assistant] balance update trigger failed:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      const reply = `I couldn't start that sync just now — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
   }
 
   const priorMessages = await ChatMemoryRepository.getRecentMessages(session.id, 10);

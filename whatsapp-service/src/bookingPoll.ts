@@ -1,4 +1,5 @@
 import { getBookingJobStatus, getBookingScreenshot } from "./assistantClient";
+import { keepTypingAlive } from "./typingIndicator";
 
 const POLL_MS = 4000;
 const MAX_ATTEMPTS = 90; // ~6 min, matching ChatBubble's own budget for a Book-on-Hold run
@@ -6,6 +7,7 @@ const MAX_ATTEMPTS = 90; // ~6 min, matching ChatBubble's own budget for a Book-
 export interface BookingPollSender {
   sendText: (text: string) => Promise<void>;
   sendImage: (buffer: Buffer, caption?: string) => Promise<void>;
+  setTyping: () => Promise<void>;
 }
 
 function errorContactNote(reason: string): string {
@@ -32,12 +34,14 @@ function formatSuccessMessage(result: NonNullable<Awaited<ReturnType<typeof getB
 // caption-bearing image itself rather than a separate text message.
 export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
   let attempts = 0;
+  const stopTyping = keepTypingAlive(sender.setTyping);
 
   const tick = async (): Promise<void> => {
     attempts++;
     try {
       const job = await getBookingJobStatus(jobId);
       if (job.status === "SUCCESS" && job.result) {
+        stopTyping();
         const text = formatSuccessMessage(job.result);
         if (job.result.hasScreenshot && job.result.screenshotUrl) {
           try {
@@ -52,6 +56,7 @@ export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
         return;
       }
       if (job.status === "FAILED") {
+        stopTyping();
         const reason = job.error?.detail || job.error?.message || "unknown error";
         await sender.sendText(`⚠️ I couldn't complete that hold.${errorContactNote(reason)}`);
         return;
@@ -61,6 +66,7 @@ export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
     }
 
     if (attempts >= MAX_ATTEMPTS) {
+      stopTyping();
       await sender.sendText("The hold is taking longer than expected — it may still complete. Check with an admin or try again.");
       return;
     }

@@ -369,6 +369,65 @@ export default function ChatBubble() {
     setTimeout(tick, 3000);
   }, [prefetchBookingScreenshot]);
 
+  // Polls after a "balance update" trigger until every airline's balance
+  // has synced more recently than the trigger instant, or the poll budget
+  // runs out — whichever comes first — then appends exactly one formatted
+  // message with whatever's freshest at that point. Mirrors
+  // whatsapp-service's balanceUpdatePoll.ts so both channels format this
+  // identically.
+  const pollBalanceUpdate = useCallback((triggeredAt: string): void => {
+    const POLL_MS = 5000;
+    const MAX_ATTEMPTS = 18; // ~90s
+
+    let attempts = 0;
+
+    const formatDateTime = (date: Date): string =>
+      date.toLocaleString("en-GB", {
+        timeZone: "Africa/Lagos",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+
+    const formatBalanceMessage = (balances: { displayName: string; balance: number }[]): string => {
+      const header = `Balance update -(${formatDateTime(new Date())})`;
+      const lines = balances.map((b, i) => `${b.displayName} - ${Math.round(b.balance).toLocaleString()}${i === balances.length - 1 ? "." : ""}`);
+      return [header, ...lines].join("\n");
+    };
+
+    const finish = (text: string) => {
+      if (!mounted.current) return;
+      setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text }]);
+    };
+
+    const tick = async (): Promise<void> => {
+      if (!mounted.current) return;
+      attempts++;
+      try {
+        const res = await fetch(`/api/assistant/balance-update/status?since=${encodeURIComponent(triggeredAt)}`, { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ready || attempts >= MAX_ATTEMPTS) {
+            finish(formatBalanceMessage(data.balances));
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("[assistant] balance update poll failed:", err);
+      }
+      if (attempts >= MAX_ATTEMPTS) {
+        finish("I couldn't pull the updated balances just now — mind trying \"balance update\" again in a moment?");
+        return;
+      }
+      if (mounted.current) setTimeout(tick, POLL_MS);
+    };
+
+    setTimeout(tick, 3000);
+  }, []);
+
   const sendMessage = useCallback(
     async (text: string): Promise<{ reply: string; hasResults: boolean } | undefined> => {
       if (!text || sending) return undefined;
@@ -416,6 +475,9 @@ export default function ChatBubble() {
         // A Book-on-Hold was just started — poll for the PNR/outcome.
         if (bookingJobId) pollBookingJob(bookingJobId, newId);
 
+        // A "balance update" sync was just triggered — poll for the fresh figures.
+        if (data.balanceUpdateTriggeredAt) pollBalanceUpdate(data.balanceUpdateTriggeredAt);
+
         // The notification itself is created server-side (durable, survives
         // reload); eagerly re-poll here just so the bell updates within a
         // second instead of waiting out the regular poll interval.
@@ -436,7 +498,7 @@ export default function ChatBubble() {
         setSending(false);
       }
     },
-    [sending, pending, identity, refresh, prefetchQuoteImage, pollBookingJob]
+    [sending, pending, identity, refresh, prefetchQuoteImage, pollBookingJob, pollBalanceUpdate]
   );
 
   // Builds the chat message for a successfully generated (PENDING_VERIFICATION)

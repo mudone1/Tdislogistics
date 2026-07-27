@@ -89,6 +89,14 @@ export async function connectWhatsApp(): Promise<void> {
         sendImage: async (targetChatId, buffer, caption) => {
           await sock.sendMessage(targetChatId, { image: buffer, caption });
         },
+        // WhatsApp's "typing…" indicator — makes a multi-second (or
+        // multi-minute, for a Book-on-Hold/balance sync) wait feel like
+        // the bot is actually working rather than just gone silent. The
+        // indicator times out client-side after a while, so callers doing
+        // long operations re-send this periodically rather than once.
+        setTyping: async (targetChatId) => {
+          await sock.sendPresenceUpdate("composing", targetChatId).catch(() => {});
+        },
       }).catch((err) => console.error(`[whatsapp] handling message from ${chatId} failed:`, err));
     }
   });

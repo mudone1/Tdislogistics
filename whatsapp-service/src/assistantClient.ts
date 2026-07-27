@@ -3,6 +3,7 @@ import { MAIN_APP_URL } from "./config";
 export interface QuoteResponse {
   reply: string;
   bookingJobId?: string;
+  balanceUpdateTriggeredAt?: string;
 }
 
 // Same endpoint the browser ChatBubble posts to — a WhatsApp chat is just
@@ -22,7 +23,11 @@ export async function askAssistant(sessionKey: string, displayName: string | nul
   }
 
   const data = (await res.json()) as Partial<QuoteResponse>;
-  return { reply: data.reply ?? "Sorry, I couldn't process that just now.", bookingJobId: data.bookingJobId };
+  return {
+    reply: data.reply ?? "Sorry, I couldn't process that just now.",
+    bookingJobId: data.bookingJobId,
+    balanceUpdateTriggeredAt: data.balanceUpdateTriggeredAt,
+  };
 }
 
 export interface BookingJobStatus {
@@ -64,4 +69,17 @@ export async function getBookingScreenshot(screenshotUrl: string): Promise<Buffe
   }
   const arrayBuffer = await res.arrayBuffer();
   return Buffer.from(arrayBuffer);
+}
+
+export interface BalanceUpdateStatus {
+  ready: boolean;
+  balances: { airline: string; displayName: string; balance: number }[];
+}
+
+export async function getBalanceUpdateStatus(triggeredAt: string): Promise<BalanceUpdateStatus> {
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/balance-update/status?since=${encodeURIComponent(triggeredAt)}`);
+  if (!res.ok) {
+    throw new Error(`Balance update status API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as BalanceUpdateStatus;
 }

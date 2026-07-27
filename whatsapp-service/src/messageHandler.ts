@@ -1,6 +1,8 @@
 import { BOT_MENTION_TRIGGER } from "./config";
 import { askAssistant } from "./assistantClient";
 import { pollBookingJob } from "./bookingPoll";
+import { pollBalanceUpdate } from "./balanceUpdatePoll";
+import { keepTypingAlive } from "./typingIndicator";
 
 export interface IncomingMessage {
   chatId: string; // group JID (ends @g.us) or individual JID (ends @s.whatsapp.net)
@@ -16,6 +18,7 @@ export interface IncomingMessage {
 export interface MessageSender {
   sendText: (chatId: string, text: string) => Promise<void>;
   sendImage: (chatId: string, buffer: Buffer, caption?: string) => Promise<void>;
+  setTyping: (chatId: string) => Promise<void>;
 }
 
 // Strips a leading/embedded "@tdisbot" (case-insensitive, trailing word
@@ -60,16 +63,28 @@ export async function handleIncomingMessage(msg: IncomingMessage, sender: Messag
   const sessionKey = `whatsapp:${msg.chatId}`;
   const reply = async (text: string) => sender.sendText(msg.chatId, text);
 
+  // "Typing…" from the moment we start working on a reply until it's
+  // actually sent — covers both the initial assistant call (a flight
+  // search can take 20-30s) and, if it continues into a poll below, that
+  // too, so the chat never goes silent while something is happening.
+  const stopTyping = keepTypingAlive(() => sender.setTyping(msg.chatId));
+
   try {
     const result = await askAssistant(sessionKey, msg.senderName, message);
+    stopTyping();
     await reply(result.reply);
     if (result.bookingJobId) {
       pollBookingJob(result.bookingJobId, {
         sendText: reply,
         sendImage: (buffer, caption) => sender.sendImage(msg.chatId, buffer, caption),
+        setTyping: () => sender.setTyping(msg.chatId),
       });
     }
+    if (result.balanceUpdateTriggeredAt) {
+      pollBalanceUpdate(result.balanceUpdateTriggeredAt, reply, () => sender.setTyping(msg.chatId));
+    }
   } catch (err) {
+    stopTyping();
     console.error(`[whatsapp] assistant call failed for chat ${msg.chatId}:`, err);
     const reason = err instanceof Error ? err.message : String(err);
     await reply(`I couldn't reach the assistant just now — mind trying again in a moment? (${reason})`);
