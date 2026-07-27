@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { AirlineAIService } from "@/modules/airline-connectors/services/AirlineAIService";
+import { getBalanceUpdateStatus } from "@/lib/balanceUpdateService";
 
 // GET ?since=<ISO timestamp from /trigger> — polled until "ready" is true
 // (every airline's balance synced more recently than "since") or the
@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   }
 
   try {
-    const result = await AirlineAIService.getBalanceUpdateStatus(since);
+    const result = await getBalanceUpdateStatus(since);
     return NextResponse.json(result);
   } catch (err) {
     console.error("[balance-update/status] failed:", err);

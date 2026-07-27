@@ -8,7 +8,7 @@ import { formatLeg, formatRouteHeader } from "../formatting/formatFlightResults"
 import { startBookOnHold } from "../booking/startBookOnHold";
 import { ENUGU_SUPPORTED_TITLES } from "../booking/vars-platform/VarsBookOnHold";
 import { handleQuery as handleSalesReportQuery } from "../orchestration/SalesReportAssistant";
-import { AirlineAIService } from "../../airline-connectors/services/AirlineAIService";
+import { triggerBalanceUpdate } from "../../../lib/balanceUpdateService";
 import type {
   AssistantTurn,
   ConversationSlots,
@@ -101,7 +101,7 @@ const REFERENCE_ID_PATTERN = /^TDIS-\d{8}-\d{3}$/i;
 // matched directly rather than routed through the LLM classifier, so it
 // behaves identically every single time regardless of classification
 // variance. Fires a real sync across every airline connector (not just a
-// read of whatever's currently stored) — see AirlineAIService.
+// read of whatever's currently stored) — see lib/balanceUpdateService.
 const BALANCE_UPDATE_PATTERN = /\bbalance\s*update\b/i;
 
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
@@ -132,7 +132,7 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
   if (BALANCE_UPDATE_PATTERN.test(trimmed)) {
     await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
     try {
-      const { triggeredAt } = await AirlineAIService.triggerBalanceUpdate();
+      const { triggeredAt } = await triggerBalanceUpdate();
       const reply = "🔄 Syncing every airline now — I'll have fresh balances for you in a moment.";
       await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
       return { reply, balanceUpdateTriggeredAt: triggeredAt };

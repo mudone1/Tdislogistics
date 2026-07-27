@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { AirlineAIService } from "@/modules/airline-connectors/services/AirlineAIService";
+import { triggerBalanceUpdate } from "@/lib/balanceUpdateService";
 
 export const maxDuration = 30; // just fires the sync requests, doesn't wait for them to finish
 
@@ -11,7 +11,7 @@ export const maxDuration = 30; // just fires the sync requests, doesn't wait for
 // fresh balances are ready, the same job+poll shape as Book-on-Hold.
 export async function POST() {
   try {
-    const result = await AirlineAIService.triggerBalanceUpdate();
+    const result = await triggerBalanceUpdate();
     return NextResponse.json(result);
   } catch (err) {
     console.error("[balance-update/trigger] failed:", err);
