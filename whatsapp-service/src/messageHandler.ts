@@ -9,9 +9,13 @@ export interface IncomingMessage {
   text: string;
 }
 
-export interface OutgoingMessage {
-  chatId: string;
-  text: string;
+// Split into text/image rather than one "send whatever" call so a
+// Book-on-Hold confirmation screenshot (see bookingPoll.ts) can be sent as
+// a real WhatsApp image message with the PNR as its caption, matching
+// ChatBubble's BookingResultCard rather than just describing it in text.
+export interface MessageSender {
+  sendText: (chatId: string, text: string) => Promise<void>;
+  sendImage: (chatId: string, buffer: Buffer, caption?: string) => Promise<void>;
 }
 
 // Strips a leading/embedded "@tdisbot" (case-insensitive, trailing word
@@ -47,23 +51,23 @@ function mentionsBot(text: string): boolean {
 // responding to every unrelated message in a group it's just a member
 // of); a direct 1:1 message is already addressed to the bot, so no
 // trigger is required there.
-export async function handleIncomingMessage(
-  msg: IncomingMessage,
-  sendMessage: (out: OutgoingMessage) => Promise<void>
-): Promise<void> {
+export async function handleIncomingMessage(msg: IncomingMessage, sender: MessageSender): Promise<void> {
   if (msg.isGroup && !mentionsBot(msg.text)) return;
 
   const message = msg.isGroup ? stripTrigger(msg.text) : msg.text.trim();
   if (!message) return;
 
   const sessionKey = `whatsapp:${msg.chatId}`;
-  const reply = async (text: string) => sendMessage({ chatId: msg.chatId, text });
+  const reply = async (text: string) => sender.sendText(msg.chatId, text);
 
   try {
     const result = await askAssistant(sessionKey, msg.senderName, message);
     await reply(result.reply);
     if (result.bookingJobId) {
-      pollBookingJob(result.bookingJobId, (text) => reply(text));
+      pollBookingJob(result.bookingJobId, {
+        sendText: reply,
+        sendImage: (buffer, caption) => sender.sendImage(msg.chatId, buffer, caption),
+      });
     }
   } catch (err) {
     console.error(`[whatsapp] assistant call failed for chat ${msg.chatId}:`, err);

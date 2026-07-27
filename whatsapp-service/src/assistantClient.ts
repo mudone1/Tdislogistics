@@ -33,6 +33,8 @@ export interface BookingJobStatus {
     holdExpiresAt: string | null;
     totalPayable: number | null;
     currency: string | null;
+    hasScreenshot: boolean;
+    screenshotUrl: string | null; // relative path, e.g. "/api/assistant/book-hold/{id}/screenshot" — resolve against MAIN_APP_URL
   };
   error?: {
     message: string;
@@ -50,4 +52,16 @@ export async function getBookingJobStatus(jobId: string): Promise<BookingJobStat
     throw new Error(`Booking status API returned HTTP ${res.status}`);
   }
   return (await res.json()) as BookingJobStatus;
+}
+
+// The screenshot itself is served separately (kept out of the poll
+// response so that stays small — same reasoning as ChatBubble's <img src>
+// pointing at it directly rather than embedding the bytes).
+export async function getBookingScreenshot(screenshotUrl: string): Promise<Buffer> {
+  const res = await fetch(`${MAIN_APP_URL}${screenshotUrl}`);
+  if (!res.ok) {
+    throw new Error(`Screenshot fetch returned HTTP ${res.status}`);
+  }
+  const arrayBuffer = await res.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }

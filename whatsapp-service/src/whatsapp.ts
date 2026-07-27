@@ -1,7 +1,7 @@
 import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import P from "pino";
-import { handleIncomingMessage, type IncomingMessage, type OutgoingMessage } from "./messageHandler";
+import { handleIncomingMessage, type IncomingMessage } from "./messageHandler";
 
 // Persisted WhatsApp session credentials — see README for why this must
 // survive restarts. Configurable so a Railway (or similar) deployment can
@@ -82,8 +82,13 @@ export async function connectWhatsApp(): Promise<void> {
         text,
       };
 
-      await handleIncomingMessage(incoming, async (out: OutgoingMessage) => {
-        await sock.sendMessage(out.chatId, { text: out.text });
+      await handleIncomingMessage(incoming, {
+        sendText: async (targetChatId, text) => {
+          await sock.sendMessage(targetChatId, { text });
+        },
+        sendImage: async (targetChatId, buffer, caption) => {
+          await sock.sendMessage(targetChatId, { image: buffer, caption });
+        },
       }).catch((err) => console.error(`[whatsapp] handling message from ${chatId} failed:`, err));
     }
   });
