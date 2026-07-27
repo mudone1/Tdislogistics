@@ -1,0 +1,25 @@
+{
+  "name": "tdis-whatsapp-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone service connecting a WhatsApp number (via Baileys, an unofficial WhatsApp Web protocol client) to the TDIS AI assistant. Deployed separately from the Next.js app — holds a persistent socket connection to WhatsApp, which a serverless/short-lived process can't do. Talks to the main app's existing /api/assistant/quote and /api/assistant/book-hold/[id] over HTTP; holds no database connection of its own.",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.9",
+    "express": "^4.21.2",
+    "qrcode-terminal": "^0.12.0",
+    "dotenv": "^16.4.7",
+    "pino": "^9.5.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "tsx": "^4.19.2",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "@types/qrcode-terminal": "^0.12.2"
+  }
+}

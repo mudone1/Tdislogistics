@@ -649,6 +649,53 @@ function matchTimeSelection(message: string, options: string[]): string | null {
   return null;
 }
 
+interface ShownFlightReferenceOutcome {
+  // The single flight the message unambiguously resolved to, or null if
+  // either nothing matched or more than one candidate remains (see
+  // ambiguousCandidates in that case).
+  matched: FlightOption | null;
+  // Non-null only when more than one option could plausibly be meant —
+  // their departure times, to ask the user to pick one via the same
+  // pendingDepartureTimeOptions mechanism used elsewhere. Never silently
+  // pick between tied/ambiguous candidates.
+  ambiguousCandidates: string[] | null;
+}
+
+// Resolves a follow-up like "book the 10:50 one", "book the cheapest",
+// "book that flight" against the Enugu Air options from the user's most
+// recent search this session. Tries, in order: explicit time or ordinal/
+// position (reusing matchTimeSelection), then "cheapest"/"lowest fare",
+// then — only when nothing more specific matched — falls back to "the
+// only option" (safe, no ambiguity) or "ask which one" (more than one
+// option and nothing narrowed it down; never guess).
+function resolveShownFlightReference(rawMessage: string, options: FlightOption[]): ShownFlightReferenceOutcome {
+  const times = options.map((o) => o.departureTime).filter((t): t is string => !!t);
+
+  const byTimeOrOrdinal = matchTimeSelection(rawMessage, times);
+  if (byTimeOrOrdinal) {
+    const match = options.find((o) => o.departureTime === byTimeOrOrdinal);
+    if (match) return { matched: match, ambiguousCandidates: null };
+  }
+
+  if (/\bcheap|lowest fare|lowest price/i.test(rawMessage)) {
+    const priced = options.filter((o) => o.fare != null);
+    if (priced.length > 0) {
+      const minFare = Math.min(...priced.map((o) => o.fare!));
+      const cheapest = priced.filter((o) => o.fare === minFare);
+      if (cheapest.length === 1) return { matched: cheapest[0], ambiguousCandidates: null };
+      return { matched: null, ambiguousCandidates: cheapest.map((o) => o.departureTime).filter(Boolean) };
+    }
+  }
+
+  if (options.length === 1) {
+    return { matched: options[0], ambiguousCandidates: null };
+  }
+  if (options.length > 1) {
+    return { matched: null, ambiguousCandidates: times };
+  }
+  return { matched: null, ambiguousCandidates: null };
+}
+
 interface LegFlightChoiceOutcome {
   // Non-null when the caller should respond with this instead of
   // proceeding — either an error/no-flights message, or an ambiguity
@@ -769,6 +816,56 @@ async function handleBookOnHold(
     }
     slots.selectedReturnTime = matched;
     slots.pendingReturnTimeOptions = null;
+  }
+
+  // No route/date at all — rather than immediately asking for them, check
+  // whether this message is referencing a flight from the most recent
+  // search shown this session ("book the 10:50 one", "book the cheapest",
+  // "book that flight"). A plain search deliberately clears origin/
+  // destination/date/airline (see resetRouteSlots) precisely so a later
+  // unrelated message doesn't silently reuse a stale route — so this has
+  // to pull the route from the SAVED SEARCH RECORD, not slots.
+  if (!slots.origin && !slots.destination && !slots.date) {
+    const recent = await FlightSearchHistoryRepository.getRecentForSession(sessionId, 1);
+    const record = recent[0];
+    // Only treat this as "referencing what I just showed you" if that
+    // search genuinely happened moments ago — a long-lived session could
+    // have a search from hours or days back as its "most recent" one, and
+    // a vague new booking request ("I want to book a flight") shouldn't
+    // get silently hijacked into disambiguating against a stale list the
+    // user has long forgotten about.
+    const isRecent = record ? Date.now() - record.createdAt.getTime() < 15 * 60 * 1000 : false;
+    if (record && isRecent) {
+      const results = record.resultsJson as unknown as FlightSearchResult;
+      // Scoped to Enugu Air only, matching the current booking
+      // restriction — a shown United/Rano/XeJet option can never actually
+      // be held right now, so resolving a reference to one of those would
+      // just be setting the user up for the "not wired up yet" message
+      // moments later instead of now.
+      const enuguOptions = results.options.filter((o) => o.airline === "Enugu Air");
+      if (enuguOptions.length > 0) {
+        const outcome = resolveShownFlightReference(rawMessage, enuguOptions);
+        if (outcome.matched || outcome.ambiguousCandidates) {
+          slots.airline = "ENUGU";
+          slots.origin = record.origin;
+          slots.destination = record.destination;
+          slots.date = record.date;
+          if (outcome.matched) {
+            slots.selectedDepartureTime = outcome.matched.departureTime;
+          } else {
+            const reply = `I found more than one Enugu Air option from that search — which one?\n${outcome.ambiguousCandidates!.map((t) => `• ${t}`).join("\n")}`;
+            slots.pendingDepartureTimeOptions = outcome.ambiguousCandidates!;
+            await ChatMemoryRepository.updateSlots(sessionId, slots);
+            await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+            return { reply };
+          }
+        }
+        // No match at all falls through to the normal clarifying question
+        // below — the reference didn't resolve to anything, so asking for
+        // the route plainly is the right fallback, same as if there'd been
+        // no prior search to check.
+      }
+    }
   }
 
   const gaps = collectBookingGaps(slots);

@@ -10,6 +10,10 @@ node_modules/
 # production
 /build
 connector-service/dist/
+whatsapp-service/dist/
+
+# WhatsApp session credentials — treat like a secret, never commit
+whatsapp-service/auth_info/
 
 # env
 .env*.local
@@ -29,3 +33,7 @@ next-env.d.ts
 
 .vercel
 .env*
+# .env.example files are safe templates (no secrets) and should always be
+# committed — re-include them despite the broad .env* rule above.
+!.env.example
+!**/.env.example
