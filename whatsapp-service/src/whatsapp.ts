@@ -3,7 +3,11 @@ import qrcode from "qrcode-terminal";
 import P from "pino";
 import { handleIncomingMessage, type IncomingMessage, type OutgoingMessage } from "./messageHandler";
 
-const AUTH_DIR = "auth_info"; // persisted WhatsApp session credentials — see README for why this must survive restarts
+// Persisted WhatsApp session credentials — see README for why this must
+// survive restarts. Configurable so a Railway (or similar) deployment can
+// point it at a mounted volume instead of the container's ephemeral
+// filesystem, which gets wiped on every redeploy.
+const AUTH_DIR = process.env.AUTH_DIR || "auth_info";
 
 // Wraps Baileys (an unofficial WhatsApp Web protocol client — see the
 // service README for why this is used instead of Meta's official Cloud
