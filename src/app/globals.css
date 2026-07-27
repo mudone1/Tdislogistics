@@ -1076,6 +1076,42 @@ input:focus, select:focus { box-shadow: 0 0 0 3px rgba(24,79,115,0.10); }
 .tdis-chat-controls button:hover { background: rgba(255,255,255,0.18); border-color: rgba(196,154,42,0.4); color: white; }
 .tdis-chat-controls button.active { background: var(--gold-light); border-color: var(--gold-light); color: var(--navy-dark); }
 
+/* ── Voice call (Realtime API) ── */
+.tdis-chat-voicebtn.active {
+  background: var(--red);
+  border-color: var(--red);
+  color: white;
+  animation: voicePulse 1.6s ease-in-out infinite;
+}
+@keyframes voicePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(192,57,43,0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(192,57,43,0); }
+}
+.tdis-chat-live-badge {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--red-light);
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  margin: 4px 0;
+}
+.tdis-chat-live-badge button {
+  background: white;
+  border: 1px solid var(--red);
+  color: var(--red);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tdis-chat-live-badge button:hover { background: var(--red); color: white; }
+
 /* ── Resize handles (floating, undocked mode only) ── */
 .tdis-chat-resize { position: absolute; z-index: 1; }
 .tdis-chat-resize.r-n { top: -3px; left: 8px; right: 8px; height: 6px; cursor: ns-resize; }

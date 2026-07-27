@@ -13,6 +13,7 @@ import {
   cheapestFareClass,
 } from "@/modules/travel-assistant/formatting/formatFlightResults";
 import FlightCards, { type FlightLeg } from "./FlightCards";
+import { useRealtimeVoice } from "./chat/useRealtimeVoice";
 
 interface BookingResult {
   pnr: string | null;
@@ -262,8 +263,8 @@ export default function ChatBubble() {
   }, []);
 
   const sendMessage = useCallback(
-    async (text: string): Promise<void> => {
-      if (!text || sending) return;
+    async (text: string): Promise<{ reply: string; hasResults: boolean } | undefined> => {
+      if (!text || sending) return undefined;
 
       setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
       setSending(true);
@@ -277,9 +278,10 @@ export default function ChatBubble() {
 
         if (!res.ok) {
           console.error(`[assistant] request failed: HTTP ${res.status}`);
-          setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: describeHttpError(res.status) }]);
+          const errorText = describeHttpError(res.status);
+          setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: errorText }]);
           setPending(null);
-          return;
+          return { reply: errorText, hasResults: false };
         }
 
         const data = await res.json();
@@ -314,18 +316,15 @@ export default function ChatBubble() {
           refresh();
           prefetchQuoteImage(newId, legs);
         }
+
+        return { reply: data.reply || "No response.", hasResults };
       } catch (err) {
         console.error("[assistant] request threw:", err);
         const reason = err instanceof Error ? err.message : String(err);
-        setMessages((m: ChatMessage[]) => [
-          ...m,
-          {
-            id: idCounter++,
-            role: "assistant",
-            text: `Couldn't reach the search service — check your connection and try again.${errorContactNote(reason)}`,
-          },
-        ]);
+        const errorText = `Couldn't reach the search service — check your connection and try again.${errorContactNote(reason)}`;
+        setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: errorText }]);
         setPending(null);
+        return { reply: errorText, hasResults: false };
       } finally {
         setSending(false);
       }
@@ -557,48 +556,76 @@ export default function ChatBubble() {
     }
   }
 
+  // Shared by typed input (send(), below) and voice input (the
+  // route_to_travel_assistant tool bridge passed to useRealtimeVoice) so
+  // both respect the same pending-upload-confirmation branching — without
+  // this, a voice reply given while a sales-report upload confirmation is
+  // pending would be misrouted straight into sendMessage as if it were a
+  // flight query. Returns a short text summary suitable for voice to speak;
+  // typed input ignores the return value.
+  const dispatchUserText = useCallback(
+    async (text: string): Promise<string> => {
+      if (pendingUploadFile) {
+        const file = pendingUploadFile;
+        if (/^cancel$/i.test(text)) {
+          setPendingUploadFile(null);
+          setPendingDetection(null);
+          setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }, { id: idCounter++, role: "assistant", text: "Cancelled that upload." }]);
+          return "Cancelled the pending upload.";
+        }
+
+        setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
+
+        // Confirming a detection guess ("yes") re-uses that guess directly
+        // rather than requiring the airline to be re-typed.
+        if (pendingDetection && /^(yes|y|correct|confirm)$/i.test(text)) {
+          const detection = pendingDetection;
+          setPendingUploadFile(null);
+          setPendingDetection(null);
+          handleGenerateReport(file, detection.key, detection.label);
+          return `Generating the ${detection.label} sales report now — it'll show up in the chat.`;
+        }
+
+        const airline = matchSalesReportAirline(text);
+        if (!airline) {
+          const notRecognized = 'I didn\'t recognize that airline — please reply Aero, Airpeace, Ibom, or Arik, or "cancel" to skip this upload.';
+          setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: notRecognized }]);
+          return notRecognized;
+        }
+        setPendingUploadFile(null);
+        setPendingDetection(null);
+        handleGenerateReport(file, airline.key, airline.label);
+        return `Generating the ${airline.label} sales report now — it'll show up in the chat.`;
+      }
+
+      const result = await sendMessage(text);
+      return result?.reply ?? "That's in the chat now.";
+    },
+    [pendingUploadFile, pendingDetection, sendMessage]
+  );
+
   function send(): void {
     const text = input.trim();
     if (!text) return;
     setInput("");
-
-    if (pendingUploadFile) {
-      const file = pendingUploadFile;
-      if (/^cancel$/i.test(text)) {
-        setPendingUploadFile(null);
-        setPendingDetection(null);
-        setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }, { id: idCounter++, role: "assistant", text: "Cancelled that upload." }]);
-        return;
-      }
-
-      setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
-
-      // Confirming a detection guess ("yes") re-uses that guess directly
-      // rather than requiring the airline to be re-typed.
-      if (pendingDetection && /^(yes|y|correct|confirm)$/i.test(text)) {
-        const detection = pendingDetection;
-        setPendingUploadFile(null);
-        setPendingDetection(null);
-        handleGenerateReport(file, detection.key, detection.label);
-        return;
-      }
-
-      const airline = matchSalesReportAirline(text);
-      if (!airline) {
-        setMessages((m: ChatMessage[]) => [
-          ...m,
-          { id: idCounter++, role: "assistant", text: 'I didn\'t recognize that airline — please reply Aero, Airpeace, Ibom, or Arik, or "cancel" to skip this upload.' },
-        ]);
-        return;
-      }
-      setPendingUploadFile(null);
-      setPendingDetection(null);
-      handleGenerateReport(file, airline.key, airline.label);
-      return;
-    }
-
-    sendMessage(text);
+    dispatchUserText(text);
   }
+
+  // Echoes the user's transcribed speech into the chat as a normal message
+  // bubble, same as a typed message would show — never leave the user
+  // guessing what the mic actually heard. The model's own spoken replies
+  // aren't separately echoed here (they'd duplicate the tool-call summary
+  // and any FlightCards/BookingResultCard already rendered by dispatchUserText).
+  const handleVoiceTranscript = useCallback((role: "user" | "assistant", text: string) => {
+    if (role !== "user" || !text.trim()) return;
+    setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
+  }, []);
+
+  const voice = useRealtimeVoice({
+    sessionKey: identity?.sessionKey ?? null,
+    onToolCall: dispatchUserText,
+    onTranscript: handleVoiceTranscript,
+  });
 
   // A notification bell click for a saved search dispatches this with the
   // reference ID — reuse the existing bare-reference-ID lookup shortcut
@@ -781,15 +808,28 @@ function describeHttpError(status: number): string {
     return `That request didn't go through — try rephrasing it.${errorContactNote(`HTTP ${status}`)}`;
   }
 
+  const voiceLive = voice.state === "listening" || voice.state === "speaking";
+
   const headerExtras = (
-    <button
-      className="tdis-chat-headerbtn"
-      onClick={() => (historyOpen ? setHistoryOpen(false) : openHistory())}
-      aria-label={historyOpen ? "Back to conversation" : "Search history"}
-      title={historyOpen ? "Back" : "Search history"}
-    >
-      {historyOpen ? "← Back" : "🕘"}
-    </button>
+    <>
+      <button
+        className={`tdis-chat-headerbtn tdis-chat-voicebtn ${voiceLive ? "active" : ""}`}
+        onClick={() => (voice.state === "idle" || voice.state === "error" ? voice.start() : voice.stop())}
+        disabled={voice.state === "connecting"}
+        aria-label={voiceLive ? "End voice call" : voice.state === "connecting" ? "Connecting…" : "Start voice call"}
+        title={voice.errorMessage ?? (voiceLive ? "End voice call" : "Talk to the assistant")}
+      >
+        {voice.state === "connecting" ? "⏳" : voiceLive ? "🔴" : "🎙️"}
+      </button>
+      <button
+        className="tdis-chat-headerbtn"
+        onClick={() => (historyOpen ? setHistoryOpen(false) : openHistory())}
+        aria-label={historyOpen ? "Back to conversation" : "Search history"}
+        title={historyOpen ? "Back" : "Search history"}
+      >
+        {historyOpen ? "← Back" : "🕘"}
+      </button>
+    </>
   );
 
   return (
@@ -878,6 +918,18 @@ function describeHttpError(status: number): string {
               {(sending || generatingReport) && (
                 <div className="chat-bubble-msg assistant chat-bubble-typing">
                   {generatingReport ? "📊 Generating sales report…" : "🔍 Searching available flights…"}
+                </div>
+              )}
+              {voiceLive && (
+                <div className="tdis-chat-live-badge">
+                  🔴 Voice call live — {voice.state === "listening" ? "listening…" : "speaking…"}
+                  <button type="button" onClick={voice.toggleMute}>{voice.muted ? "Unmute" : "Mute"}</button>
+                  <button type="button" onClick={voice.stop}>End call</button>
+                </div>
+              )}
+              {voice.errorMessage && !voiceLive && (
+                <div className="chat-bubble-msg assistant" style={{ borderLeft: "3px solid #e11d48" }}>
+                  ⚠️ {voice.errorMessage}
                 </div>
               )}
             </div>
