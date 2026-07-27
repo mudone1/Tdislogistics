@@ -93,6 +93,104 @@ export interface BookOnHoldResult {
   screenshot: Buffer | null;
 }
 
+// Caches authenticated session cookies (Playwright's storageState) per
+// airline, keyed by config.logTag, for the lifetime of the connector-service
+// process — this is the one part of this system that IS a long-running
+// process (unlike the Next.js/Vercel side calling into it), so this is a
+// safe place for this pattern. Deliberately does NOT keep a live
+// Browser/Context/Page alive across bookings — that risks unbounded memory
+// growth, zombie Chromium processes if the service restarts uncleanly, or a
+// shared page silently ending up in a broken state no one notices until the
+// next booking mysteriously fails. Instead, every booking still gets a
+// brand-new, fully disposable browser+context (closed in `finally` exactly
+// as before) — the only thing reused is the cookie jar, seeded into that
+// fresh context via `storageState`. If the cache is empty, stale by the
+// heuristic below, or the live probe finds it's actually expired, this
+// degrades to exactly today's behavior: a full fresh login. It only ever
+// saves time; it can't make a booking less reliable than before.
+const sessionCache = new Map<
+  string,
+  { storageState: Awaited<ReturnType<import("playwright").BrowserContext["storageState"]>>; savedAt: number }
+>();
+// A conservative guess, not independently confirmed against the real VARS
+// portal's actual session lifetime — used only as a cheap first-pass filter
+// to skip an obviously-stale entry without even trying it. The real check
+// is always the live LOGGED_IN_MARKER probe below; this number being wrong
+// in either direction only costs a little speed, never correctness.
+const SESSION_MAX_AGE_MS = 25 * 60 * 1000;
+
+// Establishes a logged-in page, reusing a cached session when one exists
+// and still checks out live, otherwise falling back to a full login —
+// identical mechanism/selectors as before, just conditionally skipped.
+async function establishSession(
+  browser: import("playwright").Browser,
+  loginUrl: string,
+  requirementsUrl: string,
+  credentials: BookOnHoldCredentials,
+  logTag: string
+): Promise<{ context: import("playwright").BrowserContext; page: import("playwright").Page }> {
+  const cached = sessionCache.get(logTag);
+  const cacheUsable = !!cached && Date.now() - cached.savedAt < SESSION_MAX_AGE_MS;
+
+  const newContext = () => {
+    const ctx = browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      ...(cacheUsable ? { storageState: cached!.storageState } : {}),
+    });
+    return ctx;
+  };
+
+  let context = await newContext();
+  context.on("dialog", (dialog) => {
+    console.log(`[${logTag}] dialog appeared: "${dialog.message()}"`);
+    dialog.dismiss().catch(() => {});
+  });
+  let page = await context.newPage();
+
+  if (cacheUsable) {
+    // Probe with a short timeout — if the cached cookies are still good
+    // this resolves almost immediately (no login form to wait through); if
+    // they've expired, fail fast rather than eating the full 20s
+    // login-marker timeout for a session already suspected dead.
+    console.log(`[${logTag}] trying cached session`);
+    await page.goto(requirementsUrl, { waitUntil: "domcontentloaded" });
+    const stillLoggedIn = await page
+      .locator(LOGGED_IN_MARKER)
+      .waitFor({ state: "visible", timeout: 4000 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (stillLoggedIn) {
+      console.log(`[${logTag}] cached session still valid, skipped login`);
+      return { context, page };
+    }
+
+    console.log(`[${logTag}] cached session expired, logging in fresh`);
+    sessionCache.delete(logTag);
+    await context.close().catch(() => {});
+    context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    context.on("dialog", (dialog) => {
+      console.log(`[${logTag}] dialog appeared: "${dialog.message()}"`);
+      dialog.dismiss().catch(() => {});
+    });
+    page = await context.newPage();
+  }
+
+  console.log(`[${logTag}] logging in`);
+  await page.goto(loginUrl, { waitUntil: "domcontentloaded" });
+  await page.locator("#txtSineCode").fill(credentials.username);
+  await page.locator("#txtPassword").fill(credentials.password);
+  await page.locator("#btnOk").click();
+  await page.locator(LOGGED_IN_MARKER).waitFor({ state: "visible", timeout: 20000 });
+  sessionCache.set(logTag, { storageState: await context.storageState(), savedAt: Date.now() });
+
+  // Always return with the page already sitting on requirementsUrl, same
+  // as the cached-session path above — the caller never needs to know or
+  // branch on which path was taken.
+  await page.goto(requirementsUrl, { waitUntil: "domcontentloaded" });
+  return { context, page };
+}
+
 export async function bookVarsPlatformOnHold(
   credentials: BookOnHoldCredentials,
   request: BookOnHoldRequest,
@@ -106,24 +204,13 @@ export async function bookVarsPlatformOnHold(
   });
 
   try {
-    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-    context.on("dialog", (dialog) => {
-      console.log(`[${logTag}] dialog appeared: "${dialog.message()}"`);
-      dialog.dismiss().catch(() => {});
-    });
-    const page = await context.newPage();
+    const { context, page } = await establishSession(browser, loginUrl, requirementsUrl, credentials, logTag);
 
-    // --- Login (identical mechanism across every VARS airline) ---
-    console.log(`[${logTag}] logging in`);
-    await page.goto(loginUrl, { waitUntil: "domcontentloaded" });
-    await page.locator("#txtSineCode").fill(credentials.username);
-    await page.locator("#txtPassword").fill(credentials.password);
-    await page.locator("#btnOk").click();
-    await page.locator(LOGGED_IN_MARKER).waitFor({ state: "visible", timeout: 20000 });
-
-    // --- Search (same public CustomerPanels flow, now under the agent session) ---
+    // --- Search (same public CustomerPanels flow, now under the agent
+    // session) --- establishSession already leaves the page sitting on
+    // requirementsUrl either way (cached-session probe, or the fresh-login
+    // path's own navigation there) — no re-navigation needed here.
     console.log(`[${logTag}] searching ${request.origin}->${request.destination}`);
-    await page.goto(requirementsUrl, { waitUntil: "domcontentloaded" });
     await page.locator("#Origin").selectOption(request.origin);
     await page.locator("#Destination").selectOption(request.destination);
     // The Return/One Way control is a Bootstrap .btn-check radio — its
@@ -205,7 +292,11 @@ export async function bookVarsPlatformOnHold(
         .click({ timeout: 10000 })
         .catch((err) => console.warn(`[${logTag}] remove-product click ${i} failed, continuing: ${err}`));
       await page.locator("#spinnerModal.in").waitFor({ state: "hidden", timeout: 10000 }).catch(() => {});
-      await page.waitForTimeout(300);
+      // Reduced from 300ms — the spinner-hidden wait above already
+      // confirms the removal's postback finished; this is just a small
+      // margin for the list DOM to re-render before the next iteration's
+      // index-0 click, not a real settle time we've seen fail at 150ms.
+      await page.waitForTimeout(150);
     }
 
     await clickNext(page, "products", logTag);
@@ -307,9 +398,17 @@ export async function bookVarsPlatformOnHold(
     };
     page.on("response", validationListener);
     await clickNext(page, "payment-details", logTag);
-    await page.waitForTimeout(2000);
-    page.off("response", validationListener);
+    // Short sanity buffer only — NOT the sole safety net for catching a
+    // validation error. Previously this was a flat, unconditional 2000ms
+    // wait on every single booking, after which the listener was detached;
+    // that could also silently miss a slower validation response arriving
+    // just after the 2s cutoff. Now the listener stays attached through the
+    // confirmation-page wait below too, and is checked again there — so
+    // this is both faster in the common case and strictly more robust for
+    // a slow validation response, not a speed/safety tradeoff.
+    await page.waitForTimeout(500);
     if (validationError) {
+      page.off("response", validationListener);
       throw new Error(`Booking validation failed: ${validationError}`);
     }
 
@@ -319,6 +418,7 @@ export async function bookVarsPlatformOnHold(
       .first()
       .waitFor({ state: "visible", timeout: 30000 })
       .catch(async (err) => {
+        if (validationError) throw new Error(`Booking validation failed: ${validationError}`);
         const diagnostic = await page.evaluate(() => ({
           url: window.location.href,
           visibleButtons: Array.from(
@@ -331,6 +431,10 @@ export async function bookVarsPlatformOnHold(
         console.error(`[${logTag}] confirmation page never appeared. DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
         throw err;
       });
+    page.off("response", validationListener);
+    if (validationError) {
+      throw new Error(`Booking validation failed: ${validationError}`);
+    }
 
     // Click the final Confirm/Submit button to actually complete the booking —
     // not required: some flights land straight on Manage My Booking (PNR
@@ -351,19 +455,28 @@ export async function bookVarsPlatformOnHold(
       });
 
     const raw = await page.locator("body").innerText();
-    // Best-effort — a screenshot failure must never turn a real successful
-    // hold into a failed job, so swallow and fall back to null.
-    const screenshot = await page.screenshot({ fullPage: true }).catch(() => null);
-    const result = parseConfirmation(raw, screenshot);
+    // Parse the PNR out of the raw text immediately (cheap regex, no
+    // screenshot needed for it) so verification can start right away —
+    // it runs on its own fresh page in the same context, fully independent
+    // of the screenshot below, so there's no reason to run them one after
+    // the other. Previously this was sequential: wait for the screenshot,
+    // THEN separately wait for verification (full navigation + form fill +
+    // networkidle). Running them concurrently costs only the slower of the
+    // two instead of the sum of both.
+    const pnr = parseConfirmation(raw, null).pnr;
 
     // Independent verification, not just trusting the in-flow page — see
     // the mmbUrl comment above for exactly why that page alone isn't
     // trustworthy (confirmed for Enugu Air: it can show booking-management
     // nav chrome with no actual booking behind it).
-    console.log(`[${logTag}] verifying PNR "${result.pnr}" via public Manage My Booking lookup`);
-    const verified = result.pnr
-      ? await verifyBookingReference(context, mmbUrl, result.pnr, request.passenger.lastName, logTag)
-      : false;
+    console.log(`[${logTag}] verifying PNR "${pnr}" via public Manage My Booking lookup (in parallel with screenshot capture)`);
+    const [screenshot, verified] = await Promise.all([
+      // Best-effort — a screenshot failure must never turn a real
+      // successful hold into a failed job, so swallow and fall back to null.
+      page.screenshot({ fullPage: true }).catch(() => null),
+      pnr ? verifyBookingReference(context, mmbUrl, pnr, request.passenger.lastName, logTag) : Promise.resolve(false),
+    ]);
+    const result = parseConfirmation(raw, screenshot);
     if (!verified) {
       throw new Error(
         result.pnr

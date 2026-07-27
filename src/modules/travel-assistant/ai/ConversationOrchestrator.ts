@@ -421,6 +421,45 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   if (e.passengerLastName?.trim()) slots.passengerLastName = e.passengerLastName.trim();
   if (e.passengerPhone?.trim()) slots.passengerPhone = e.passengerPhone.trim();
   if (e.passengerEmail?.trim()) slots.passengerEmail = e.passengerEmail.trim();
+
+  // Reproduced live: the LLM occasionally comes back with route/date
+  // extracted but passenger email/phone left null even though the raw
+  // message plainly contains both — same class of "don't trust the LLM's
+  // extraction on faith" issue messageActuallyNamesAirline already exists
+  // for. Unlike a name, an email or phone number has a simple, reliable
+  // pattern that doesn't need an LLM at all — check the raw text directly
+  // as a safety net whenever the LLM didn't already provide one, so a
+  // clearly-present contact detail can never get silently dropped into a
+  // "please give me your email/phone" re-ask the user just answered.
+  if (!slots.passengerEmail) {
+    const emailMatch = rawMessage.match(EMAIL_SEARCH_RE);
+    if (emailMatch) slots.passengerEmail = emailMatch[0];
+  }
+  if (!slots.passengerPhone) {
+    const phoneFound = findPhoneInText(rawMessage);
+    if (phoneFound) slots.passengerPhone = phoneFound;
+  }
+}
+
+// Non-anchored — finds an email ANYWHERE in raw free text, unlike the
+// validate-an-already-extracted-value EMAIL_RE further down this file.
+const EMAIL_SEARCH_RE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+
+// Finds a plausible Nigerian phone number anywhere in raw free text —
+// a run of digits (allowing spaces/dashes and an optional leading +) that,
+// stripped down, is 10-14 digits long (covers local 11-digit numbers like
+// "08140962303" and +234-prefixed international form). Deliberately not
+// reused for the flight-date portion of a message — a date like "30th jul"
+// or "2026-07-30" never produces a long enough contiguous digit run to
+// false-positive here.
+function findPhoneInText(text: string): string | null {
+  const candidates = text.match(/\+?[\d][\d\s-]{8,17}\d/g);
+  if (!candidates) return null;
+  for (const candidate of candidates) {
+    const digits = candidate.replace(/\D/g, "");
+    if (digits.length >= 10 && digits.length <= 14) return candidate.trim();
+  }
+  return null;
 }
 
 function messageActuallyNamesAirline(rawMessage: string, airline: string): boolean {
