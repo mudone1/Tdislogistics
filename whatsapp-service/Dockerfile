@@ -6,7 +6,7 @@
 #   docker build -f whatsapp-service/Dockerfile -t tdis-whatsapp-service whatsapp-service
 #   docker run --env-file whatsapp-service/.env -p 4200:4200 -v whatsapp_auth:/app/auth_info tdis-whatsapp-service
 
-FROM node:20-slim AS base
+FROM node:24-slim AS base
 WORKDIR /app
 
 COPY package.json package-lock.json* ./

@@ -41,7 +41,11 @@ export interface BookingJobStatus {
 }
 
 export async function getBookingJobStatus(jobId: string): Promise<BookingJobStatus> {
-  const res = await fetch(`${MAIN_APP_URL}/api/assistant/book-hold/${jobId}`, { cache: "no-store" });
+  // Plain external HTTP call from a Node process, not a Next.js server
+  // component — {cache: "no-store"} is a Next.js fetch extension with no
+  // effect (and, depending on the Node/undici version's RequestInit
+  // types, not even a valid property) here.
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/book-hold/${jobId}`);
   if (!res.ok) {
     throw new Error(`Booking status API returned HTTP ${res.status}`);
   }
