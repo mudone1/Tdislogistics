@@ -9,6 +9,18 @@ import { handleIncomingMessage, type IncomingMessage, type OutgoingMessage } fro
 // filesystem, which gets wiped on every redeploy.
 const AUTH_DIR = process.env.AUTH_DIR || "auth_info";
 
+// The latest pending QR string, if any — read by the /qr HTTP route (see
+// index.ts) so it can be rendered as a real scannable image. ASCII-art QR
+// codes in a web-based log viewer (rather than a real terminal) often
+// distort under line-wrapping/font-aspect-ratio and become unscannable,
+// which is exactly what happened trying to pair this on Railway.
+let latestQR: string | null = null;
+let connectionStatus: "connecting" | "open" | "closed" = "connecting";
+
+export function getQRState(): { qr: string | null; status: typeof connectionStatus } {
+  return { qr: latestQR, status: connectionStatus };
+}
+
 // Wraps Baileys (an unofficial WhatsApp Web protocol client — see the
 // service README for why this is used instead of Meta's official Cloud
 // API, which doesn't support a bot participating in group chats).
@@ -30,11 +42,15 @@ export async function connectWhatsApp(): Promise<void> {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
+      latestQR = qr;
+      connectionStatus = "connecting";
       console.log("\nScan this QR code with WhatsApp (Settings -> Linked Devices -> Link a Device):\n");
+      console.log("Or, more reliably, open this service's /qr HTTP endpoint in a browser.\n");
       qrcode.generate(qr, { small: true });
     }
 
     if (connection === "close") {
+      connectionStatus = "closed";
       const statusCode = (lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
       const loggedOut = statusCode === DisconnectReason.loggedOut;
       console.log(`[whatsapp] connection closed (statusCode=${statusCode}) — ${loggedOut ? "logged out, not reconnecting" : "reconnecting"}`);
@@ -42,6 +58,8 @@ export async function connectWhatsApp(): Promise<void> {
         connectWhatsApp().catch((err) => console.error("[whatsapp] reconnect failed:", err));
       }
     } else if (connection === "open") {
+      latestQR = null;
+      connectionStatus = "open";
       console.log("[whatsapp] connected");
     }
   });
