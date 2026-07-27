@@ -14,19 +14,28 @@ export interface OutgoingMessage {
   text: string;
 }
 
-// Strips a leading/embedded "@tdisbot" (case-insensitive, whole-word so it
-// doesn't also eat a longer name that happens to contain it) from the
-// message text. Users typically type this as plain text rather than using
-// WhatsApp's actual @-mention picker, so matching on the literal string is
-// more reliable than relying on WhatsApp's structured mention metadata.
+// Strips a leading/embedded "@tdisbot" (case-insensitive, trailing word
+// boundary so it doesn't also eat a longer word that happens to start with
+// it, e.g. "@tdisbotter") from the message text. Users typically type this
+// as plain text rather than using WhatsApp's actual @-mention picker, so
+// matching on the literal string is more reliable than relying on
+// WhatsApp's structured mention metadata.
+//
+// No LEADING \b before the trigger — "@" is a non-word character, so a
+// word-boundary assertion immediately before it can never match at the
+// start of a message or right after a space (there's no \w/\W transition
+// there), which is exactly how everyone actually types it. An earlier
+// version had \b on both sides and silently matched nothing as a result.
+function buildTriggerPattern(): RegExp {
+  return new RegExp(`${BOT_MENTION_TRIGGER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+}
+
 function stripTrigger(text: string): string {
-  const pattern = new RegExp(`\\b${BOT_MENTION_TRIGGER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
-  return text.replace(pattern, "").trim();
+  return text.replace(buildTriggerPattern(), "").trim();
 }
 
 function mentionsBot(text: string): boolean {
-  const pattern = new RegExp(`\\b${BOT_MENTION_TRIGGER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
-  return pattern.test(text);
+  return buildTriggerPattern().test(text);
 }
 
 // Decides whether to respond at all, and if so, forwards the (trigger-
