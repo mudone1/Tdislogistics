@@ -86,18 +86,20 @@ export async function POST(req: Request) {
           instructions: `${VOICE_SYSTEM_PROMPT}\n\n${STAFF_KNOWLEDGE}`,
           // input.transcription turns on text transcripts of the user's own
           // speech (surfaced client-side as conversation.item events) so the
-          // UI can echo what was heard, same as a typed message would show —
-          // field nesting confirmed for audio.output.voice directly from
-          // OpenAI's docs; audio.input.transcription is inferred by analogy
-          // and not independently doc-confirmed, so verify live and adjust
-          // if the transcript events don't show up.
+          // UI can echo what was heard, same as a typed message would show.
+          // Whole shape (including audio.input.transcription) confirmed live
+          // against the real endpoint — a 200 response echoing this exact
+          // structure back, not just inferred from docs.
           audio: {
             input: { transcription: { model: "whisper-1" } },
             output: { voice: REALTIME_VOICE },
           },
           tools: [ROUTE_TO_TRAVEL_ASSISTANT_TOOL],
           tool_choice: "auto",
-          max_response_output_tokens: MAX_RESPONSE_OUTPUT_TOKENS,
+          // NOT max_response_output_tokens (that's the old preview API's
+          // name and gets rejected with "Unknown parameter" — confirmed
+          // live) — this field is just max_output_tokens now.
+          max_output_tokens: MAX_RESPONSE_OUTPUT_TOKENS,
         },
       }),
     });
