@@ -27,6 +27,11 @@ interface BookingState {
   jobId: string;
   status: "processing" | "success" | "failed";
   result?: BookingResult;
+  // Prefetched as soon as the hold succeeds (see prefetchBookingScreenshot)
+  // so the WhatsApp share button's navigator.share() call stays synchronous
+  // with the click — same user-activation constraint documented for quote
+  // image sharing below.
+  screenshotBlob?: Blob;
   error?: { message: string; detail: string | null };
 }
 
@@ -64,6 +69,21 @@ function matchSalesReportAirline(text: string): { key: string; label: string } |
   const t = text.toLowerCase();
   const match = SALES_REPORT_AIRLINES.find((a) => a.aliases.some((alias) => t.includes(alias)));
   return match ? { key: match.key, label: match.label } : null;
+}
+
+// Cheap, deterministic pre-check for "this looks like a booking request" —
+// mirrors the same booking-verb + passenger-detail co-occurrence rule
+// systemPrompt.ts's BOOK_ON_HOLD classifier uses server-side, but runs here
+// client-side so an immediate "Copy" acknowledgement bubble can appear the
+// instant the message is sent, before the (LLM-backed) assistant call —
+// which can take many seconds — even resolves. A false positive just means
+// an extra "Copy" ahead of what turns out to be a flight search.
+const BOOKING_VERB_PATTERN = /\b(book|hold|reserve)\b/i;
+const EMAIL_PATTERN = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+const PHONE_PATTERN = /\+?[\d][\d\s-]{8,17}\d/;
+
+function looksLikeBookingRequest(text: string): boolean {
+  return BOOKING_VERB_PATTERN.test(text) && (EMAIL_PATTERN.test(text) || PHONE_PATTERN.test(text));
 }
 
 function detectAttachmentKind(file: File): "excel" | "image" | "other" {
@@ -130,6 +150,91 @@ function buildQuoteImagePayload(legs: FlightLeg[]) {
       }),
     })),
   };
+}
+
+// ─── WhatsApp sharing (pure — no component state, shared by quote and
+// booking-confirmation images) ───
+function shareTextToWhatsApp(text: string): void {
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+}
+
+function downloadImageAndOpenWhatsApp(blob: Blob, filename: string): void {
+  // No URL-scheme way to pre-attach an image to wa.me — download the
+  // image and open WhatsApp Web/App so the user can attach it manually.
+  // This is the guaranteed-delivery path: once we have a real image in
+  // hand, every other path funnels back to this rather than ever
+  // degrading to a plain-text message.
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  window.open("https://wa.me/", "_blank", "noopener,noreferrer");
+}
+
+async function shareImageBlob(blob: Blob, filename: string, shareTitle: string): Promise<void> {
+  const file = new File([blob], filename, { type: "image/png" });
+
+  // navigator.canShare (and even navigator.share itself) is inconsistent
+  // across installed-PWA/WebView contexts on Android — some versions
+  // throw synchronously rather than returning false for file shares, or
+  // silently drop the files and would otherwise leave us with nothing.
+  // Wrapping the whole check means any failure here still falls through
+  // to the guaranteed image-download path below instead of propagating
+  // and losing the image entirely.
+  try {
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: shareTitle });
+      return;
+    }
+  } catch (err) {
+    // AbortError just means the user dismissed the share sheet — not a
+    // failure worth falling back for.
+    if (err instanceof Error && err.name === "AbortError") return;
+    console.error("[assistant] navigator.share failed:", err);
+  }
+
+  downloadImageAndOpenWhatsApp(blob, filename);
+}
+
+// One click from the booking confirmation card to WhatsApp. Prefers the
+// blob prefetchBookingScreenshot already fetched (keeps navigator.share()
+// synchronous with the click, same user-activation constraint as the quote
+// image share); falls back to fetching screenshotUrl fresh if the prefetch
+// hasn't landed yet, and to a plain-text summary only if there's truly no
+// image to share at all.
+async function shareBookingToWhatsApp(result: BookingResult, screenshotBlob: Blob | undefined): Promise<void> {
+  const filename = "tdis-booking-confirmation.png";
+  const shareTitle = "TDIS Booking Confirmation";
+
+  if (screenshotBlob) {
+    try {
+      await shareImageBlob(screenshotBlob, filename, shareTitle);
+      return;
+    } catch (err) {
+      console.error("[assistant] WhatsApp booking image share failed unexpectedly:", err);
+      downloadImageAndOpenWhatsApp(screenshotBlob, filename);
+      return;
+    }
+  }
+
+  if (result.screenshotUrl) {
+    try {
+      const res = await fetch(result.screenshotUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      await shareImageBlob(blob, filename, shareTitle);
+      return;
+    } catch (err) {
+      console.error("[assistant] WhatsApp booking image fetch/share failed:", err);
+    }
+  }
+
+  const summary = `TDIS booking confirmed${result.pnr ? ` — PNR: ${result.pnr}` : ""}${
+    result.holdExpiresAt ? `, held until ${result.holdExpiresAt}` : ""
+  }`;
+  shareTextToWhatsApp(summary);
 }
 
 export default function ChatBubble() {
@@ -214,6 +319,22 @@ export default function ChatBubble() {
     }
   }, []);
 
+  // Same reasoning as prefetchQuoteImage above — fetched eagerly as soon as
+  // a hold succeeds so the "Send to WhatsApp" button on BookingResultCard
+  // can call navigator.share() synchronously off the click.
+  const prefetchBookingScreenshot = useCallback(async (messageId: number, screenshotUrl: string): Promise<void> => {
+    try {
+      const res = await fetch(screenshotUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      setMessages((m: ChatMessage[]) =>
+        m.map((msg) => (msg.id === messageId && msg.booking ? { ...msg, booking: { ...msg.booking, screenshotBlob: blob } } : msg))
+      );
+    } catch (err) {
+      console.error("[assistant] booking screenshot prefetch failed:", err);
+    }
+  }, []);
+
   // Polls a Book-on-Hold job until it's terminal, updating the message the
   // "placing hold…" line is attached to. A hold is a multi-minute Playwright
   // run, so this is patient: every 4s for up to ~6 minutes.
@@ -234,6 +355,7 @@ export default function ChatBubble() {
           const data = await res.json();
           if (data.status === "SUCCESS") {
             setBooking({ jobId, status: "success", result: data.result });
+            if (data.result?.screenshotUrl) prefetchBookingScreenshot(messageId, data.result.screenshotUrl);
             return;
           }
           if (data.status === "FAILED") {
@@ -260,6 +382,65 @@ export default function ChatBubble() {
 
     // First check after 3s — the run has barely started before then.
     setTimeout(tick, 3000);
+  }, [prefetchBookingScreenshot]);
+
+  // Polls after a "balance update" trigger until every airline's balance
+  // has synced more recently than the trigger instant, or the poll budget
+  // runs out — whichever comes first — then appends exactly one formatted
+  // message with whatever's freshest at that point. Mirrors
+  // whatsapp-service's balanceUpdatePoll.ts so both channels format this
+  // identically.
+  const pollBalanceUpdate = useCallback((triggeredAt: string): void => {
+    const POLL_MS = 5000;
+    const MAX_ATTEMPTS = 18; // ~90s
+
+    let attempts = 0;
+
+    const formatDateTime = (date: Date): string =>
+      date.toLocaleString("en-GB", {
+        timeZone: "Africa/Lagos",
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+
+    const formatBalanceMessage = (balances: { displayName: string; balance: number }[]): string => {
+      const header = `Balance update -(${formatDateTime(new Date())})`;
+      const lines = balances.map((b, i) => `${b.displayName} - ${Math.round(b.balance).toLocaleString()}${i === balances.length - 1 ? "." : ""}`);
+      return [header, ...lines].join("\n");
+    };
+
+    const finish = (text: string) => {
+      if (!mounted.current) return;
+      setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text }]);
+    };
+
+    const tick = async (): Promise<void> => {
+      if (!mounted.current) return;
+      attempts++;
+      try {
+        const res = await fetch(`/api/assistant/balance-update/status?since=${encodeURIComponent(triggeredAt)}`, { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ready || attempts >= MAX_ATTEMPTS) {
+            finish(formatBalanceMessage(data.balances));
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("[assistant] balance update poll failed:", err);
+      }
+      if (attempts >= MAX_ATTEMPTS) {
+        finish("I couldn't pull the updated balances just now — mind trying \"balance update\" again in a moment?");
+        return;
+      }
+      if (mounted.current) setTimeout(tick, POLL_MS);
+    };
+
+    setTimeout(tick, 3000);
   }, []);
 
   const sendMessage = useCallback(
@@ -267,6 +448,12 @@ export default function ChatBubble() {
       if (!text || sending) return undefined;
 
       setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text }]);
+      // Immediate acknowledgement — appears right away, before any real
+      // processing, so a booking request never sits in silence waiting on
+      // the assistant call.
+      if (looksLikeBookingRequest(text)) {
+        setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: "Copy" }]);
+      }
       setSending(true);
 
       try {
@@ -309,6 +496,9 @@ export default function ChatBubble() {
         // A Book-on-Hold was just started — poll for the PNR/outcome.
         if (bookingJobId) pollBookingJob(bookingJobId, newId);
 
+        // A "balance update" sync was just triggered — poll for the fresh figures.
+        if (data.balanceUpdateTriggeredAt) pollBalanceUpdate(data.balanceUpdateTriggeredAt);
+
         // The notification itself is created server-side (durable, survives
         // reload); eagerly re-poll here just so the bell updates within a
         // second instead of waiting out the regular poll interval.
@@ -329,7 +519,7 @@ export default function ChatBubble() {
         setSending(false);
       }
     },
-    [sending, pending, identity, refresh, prefetchQuoteImage, pollBookingJob]
+    [sending, pending, identity, refresh, prefetchQuoteImage, pollBookingJob, pollBalanceUpdate]
   );
 
   // Builds the chat message for a successfully generated (PENDING_VERIFICATION)
@@ -668,50 +858,6 @@ export default function ChatBubble() {
     }
   }
 
-  function shareTextToWhatsApp(text: string): void {
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
-  }
-
-  function downloadImageAndOpenWhatsApp(blob: Blob): void {
-    // No URL-scheme way to pre-attach an image to wa.me — download the
-    // image and open WhatsApp Web/App so the user can attach it manually.
-    // This is the guaranteed-delivery path: once we have a real image in
-    // hand, every other path funnels back to this rather than ever
-    // degrading to a plain-text message.
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "tdis-flight-quote.png";
-    a.click();
-    URL.revokeObjectURL(url);
-    window.open("https://wa.me/", "_blank", "noopener,noreferrer");
-  }
-
-  async function shareImageBlob(blob: Blob): Promise<void> {
-    const file = new File([blob], "tdis-flight-quote.png", { type: "image/png" });
-
-    // navigator.canShare (and even navigator.share itself) is inconsistent
-    // across installed-PWA/WebView contexts on Android — some versions
-    // throw synchronously rather than returning false for file shares, or
-    // silently drop the files and would otherwise leave us with nothing.
-    // Wrapping the whole check means any failure here still falls through
-    // to the guaranteed image-download path below instead of propagating
-    // and losing the image entirely.
-    try {
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({ files: [file], title: "TDIS Flight Quote" });
-        return;
-      }
-    } catch (err) {
-      // AbortError just means the user dismissed the share sheet — not a
-      // failure worth falling back for.
-      if (err instanceof Error && err.name === "AbortError") return;
-      console.error("[assistant] navigator.share failed:", err);
-    }
-
-    downloadImageAndOpenWhatsApp(blob);
-  }
-
   async function shareToWhatsApp(m: ChatMessage): Promise<void> {
     if (!m.legs || m.legs.length === 0) {
       shareTextToWhatsApp(m.text);
@@ -727,13 +873,13 @@ export default function ChatBubble() {
     // the best available fallback.
     if (m.imageBlob) {
       try {
-        await shareImageBlob(m.imageBlob);
+        await shareImageBlob(m.imageBlob, "tdis-flight-quote.png", "TDIS Flight Quote");
       } catch (err) {
         // We already have a valid image in hand at this point, so even an
         // unexpected failure here should still deliver the image rather
         // than degrading all the way down to a plain-text share.
         console.error("[assistant] WhatsApp image share failed unexpectedly:", err);
-        downloadImageAndOpenWhatsApp(m.imageBlob);
+        downloadImageAndOpenWhatsApp(m.imageBlob, "tdis-flight-quote.png");
       }
       return;
     }
@@ -746,7 +892,7 @@ export default function ChatBubble() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
-      await shareImageBlob(blob);
+      await shareImageBlob(blob, "tdis-flight-quote.png", "TDIS Flight Quote");
     } catch (err) {
       // Only reachable when image GENERATION itself failed — there's no
       // image to fall back to, so text is genuinely the last resort here.
@@ -811,25 +957,14 @@ function describeHttpError(status: number): string {
   const voiceLive = voice.state === "listening" || voice.state === "speaking";
 
   const headerExtras = (
-    <>
-      <button
-        className={`tdis-chat-headerbtn tdis-chat-voicebtn ${voiceLive ? "active" : ""}`}
-        onClick={() => (voice.state === "idle" || voice.state === "error" ? voice.start() : voice.stop())}
-        disabled={voice.state === "connecting"}
-        aria-label={voiceLive ? "End voice call" : voice.state === "connecting" ? "Connecting…" : "Start voice call"}
-        title={voice.errorMessage ?? (voiceLive ? "End voice call" : "Talk to the assistant")}
-      >
-        {voice.state === "connecting" ? "⏳" : voiceLive ? "🔴" : "🎙️"}
-      </button>
-      <button
-        className="tdis-chat-headerbtn"
-        onClick={() => (historyOpen ? setHistoryOpen(false) : openHistory())}
-        aria-label={historyOpen ? "Back to conversation" : "Search history"}
-        title={historyOpen ? "Back" : "Search history"}
-      >
-        {historyOpen ? "← Back" : "🕘"}
-      </button>
-    </>
+    <button
+      className="tdis-chat-headerbtn"
+      onClick={() => (historyOpen ? setHistoryOpen(false) : openHistory())}
+      aria-label={historyOpen ? "Back to conversation" : "Search history"}
+      title={historyOpen ? "Back" : "Search history"}
+    >
+      {historyOpen ? "← Back" : "🕘"}
+    </button>
   );
 
   return (
@@ -905,7 +1040,7 @@ function describeHttpError(status: number): string {
                     <div className="chat-bubble-msg assistant chat-bubble-typing">⏳ Placing the hold — this can take a minute or two…</div>
                   )}
                   {m.booking?.status === "success" && m.booking.result && (
-                    <BookingResultCard result={m.booking.result} />
+                    <BookingResultCard booking={m.booking} />
                   )}
                   {m.booking?.status === "failed" && m.booking.error && (
                     <div className="chat-bubble-msg assistant" style={{ borderLeft: "3px solid #e11d48" }}>
@@ -951,6 +1086,16 @@ function describeHttpError(status: number): string {
               >
                 +
               </button>
+              <button
+                type="button"
+                className={`tdis-chat-voicebtn ${voiceLive ? "active" : ""}`}
+                onClick={() => (voice.state === "idle" || voice.state === "error" ? voice.start() : voice.stop())}
+                disabled={voice.state === "connecting"}
+                aria-label={voiceLive ? "End voice call" : voice.state === "connecting" ? "Connecting…" : "Start voice call"}
+                title={voice.errorMessage ?? (voiceLive ? "End voice call" : "Talk to the assistant")}
+              >
+                {voice.state === "connecting" ? "⏳" : voiceLive ? "🔴" : "🎙️"}
+              </button>
               <input
                 type="text"
                 placeholder={
@@ -979,7 +1124,10 @@ function describeHttpError(status: number): string {
 
 // Confirmation card for a successful Book-on-Hold: PNR, hold expiry, total,
 // and the captured confirmation screenshot (same-origin, click to enlarge).
-function BookingResultCard({ result }: { result: BookingResult }) {
+function BookingResultCard({ booking }: { booking: BookingState }) {
+  const result = booking.result;
+  if (!result) return null;
+
   return (
     <div
       className="chat-bubble-msg assistant"
@@ -1009,6 +1157,13 @@ function BookingResultCard({ result }: { result: BookingResult }) {
             style={{ maxWidth: "100%", borderRadius: 6, marginTop: 4 }}
           />
         </a>
+      )}
+      {(result.screenshotUrl || booking.screenshotBlob) && (
+        <div className="chat-bubble-msg-actions">
+          <button onClick={() => shareBookingToWhatsApp(result, booking.screenshotBlob)}>
+            📲 Send to WhatsApp
+          </button>
+        </div>
       )}
     </div>
   );

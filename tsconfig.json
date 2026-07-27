@@ -22,6 +22,7 @@
   "exclude": [
     "node_modules",
     "connector-service",
+    "whatsapp-service",
     "src/modules/airline-connectors/services/SyncService.ts",
     "src/modules/airline-connectors/services/FirestoreMirrorService.ts",
     "src/modules/travel-assistant/search"

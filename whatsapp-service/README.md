@@ -71,11 +71,43 @@ participant, the same way you'd add any contact. No further setup is
 needed — it'll respond to any message in that group containing
 `@tdisbot`.
 
+## Running without a terminal open (PM2)
+
+`npm run dev` only stays alive as long as its terminal window is open —
+fine for pairing/testing, not for actual use. [PM2](https://pm2.keymetrics.io/)
+daemonizes the process so it keeps running in the background and
+auto-restarts if it ever crashes.
+
+```bash
+npm install -g pm2
+npm run build          # compile to dist/ — pm2 runs the built output, not tsx watch mode
+pm2 start ecosystem.config.js
+pm2 logs tdis-whatsapp # tail its output any time
+pm2 status             # confirm it's running
+```
+
+Once started this way, you can close the terminal entirely — the process
+keeps running as a background daemon. To stop it: `pm2 stop tdis-whatsapp`.
+
+**Optional — survive a full reboot too:** by default PM2 only survives
+closing the terminal, not restarting the machine. To also auto-start on
+boot (Windows):
+
+```bash
+npm install -g pm2-windows-startup
+pm2-startup install
+pm2 save                # snapshots the currently running process list
+```
+
+After this, `tdis-whatsapp` starts automatically next time Windows boots,
+with no manual `pm2 start` needed.
+
 ## Deployment
 
 Deploy this alongside (but as a separate process/container from)
 `connector-service` — anywhere that can run a long-lived Node process and
 persist the `auth_info/` directory across restarts (a Docker volume, or a
-VPS with a real filesystem). It does not need inbound network access
-beyond its own health check; it only makes outbound connections to
-WhatsApp's servers and to `MAIN_APP_URL`.
+VPS with a real filesystem, or PM2 as above for a local Windows machine).
+It does not need inbound network access beyond its own health check; it
+only makes outbound connections to WhatsApp's servers and to
+`MAIN_APP_URL`.

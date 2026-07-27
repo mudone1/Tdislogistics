@@ -83,6 +83,16 @@ export interface ConversationSlots {
   // already the resolved value (with any unsupported honorific merged in);
   // cleared once resolved into passengerTitle.
   pendingTitleConfirmation: { firstName: string; lastName: string } | null;
+  // Passengers beyond the lead one, same PNR — same trip, same hold, sharing
+  // the lead passenger's phone/email (only title/name differ per passenger).
+  // Populated when the booking request names more than one passenger.
+  additionalPassengers: { firstName: string; lastName: string; title: string | null }[] | null;
+  // Same purpose as pendingTitleConfirmation above, but for an additional
+  // passenger whose title/gender couldn't be confidently resolved — "index"
+  // is the position into additionalPassengers being confirmed. Resolved one
+  // at a time (first entry in this list first) so as not to pile up several
+  // clarifying questions in a single turn.
+  pendingAdditionalTitleConfirmations: { index: number; firstName: string; lastName: string }[] | null;
 }
 
 export interface ChatEntities {
@@ -106,6 +116,13 @@ export interface ChatEntities {
   // null) means the name is ambiguous/unisex/uncommon enough that the
   // assistant must ask rather than guess.
   passengerGenderGuess: "male" | "female" | "unsure" | null;
+  // Any passengers named IN ADDITION to the lead one above, for a
+  // multi-passenger Book-on-Hold on the same PNR (e.g. "book for John Doe
+  // and Mary Smith ..."). Each still follows the last-word-is-surname rule.
+  // Empty/null when only one passenger was named.
+  additionalPassengers:
+    | { firstName: string; lastName: string; title: string | null; genderGuess: "male" | "female" | "unsure" | null }[]
+    | null;
 }
 
 export interface AssistantTurn {

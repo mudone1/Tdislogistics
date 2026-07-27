@@ -625,6 +625,12 @@ model BookingJob {
   lastName      String
   phone         String?
   email         String?
+  // Passengers beyond the lead one above, same PNR — each is
+  // {title, firstName, lastName}; they share the lead passenger's phone/
+  // email rather than having their own (this booking form has one
+  // contact-details section per PNR, not one per passenger). Null/empty for
+  // a single-passenger hold (unchanged default).
+  additionalPassengers Json?
   // Which specific flight to book on each leg, when that leg's route/date
   // has more than one — resolved by the chat before the job is created
   // (search count -> ask the user if needed). Null means "known to have
