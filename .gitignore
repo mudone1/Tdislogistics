@@ -33,3 +33,7 @@ next-env.d.ts
 
 .vercel
 .env*
+# .env.example files are safe templates (no secrets) and should always be
+# committed — re-include them despite the broad .env* rule above.
+!.env.example
+!**/.env.example
