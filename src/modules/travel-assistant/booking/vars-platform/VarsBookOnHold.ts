@@ -138,7 +138,7 @@ const SESSION_MAX_AGE_MS = 25 * 60 * 1000;
 // Establishes a logged-in page, reusing a cached session when one exists
 // and still checks out live, otherwise falling back to a full login —
 // identical mechanism/selectors as before, just conditionally skipped.
-async function establishSession(
+export async function establishSession(
   browser: import("playwright").Browser,
   loginUrl: string,
   requirementsUrl: string,

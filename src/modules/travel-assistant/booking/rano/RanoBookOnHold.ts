@@ -10,7 +10,12 @@ import {
 // investigation for search — see RanoAirSearch.ts) — different host shape,
 // same booking engine.
 const LOGIN_URL = "https://customer3.videcom.com/RanoAir/VARS/Public/CustomerPanels/AgentLoginBS.aspx";
-const REQUIREMENTS_URL = "https://customer3.videcom.com/RanoAir/VARS/Public/CustomerPanels/requirementsBS.aspx";
+// The real agent-portal booking entry point (Dashboard.aspx -> "Standard
+// Booking"), confirmed live to follow the exact same pattern as Enugu Air's
+// and United Nigeria's — not the CustomerPanels deep-link, which never
+// surfaces the accordion payment section with the "Book Now, Pay Later"
+// panel and its required agent-password re-confirmation field.
+const REQUIREMENTS_URL = "https://customer3.videcom.com/RanoAir/VARS/Public/b/agentSearch.aspx";
 // Confirmed live: exact same #txtSurname/#txtPNR/#btnOk fields as Enugu Air,
 // and a bogus lookup returns "Booking not found!" matching the shared
 // BOOKING_NOT_FOUND_MARKER regex in VarsBookOnHold.ts.
