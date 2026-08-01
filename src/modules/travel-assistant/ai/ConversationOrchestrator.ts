@@ -98,6 +98,36 @@ const AIRLINE_NAME_MATCHERS: Record<string, string> = {
   rano: "RANO",
 };
 
+// These 5 are real airlines the assistant knows about (their balances sync,
+// and 4 of them have sales-report data) but have NO flight-search automation
+// built — a completely different platform (Crane) from the 4 VARS-platform
+// carriers above. Live-confirmed bug this fixes: asking for one of these by
+// name (e.g. "quote AirPeace ABV-LOS") silently searched all 4 OTHER
+// carriers instead and said nothing about AirPeace — confusing, since the
+// user gets a real-looking answer to a question they didn't ask. Checked
+// against the raw message text (not slots.airline) so it fires regardless
+// of whether the LLM happened to populate that entity for a name outside
+// its known searchable set.
+const UNSUPPORTED_SEARCH_AIRLINES: Record<string, string> = {
+  airpeace: "Air Peace",
+  "air peace": "Air Peace",
+  aero: "Aero",
+  arik: "Arik Air",
+  "arik air": "Arik Air",
+  ibom: "Ibom Air",
+  "ibom air": "Ibom Air",
+  ngeagle: "NG Eagle",
+  "ng eagle": "NG Eagle",
+};
+
+function matchUnsupportedSearchAirline(rawMessage: string): string | null {
+  const m = rawMessage.toLowerCase();
+  for (const [alias, displayName] of Object.entries(UNSUPPORTED_SEARCH_AIRLINES)) {
+    if (m.includes(alias)) return displayName;
+  }
+  return null;
+}
+
 // If the user named a specific airline, narrow to just that one instead of
 // querying every implemented carrier. Unrecognized names fall back to
 // searching every carrier rather than silently dropping the request.
@@ -245,6 +275,16 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
 
   mergeEntitiesIntoSlots(slots, turn, input.message);
   if (turn.intent === "FLIGHT_SEARCH_ROUND_TRIP") slots.isRoundTrip = true;
+
+  // Check before asking for any missing route/date — no point collecting
+  // details for a search that can never run. Doesn't touch/clear slots, so
+  // a genuinely supported follow-up in the same conversation isn't affected.
+  const unsupportedAirline = matchUnsupportedSearchAirline(input.message);
+  if (unsupportedAirline) {
+    const reply = `I don't have flight search for ${unsupportedAirline} yet — I can currently search Enugu Air, United Nigeria, XeJet, and Rano Air. Want me to check one of those instead?`;
+    await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+    return { reply };
+  }
 
   const required = [...REQUIRED_SEARCH_SLOTS, ...(slots.isRoundTrip ? (["returnDate"] as const) : [])];
   const missing = required.filter((key) => !slots[key as keyof ConversationSlots]);
@@ -1297,15 +1337,6 @@ async function handleBookOnHold(
     if (outcome.time) slots.selectedReturnTime = outcome.time;
   }
 
-  const paxName = [slots.passengerTitle, slots.passengerFirstName, slots.passengerLastName]
-    .filter(Boolean)
-    .join(" ");
-  const otherPaxNames = (slots.additionalPassengers ?? []).map((p) => [p.title, p.firstName, p.lastName].filter(Boolean).join(" "));
-  const paxLine = [paxName, ...otherPaxNames].join(" and ");
-  const routeLine = `${slots.origin}→${slots.destination} on ${slots.date}${
-    slots.isRoundTrip && slots.returnDate ? `, returning ${slots.returnDate}` : ""
-  }`;
-
   const result = await startBookOnHold({
     airline: "ENUGU",
     sessionKey,
@@ -1341,7 +1372,15 @@ async function handleBookOnHold(
     return { reply };
   }
 
-  const reply = `Got it — I'm placing an Enugu Air hold for ${paxLine}, ${routeLine}. This takes a minute or two; I'll show the PNR right here as soon as it's done.`;
+  // Deliberately just "Copy" — per explicit product direction, this is the
+  // acknowledgement that a booking request was received and IS now being
+  // processed (the typing indicator covers the rest of the wait; the real
+  // outcome — PNR, amount, etc. — arrives as its own follow-up message once
+  // the job finishes). Generated here (not a client-side pre-check) so it
+  // fires reliably even when the message never uses an explicit trigger
+  // word like "book"/"hold" — the LLM already confirmed this IS a genuine
+  // booking by the time this line runs.
+  const reply = "Copy";
   await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
   return { reply, bookingJobId: result.jobId };
 }
