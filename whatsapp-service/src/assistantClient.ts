@@ -55,7 +55,9 @@ export async function sendPassportImage(
   form.set("sessionKey", sessionKey);
   if (displayName) form.set("displayName", displayName);
   form.set("isAuthenticated", "false");
-  form.append("file", new Blob([buffer as unknown as BlobPart], { type: mimeType }), "id-document.jpg");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- BlobPart isn't a globally available
+  // type name under this tsconfig's ES2022-only lib; `any` avoids depending on a DOM type existing.
+  form.append("file", new Blob([buffer as any], { type: mimeType }), "id-document.jpg");
 
   const res = await fetch(`${MAIN_APP_URL}/api/assistant/passport`, { method: "POST", body: form });
   if (!res.ok) {
