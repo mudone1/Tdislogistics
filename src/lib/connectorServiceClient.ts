@@ -32,4 +32,12 @@ export const connectorServiceClient = {
   // 202 immediately; the outcome is written back to the row and polled from there.
   bookHold: (jobId: string) =>
     call(`/internal/travel-assistant/book-hold`, { method: "POST", body: JSON.stringify({ jobId }) }),
+  // Kicks off ticket-issuing (find PNR -> verify -> pay -> issue) for an
+  // already-held BookingJob row. Same 202-then-poll-the-row shape as bookHold.
+  issueTicket: (jobId: string) =>
+    call(`/internal/travel-assistant/issue-ticket`, { method: "POST", body: JSON.stringify({ jobId }) }),
+  // Best-effort void of a booking's PNR. Synchronous (short-lived compared
+  // to issue/book) — the caller awaits the response directly rather than polling.
+  voidBooking: (jobId: string) =>
+    call(`/internal/travel-assistant/void-booking`, { method: "POST", body: JSON.stringify({ jobId }) }),
 };

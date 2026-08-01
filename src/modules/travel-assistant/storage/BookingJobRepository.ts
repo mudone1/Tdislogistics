@@ -20,10 +20,16 @@ export interface CreateBookingJobInput {
   lastName: string;
   phone?: string | null;
   email?: string | null;
-  // Passengers beyond the lead one above, same PNR, sharing the lead
-  // passenger's phone/email (see the Prisma column comment). Omit for a
-  // single-passenger hold.
-  additionalPassengers?: { title: string; firstName: string; lastName: string }[];
+  // Passengers beyond the lead one above, same PNR — adults share the lead
+  // passenger's phone/email, child/infant passengers carry dateOfBirth
+  // instead (see the Prisma column comment). Omit for a single-passenger hold.
+  additionalPassengers?: {
+    type?: "ADULT" | "CHILD" | "INFANT";
+    title: string;
+    firstName: string;
+    lastName: string;
+    dateOfBirth?: string;
+  }[];
   preferredDepartureTime?: string | null;
   preferredReturnTime?: string | null;
   createdBy?: string | null;
@@ -74,6 +80,58 @@ export const BookingJobRepository = {
 
   findById(id: string) {
     return prisma.bookingJob.findUnique({ where: { id } });
+  },
+
+  // Explicit PNR lookup — the ONLY way ticket-issuing resolves which
+  // booking to act on. Never derive this from "the most recent booking in
+  // this session"; a user with multiple active holds must always get
+  // exactly the one whose PNR they named. Most recent first only matters
+  // when the exact same PNR string was somehow created twice (shouldn't
+  // happen — PNRs are airline-assigned — but favors the newer row over
+  // silently picking an arbitrary one if it ever does).
+  findByPnr(pnr: string) {
+    return prisma.bookingJob.findFirst({ where: { pnr }, orderBy: { createdAt: "desc" } });
+  },
+
+  markIssuing(id: string) {
+    return prisma.bookingJob.update({
+      where: { id },
+      data: { ticketStatus: "ISSUING", issueStartedAt: new Date(), issueError: null },
+    });
+  },
+
+  markIssued(id: string, result: { ticketNumber: string | null; totalPayable: number | null; currency: string | null; screenshot: Uint8Array | null }) {
+    return prisma.bookingJob.update({
+      where: { id },
+      data: {
+        ticketStatus: "ISSUED",
+        ticketNumber: result.ticketNumber,
+        // A fare captured at issue-time (right before payment) is the more
+        // authoritative figure than whatever was estimated at hold-time —
+        // overwrite totalPayable/currency with it when present.
+        ...(result.totalPayable != null ? { totalPayable: result.totalPayable } : {}),
+        ...(result.currency ? { currency: result.currency } : {}),
+        ...(result.screenshot ? { screenshot: toBytes(result.screenshot) } : {}),
+        issuedAt: new Date(),
+      },
+    });
+  },
+
+  // ticketStatus deliberately stays BOOKED (not a new FAILED-like state) so
+  // a failed issue attempt can simply be retried later — the hold itself is
+  // still valid, only the payment attempt failed.
+  markIssueFailed(id: string, message: string) {
+    return prisma.bookingJob.update({
+      where: { id },
+      data: { ticketStatus: "BOOKED", issueError: message },
+    });
+  },
+
+  markVoided(id: string) {
+    return prisma.bookingJob.update({
+      where: { id },
+      data: { ticketStatus: "VOIDED" },
+    });
   },
 
   markRunning(id: string) {

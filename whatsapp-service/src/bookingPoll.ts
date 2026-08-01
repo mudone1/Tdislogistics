@@ -1,5 +1,6 @@
-import { getBookingJobStatus, getBookingScreenshot } from "./assistantClient";
+import { getBookingJobStatus, getBookingScreenshot, type BookingJobStatus } from "./assistantClient";
 import { keepTypingAlive } from "./typingIndicator";
+import { setPendingIssueOffer } from "./pendingIssueOffers";
 
 const POLL_MS = 4000;
 const MAX_ATTEMPTS = 90; // ~6 min, matching ChatBubble's own budget for a Book-on-Hold run
@@ -16,13 +17,38 @@ function errorContactNote(reason: string): string {
   return ` Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
 }
 
-function formatSuccessMessage(result: NonNullable<Awaited<ReturnType<typeof getBookingJobStatus>>["result"]>): string {
-  const lines = ["✅ Hold confirmed"];
-  if (result.pnr) lines.push(`Booking reference (PNR): ${result.pnr}`);
-  if (result.holdExpiresAt) lines.push(`Held until: ${result.holdExpiresAt}`);
+function passengerName(p: { title: string; firstName: string; lastName: string }): string {
+  return [p.title, p.firstName, p.lastName].filter(Boolean).join(" ");
+}
+
+// Full "Booking Successful" format: passenger name(s), PNR, airline, route,
+// date, time, fare amount, then the numbered issue-ticket options. Fare is
+// whatever was captured at hold-time (an estimate — the authoritative figure
+// gets extracted again, and overwrites this, at actual issue time).
+function formatSuccessMessage(job: BookingJobStatus): string {
+  const result = job.result!;
+  const names = [passengerName(job.passenger), ...(job.additionalPassengers ?? []).map(passengerName)];
+
+  const lines = ["✅ Booking Successful", ""];
+  lines.push(names.length > 1 ? "Passengers:" : "Passenger:");
+  lines.push(...names);
+  lines.push("");
+  if (result.pnr) lines.push(`PNR: ${result.pnr}`);
+  lines.push(`Airline: ${job.airline}`);
+  lines.push(`Route: ${job.route.origin} → ${job.route.destination}`);
+  lines.push(`Date: ${job.route.departureDate}${job.route.returnDate ? ` (returning ${job.route.returnDate})` : ""}`);
+  if (job.route.departureTime) lines.push(`Time: ${job.route.departureTime}${job.route.returnTime ? ` (returning ${job.route.returnTime})` : ""}`);
   if (result.totalPayable != null) {
-    lines.push(`Total payable: ${result.currency ? `${result.currency} ` : ""}${result.totalPayable.toLocaleString()}`);
+    lines.push(`Amount: ${result.currency ? `${result.currency} ` : ""}${result.totalPayable.toLocaleString()}`);
   }
+  if (result.holdExpiresAt) lines.push(`Held until: ${result.holdExpiresAt}`);
+
+  if (result.pnr) {
+    lines.push("");
+    lines.push("1. Issue Now");
+    lines.push(`2. Send "ISSUE ${result.pnr}" on WhatsApp to pay anytime.`);
+  }
+
   return lines.join("\n");
 }
 
@@ -32,7 +58,7 @@ function formatSuccessMessage(result: NonNullable<Awaited<ReturnType<typeof getB
 // state for a WhatsApp chat. When a confirmation screenshot is available
 // (same as the browser's BookingResultCard image), it's sent as the
 // caption-bearing image itself rather than a separate text message.
-export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
+export function pollBookingJob(jobId: string, chatId: string, sender: BookingPollSender): void {
   let attempts = 0;
   const stopTyping = keepTypingAlive(sender.setTyping);
 
@@ -42,7 +68,8 @@ export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
       const job = await getBookingJobStatus(jobId);
       if (job.status === "SUCCESS" && job.result) {
         stopTyping();
-        const text = formatSuccessMessage(job.result);
+        const text = formatSuccessMessage(job);
+        if (job.result.pnr) setPendingIssueOffer(chatId, job.result.pnr);
         if (job.result.hasScreenshot && job.result.screenshotUrl) {
           try {
             const screenshot = await getBookingScreenshot(job.result.screenshotUrl);

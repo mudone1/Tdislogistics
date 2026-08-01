@@ -17,8 +17,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     jobId: job.id,
     status: job.status,
     airline: job.airline,
-    route: { origin: job.origin, destination: job.destination, departureDate: job.departureDate, returnDate: job.returnDate },
+    route: {
+      origin: job.origin,
+      destination: job.destination,
+      departureDate: job.departureDate,
+      returnDate: job.returnDate,
+      departureTime: job.preferredDepartureTime,
+      returnTime: job.preferredReturnTime,
+    },
     passenger: { title: job.title, firstName: job.firstName, lastName: job.lastName },
+    // Additional passengers beyond the lead one, if this was a
+    // multi-passenger hold — same shape as what was stored at creation time.
+    additionalPassengers: job.additionalPassengers ?? null,
+    ticketStatus: job.ticketStatus,
     ...(job.status === "SUCCESS" && {
       result: {
         pnr: job.pnr,
