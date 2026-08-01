@@ -244,6 +244,28 @@ async function navigateToDate(page: Page, targetDateISO: string, logTag: string)
 
   for (let i = 0; i < MAX_DAY_FORWARD_CLICKS; i++) {
     if (Date.now() > deadline) {
+      // Diagnostic dump — this deadline has always been hit after a
+      // genuinely stuck forward-click before (silently producing zero
+      // real progress across every attempt), so capture exactly what the
+      // tab strip actually shows right now rather than guessing blind on
+      // the next live run: every visible day-tab label (reveals a
+      // label-format mismatch against toDayTabLabel's output, if that's
+      // the real cause) and whether the forward control itself is present/
+      // visible/enabled (reveals a stuck/disabled control instead).
+      const diagnostic = await page
+        .evaluate(() => {
+          const tabs = Array.from(document.querySelectorAll("a.dayTab")).map((el) => el.getAttribute("data-newday"));
+          const forward = document.querySelector("button.dayForward:not(.hidden-lg)") as HTMLButtonElement | null;
+          return {
+            url: window.location.href,
+            visibleDayTabs: tabs,
+            forwardControl: forward
+              ? { visible: forward.offsetParent !== null, disabled: forward.disabled, classes: forward.className }
+              : null,
+          };
+        })
+        .catch((err) => ({ evaluateError: String(err) }));
+      console.error(`DIAGNOSTIC [${logTag}] date-navigation deadline hit — state: ${JSON.stringify(diagnostic)}`);
       throw new Error(
         `Gave up navigating to date tab "${targetLabel}" after ${DATE_NAVIGATION_DEADLINE_MS}ms (${i} forward-page attempts) — bailing out early to stay inside the caller's function timeout`
       );
@@ -320,8 +342,10 @@ async function navigateToDate(page: Page, targetDateISO: string, logTag: string)
     // registering real progress, and in one observed case exhausted all
     // 60 without ever reaching the target date.
     const lastTabBefore = await page.locator("a.dayTab").last().getAttribute("data-newday").catch(() => null);
+    const tabCountBefore = await page.locator("a.dayTab").count().catch(() => -1);
+    console.log(`[${logTag}] attempt ${i + 1}: before click — url=${page.url()} tabCount=${tabCountBefore} lastTab=${lastTabBefore}`);
     await forwardArrow.evaluate((el) => (el as HTMLElement).click());
-    await page
+    const changed = await page
       .waitForFunction(
         (prev) => {
           const tabs = document.querySelectorAll("a.dayTab");
@@ -331,11 +355,15 @@ async function navigateToDate(page: Page, targetDateISO: string, logTag: string)
         lastTabBefore,
         { timeout: 5000 }
       )
-      .catch(() => {
-        /* no visible change within 5s on this attempt — fine, the next
-           loop iteration re-checks from scratch and may just need another
-           click (or may finally land on one already in flight) */
-      });
+      .then(() => true)
+      .catch(() => false);
+    // Per-attempt visibility into exactly when/if the page state collapses
+    // (URL losing its outboundroute query string, tab count dropping to
+    // zero) — added after a live run where the FINAL diagnostic showed a
+    // blank flightCal.aspx with no tabs and no forward control, but with no
+    // way to tell which of the several attempts actually caused it.
+    const tabCountAfter = await page.locator("a.dayTab").count().catch(() => -1);
+    console.log(`[${logTag}] attempt ${i + 1}: after click — changed=${changed} url=${page.url()} tabCount=${tabCountAfter}`);
   }
 
   // Reaching here after the fix above is genuinely abnormal (a real page
@@ -416,7 +444,14 @@ async function navigateToDateBySingleStepForward(
 
 function toDayTabLabel(dateISO: string): string {
   const d = new Date(dateISO + "T00:00:00");
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  // Zero-padded day — confirmed live the portal's own data-newday attribute
+  // renders "04 Aug 2026", "08 Aug 2026" etc. (padded), not "4 Aug 2026".
+  // An unpadded label here silently never matches any single-digit day
+  // (1st-9th of the month) — the exact-string selector below just never
+  // finds it, forcing endless forward-paging that then runs into the
+  // widget's own multi-day-per-click jump and overshoots the target for
+  // good, with no way back. Confirmed live via a real run against Enugu Air.
+  return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 async function extractFlightOptions(
@@ -440,13 +475,20 @@ async function extractFlightOptions(
   for (let i = 0; i < count; i++) {
     const panel = panels.nth(i);
     const parsed = await panel.evaluate((panelEl) => {
+      // Deliberately inlined rather than a local helper function — a named
+      // function expression nested inside a page.evaluate() callback can
+      // get an esbuild "__name" helper call injected into it when compiled
+      // by an esbuild-based runtime (confirmed live via tsx: "__name is not
+      // defined" once this function's source is shipped into the browser
+      // and executed there, where that Node-side helper doesn't exist).
+      // Inlining avoids the pattern entirely rather than depending on a
+      // specific bundler's transform behavior not doing this.
       const el = panelEl as HTMLElement;
-      const text = (sel: string): string | null => el.querySelector(sel)?.textContent?.trim() ?? null;
 
-      const departureTime = text(".cal-Depart-time .time");
-      const arrivalTime = text(".cal-Arrive-time .time");
-      const durationText = text(".flightDuration");
-      const flightNumber = text(".flightnumber");
+      const departureTime = el.querySelector(".cal-Depart-time .time")?.textContent?.trim() ?? null;
+      const arrivalTime = el.querySelector(".cal-Arrive-time .time")?.textContent?.trim() ?? null;
+      const durationText = el.querySelector(".flightDuration")?.textContent?.trim() ?? null;
+      const flightNumber = el.querySelector(".flightnumber")?.textContent?.trim() ?? null;
 
       const durationMatch = durationText ? durationText.match(/(\d+)h\s*(\d+)m/) : null;
       const durationMinutes = durationMatch

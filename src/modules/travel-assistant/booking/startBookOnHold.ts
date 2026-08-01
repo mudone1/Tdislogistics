@@ -26,10 +26,17 @@ export interface StartBookOnHoldInput {
   lastName: string;
   phone: string;
   email: string;
-  // Passengers beyond the lead one above, same PNR — they share the lead
-  // passenger's phone/email rather than having their own. Omit for a
+  // Passengers beyond the lead one above, same PNR — adults share the lead
+  // passenger's phone/email rather than having their own; child/infant
+  // passengers need dateOfBirth instead (see VarsBookOnHold.ts). Omit for a
   // single-passenger hold (unchanged default).
-  additionalPassengers?: { title: string; firstName: string; lastName: string }[];
+  additionalPassengers?: {
+    type?: "ADULT" | "CHILD" | "INFANT";
+    title: string;
+    firstName: string;
+    lastName: string;
+    dateOfBirth?: string;
+  }[];
   // Which specific flight to book on each leg, when the route/date has more
   // than one — resolved upstream (search count -> ask the user if needed)
   // before this is called. Omit only when that leg is already known to

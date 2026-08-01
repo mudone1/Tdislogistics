@@ -9,6 +9,8 @@ import { startBookOnHold } from "../booking/startBookOnHold";
 import { ENUGU_SUPPORTED_TITLES } from "../booking/vars-platform/VarsBookOnHold";
 import { handleQuery as handleSalesReportQuery } from "../orchestration/SalesReportAssistant";
 import { triggerBalanceUpdate } from "../../../lib/balanceUpdateService";
+import { BookingJobRepository } from "../storage/BookingJobRepository";
+import { connectorServiceClient } from "../../../lib/connectorServiceClient";
 import type {
   AssistantTurn,
   ConversationSlots,
@@ -40,6 +42,12 @@ export interface OrchestratorOutput {
   // formats and sends the final figures itself (see whatsapp-service's
   // balanceUpdatePoll.ts for the reference implementation).
   balanceUpdateTriggeredAt?: string;
+  // Set when a ticket-issuing run was just triggered for a specific PNR —
+  // the caller polls GET /api/assistant/issue-ticket/status?jobId=<this>
+  // until ticketStatus is terminal (ISSUED, or back to BOOKED with an
+  // issueError on failure).
+  issueTicketJobId?: string;
+  issueTicketPnr?: string;
 }
 
 export const EMPTY_SLOTS: ConversationSlots = {
@@ -66,6 +74,7 @@ export const EMPTY_SLOTS: ConversationSlots = {
   pendingTitleConfirmation: null,
   additionalPassengers: null,
   pendingAdditionalTitleConfirmations: null,
+  pendingAdditionalDateOfBirthConfirmations: null,
 };
 
 // Same defaulting logic used by handleAssistantMessage below — exported so
@@ -114,6 +123,16 @@ const REFERENCE_ID_PATTERN = /^TDIS-\d{8}-\d{3}$/i;
 // read of whatever's currently stored) — see lib/balanceUpdateService.
 const BALANCE_UPDATE_PATTERN = /\bbalance\s*update\b/i;
 
+// Deterministic ticket-issuing command — "Issue ABC123", "Pay ABC123",
+// "Issue Ticket ABC123", "issue ticket for ABC123" all match, capturing the
+// PNR. Matched directly (never through the LLM) so it behaves identically
+// every time and — critically — so the PNR always comes from what the user
+// actually typed, never inferred from "the most recent booking." A client
+// (WhatsApp/web) offering a numbered "1. Issue Now" option after a booking
+// confirmation rewrites that reply into this exact phrasing (with the PNR
+// it already knows from its own poll) before it ever reaches here.
+const ISSUE_TICKET_COMMAND_PATTERN = /\b(?:issue(?:\s+ticket)?|pay)(?:\s+(?:ticket\s+)?for)?\s+([A-Z0-9]{5,8})\b/i;
+
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
   const session = await ChatMemoryRepository.getOrCreateSession(
     input.sessionKey,
@@ -150,6 +169,44 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
       console.error("[travel-assistant] balance update trigger failed:", err);
       const reason = err instanceof Error ? err.message : String(err);
       const reply = `I couldn't start that sync just now — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
+  }
+
+  const issueMatch = trimmed.match(ISSUE_TICKET_COMMAND_PATTERN);
+  if (issueMatch) {
+    const pnr = issueMatch[1].toUpperCase();
+    await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
+    const job = await BookingJobRepository.findByPnr(pnr);
+    if (!job) {
+      const reply = `I couldn't find a booking with PNR ${pnr} — double-check the reference?`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
+    if (job.ticketStatus === "ISSUED") {
+      const reply = `PNR ${pnr} is already issued — nothing further to do.`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
+    if (job.ticketStatus === "ISSUING") {
+      const reply = `PNR ${pnr} is already being issued — I'll let you know as soon as it's done.`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
+    try {
+      const { ok, status, body } = await connectorServiceClient.issueTicket(job.id);
+      if (!ok) {
+        const reason = (body as { error?: string })?.error || `connector-service returned ${status}`;
+        throw new Error(reason);
+      }
+      const reply = `On it — paying and issuing the ticket for PNR ${pnr} now. This takes a minute or two; I'll confirm right here.`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply, issueTicketJobId: job.id, issueTicketPnr: pnr };
+    } catch (err) {
+      console.error(`[travel-assistant] issue-ticket trigger failed for PNR ${pnr}:`, err);
+      const reason = err instanceof Error ? err.message : String(err);
+      const reply = `I couldn't start issuing PNR ${pnr} just now — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
       await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
       return { reply };
     }
@@ -430,25 +487,49 @@ async function runIntentDetection(
   };
 }
 
-// Splits a raw full name into firstName/lastName by word count, NOT by
-// "last word = surname" — per explicit product direction, Nigerian names
-// commonly have three or four parts and no part should be silently folded
-// away. Rule: firstName gets the first floor(n/2) words, lastName gets the
-// remaining ceil(n/2) words (the extra word on an odd split goes to the
-// surname, not the first name). This deliberately generalizes both examples
-// given: a 3-word name keeps the first word alone as firstName and combines
-// the middle+last words into lastName; a 4-word name splits evenly in half.
-// Never done by the LLM (see systemPrompt.ts) — this needs to apply
-// identically every single time, which only code can guarantee.
+// Splits a raw full name into firstName/lastName: the LAST word is always
+// the surname, and every word before it (however many — middle names
+// included) joins the first name. Per explicit product direction (e.g.
+// "aliyu ibrea mohammed" -> firstName "aliyu ibrea", lastName "mohammed") —
+// this reverses an earlier floor(n/2)/ceil(n/2) split that combined middle
+// names into the surname instead; that was the wrong direction for this
+// airline's real passenger data. Never done by the LLM (see
+// systemPrompt.ts) — this needs to apply identically every single time,
+// which only code can guarantee.
 function splitPassengerName(fullName: string): { firstName: string; lastName: string } {
   const words = fullName.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return { firstName: "", lastName: "" };
   if (words.length === 1) return { firstName: words[0], lastName: "" };
-  const firstCount = Math.floor(words.length / 2);
   return {
-    firstName: words.slice(0, firstCount).join(" "),
-    lastName: words.slice(firstCount).join(" "),
+    firstName: words.slice(0, -1).join(" "),
+    lastName: words[words.length - 1],
   };
+}
+
+const TITLE_PREFIX_WORDS = new Set([
+  "mr", "mrs", "ms", "miss", "dr", "prof", "rev", "mstr",
+  "chief", "honourable", "honorable", "barrister", "pastor", "apostle",
+  "elder", "alhaji", "alhaja", "otunba", "engineer", "architect",
+]);
+
+// The LLM is asked to extract a title separately from the name (see
+// systemPrompt.ts), but sometimes folds it into the name field instead —
+// confirmed live: "Dr. Godfrey emomidue Ibrahim" came back with
+// passengerTitle=null and "Dr." stuck inside passengerFullName, so the
+// code's own gender-based title default (resolvePendingPassengerTitle)
+// then added "Mr" on top of it, producing "Mr Dr. Godfrey emomidue
+// Ibrahim". Deterministic safety net, same "don't trust the LLM's
+// extraction on faith" reasoning already applied to email/phone below:
+// only fires when the LLM didn't already give a separate title, so a
+// genuinely single-word first name is never mistaken for one.
+function extractLeadingTitle(fullName: string): { title: string | null; rest: string } {
+  const words = fullName.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return { title: null, rest: fullName };
+  const bare = words[0].replace(/\.$/, "").toLowerCase();
+  if (!TITLE_PREFIX_WORDS.has(bare)) return { title: null, rest: fullName };
+  const supported = (ENUGU_SUPPORTED_TITLES as readonly string[]).find((t) => t.toLowerCase() === bare);
+  const title = supported ?? bare.charAt(0).toUpperCase() + bare.slice(1);
+  return { title, rest: words.slice(1).join(" ") };
 }
 
 function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, rawMessage: string): void {
@@ -479,14 +560,22 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   // blanks are ignored so a later turn can fill a gap without clobbering.
   if (e.passengerTitle?.trim()) slots.passengerTitle = e.passengerTitle.trim();
   if (e.passengerFullName?.trim()) {
-    const words = e.passengerFullName.trim().split(/\s+/).filter(Boolean);
+    let effectiveFullName = e.passengerFullName;
+    if (!e.passengerTitle?.trim()) {
+      const extracted = extractLeadingTitle(e.passengerFullName);
+      if (extracted.title) {
+        slots.passengerTitle = extracted.title;
+        effectiveFullName = extracted.rest;
+      }
+    }
+    const words = effectiveFullName.trim().split(/\s+/).filter(Boolean);
     if (words.length === 1 && slots.passengerFirstName && !slots.passengerLastName) {
       // A single word arriving once the first name is already known reads as
       // answering "what's the last name?" specifically — filling that one
       // gap, not re-deriving the whole name from a single word.
       slots.passengerLastName = words[0];
     } else {
-      const { firstName, lastName } = splitPassengerName(e.passengerFullName);
+      const { firstName, lastName } = splitPassengerName(effectiveFullName);
       slots.passengerFirstName = firstName;
       slots.passengerLastName = lastName;
     }
@@ -503,29 +592,59 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   // pendingAdditionalTitleConfirmations for handleBookOnHold to ask about,
   // one at a time, rather than ever guessing.
   if (!slots.additionalPassengers && e.additionalPassengers?.length) {
-    const resolved: { firstName: string; lastName: string; title: string | null }[] = [];
-    const pending: { index: number; firstName: string; lastName: string }[] = [];
+    const resolved: { type: "ADULT" | "CHILD" | "INFANT"; firstName: string; lastName: string; title: string | null; dateOfBirth: string | null }[] = [];
+    const titlePending: { index: number; firstName: string; lastName: string }[] = [];
+    const dobPending: { index: number; firstName: string; lastName: string }[] = [];
     e.additionalPassengers
       .filter((p) => p.fullName?.trim())
       .forEach((p, index) => {
-        const { firstName, lastName } = splitPassengerName(p.fullName);
-        const rawTitle = p.title?.trim() || null;
+        const type = p.type ?? "ADULT";
+        const dateOfBirth = p.dateOfBirth?.trim() || null;
+        let rawTitle = p.title?.trim() || null;
+        let effectiveFullName = p.fullName;
+        if (!rawTitle) {
+          const extracted = extractLeadingTitle(p.fullName);
+          if (extracted.title) {
+            rawTitle = extracted.title;
+            effectiveFullName = extracted.rest;
+          }
+        }
+        const { firstName, lastName } = splitPassengerName(effectiveFullName);
+
+        const queueDobIfNeeded = (name: { firstName: string; lastName: string }) => {
+          if (type !== "ADULT" && !dateOfBirth) dobPending.push({ index, ...name });
+        };
+
+        // Mstr/Mr/Miss/Ms (the child/infant-eligible titles) are already a
+        // subset of ENUGU_SUPPORTED_TITLES, so this same check validates a
+        // given title correctly for every passenger type — only the
+        // gender-based DEFAULT below needs to differ for a child (Mstr, not
+        // Mr, per the portal's own title dropdown for that passenger type).
         if (rawTitle && (ENUGU_SUPPORTED_TITLES as readonly string[]).some((t) => t.toLowerCase() === rawTitle.toLowerCase())) {
-          resolved.push({ firstName, lastName, title: rawTitle });
+          resolved.push({ type, firstName, lastName, title: rawTitle, dateOfBirth });
+          queueDobIfNeeded({ firstName, lastName });
           return;
         }
         const effectiveFirstName = rawTitle ? `${rawTitle} ${firstName}`.trim() : firstName;
+        const maleTitle = type === "CHILD" ? "Mstr" : "Mr";
         if (p.genderGuess === "male") {
-          resolved.push({ firstName: effectiveFirstName, lastName, title: "Mr" });
+          resolved.push({ type, firstName: effectiveFirstName, lastName, title: maleTitle, dateOfBirth });
+          queueDobIfNeeded({ firstName: effectiveFirstName, lastName });
         } else if (p.genderGuess === "female") {
-          resolved.push({ firstName: effectiveFirstName, lastName, title: "Miss" });
+          resolved.push({ type, firstName: effectiveFirstName, lastName, title: "Miss", dateOfBirth });
+          queueDobIfNeeded({ firstName: effectiveFirstName, lastName });
         } else {
-          resolved.push({ firstName: effectiveFirstName, lastName, title: null });
-          pending.push({ index, firstName: effectiveFirstName, lastName });
+          resolved.push({ type, firstName: effectiveFirstName, lastName, title: null, dateOfBirth });
+          titlePending.push({ index, firstName: effectiveFirstName, lastName });
+          // Title unresolved takes priority — DOB is asked about afterward
+          // (see the resolution order in handleBookOnHold), still queued
+          // here so it isn't lost once title resolves.
+          queueDobIfNeeded({ firstName: effectiveFirstName, lastName });
         }
       });
     slots.additionalPassengers = resolved;
-    if (pending.length) slots.pendingAdditionalTitleConfirmations = pending;
+    if (titlePending.length) slots.pendingAdditionalTitleConfirmations = titlePending;
+    if (dobPending.length) slots.pendingAdditionalDateOfBirthConfirmations = dobPending;
   }
 
   // Reproduced live: the LLM occasionally comes back with route/date
@@ -654,6 +773,7 @@ function resetBookingSlots(slots: ConversationSlots): void {
   slots.pendingTitleConfirmation = null;
   slots.additionalPassengers = null;
   slots.pendingAdditionalTitleConfirmations = null;
+  slots.pendingAdditionalDateOfBirthConfirmations = null;
 }
 
 // Resolves a raw passenger title/first-name pair into a title Enugu Air's
@@ -727,6 +847,36 @@ function matchTitleConfirmation(rawMessage: string): (typeof ENUGU_SUPPORTED_TIT
   const words = rawMessage.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
   for (const word of words) {
     if (TITLE_CONFIRMATION_WORDS[word]) return TITLE_CONFIRMATION_WORDS[word];
+  }
+  return null;
+}
+
+// Parses a reply answering "what's <child>'s date of birth?" — an explicit
+// date, or a stated age converted to an approximate date of birth (today
+// minus that many years/months). Returns "YYYY-MM-DD" or null if nothing
+// recognizable is present. Deliberately only used against a message already
+// known (via pendingAdditionalDateOfBirthConfirmations) to be answering
+// exactly this question — a bare "7" is too ambiguous to scan out of
+// arbitrary free text otherwise.
+function parseDateOfBirthReply(text: string): string | null {
+  const isoMatch = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (isoMatch) return isoMatch[0];
+
+  const monthsMatch = text.match(/\b(\d{1,2})\s*(?:months?|mo)\b/i);
+  if (monthsMatch) {
+    const d = new Date();
+    d.setMonth(d.getMonth() - parseInt(monthsMatch[1], 10));
+    return d.toISOString().slice(0, 10);
+  }
+
+  const yearsMatch = text.match(/\b(\d{1,2})\s*(?:years?|yrs?)?\s*(?:old)?\b/i);
+  if (yearsMatch) {
+    const age = parseInt(yearsMatch[1], 10);
+    if (age >= 0 && age <= 17) {
+      const d = new Date();
+      d.setFullYear(d.getFullYear() - age);
+      return d.toISOString().slice(0, 10);
+    }
   }
   return null;
 }
@@ -851,26 +1001,39 @@ interface LegFlightChoiceOutcome {
   // question (pendingOptions will be set in that case).
   reply: string | null;
   pendingOptions: string[] | null;
-  // The resolved departure time when exactly one flight was found. Also
-  // legitimately null (with reply also null) when the disambiguation
-  // search itself failed — see the comment at the call site for why that
-  // proceeds rather than blocks.
+  // The resolved departure time when exactly one flight was found.
   time: string | null;
+  // True when `reply` is set because the disambiguation CHECK itself
+  // failed (not because the route/date genuinely has no flights) — the
+  // caller leaves every other slot untouched so simply retrying resolves
+  // it, rather than resetting the whole booking and making the user
+  // re-supply everything they already gave.
+  retryable: boolean;
 }
 
 // Turns a leg's flight-count into the right outcome: exactly one flight ->
 // use it silently, zero -> tell the user, more than one -> try the
 // departure time the user already stated in their booking request (if any)
-// before asking. A search failure returns "nothing to ask, nothing
-// resolved" rather than blocking the booking on a check that itself errored.
+// before asking. A search failure asks the user to retry rather than
+// silently proceeding without a preference — confirmed live that "proceed
+// blind" guarantees a confusing, wasted automation failure whenever the
+// route genuinely does have multiple flights (the booking automation's own
+// ambiguity guard has no preferredDepartureTime to work with and refuses
+// to guess), which is strictly worse than a quick, honest "try again."
 function resolveLegFlightChoice(
   search: FlightSearchResult & { error?: string },
   leg: "outbound" | "return",
   rawMessage: string
 ): LegFlightChoiceOutcome {
   if (search.error) {
-    console.warn(`[travel-assistant] ${leg} disambiguation search failed, proceeding without a preferred time: ${search.error}`);
-    return { reply: null, pendingOptions: null, time: null };
+    console.warn(`[travel-assistant] ${leg} disambiguation search failed, asking to retry: ${search.error}`);
+    const legNote = leg === "return" ? " for the return leg" : "";
+    return {
+      reply: `I'm having trouble checking available times${legNote} right now — mind trying again in a moment?`,
+      pendingOptions: null,
+      time: null,
+      retryable: true,
+    };
   }
 
   const times = search.options.map((o) => o.departureTime).filter((t): t is string => !!t);
@@ -880,10 +1043,11 @@ function resolveLegFlightChoice(
       reply: `I couldn't find any Enugu Air flights${legNote} for that route and date. Want to try a different date?`,
       pendingOptions: null,
       time: null,
+      retryable: false,
     };
   }
   if (times.length === 1) {
-    return { reply: null, pendingOptions: null, time: times[0] };
+    return { reply: null, pendingOptions: null, time: times[0], retryable: false };
   }
 
   // More than one flight — if the user's own booking request already named
@@ -895,7 +1059,7 @@ function resolveLegFlightChoice(
   const stated = parseTimeExpression(rawMessage);
   if (stated) {
     const match = times.find((t) => normalizeOptionTime(t) === stated);
-    if (match) return { reply: null, pendingOptions: null, time: match };
+    if (match) return { reply: null, pendingOptions: null, time: match, retryable: false };
   }
 
   const legNote = leg === "return" ? "the return leg" : "your journey";
@@ -903,6 +1067,7 @@ function resolveLegFlightChoice(
     reply: `I found multiple flights for ${legNote}.\nAvailable departure times are:\n${times.map((t, i) => `${i + 1}. ${t}`).join("\n")}\nWhich departure time would you prefer? Reply with the number or the time.`,
     pendingOptions: times,
     time: null,
+    retryable: false,
   };
 }
 
@@ -973,6 +1138,33 @@ async function handleBookOnHold(
     if (slots.pendingAdditionalTitleConfirmations) {
       const next = slots.pendingAdditionalTitleConfirmations[0];
       const reply = `Got it. And for ${next.firstName} ${next.lastName}?`;
+      await ChatMemoryRepository.updateSlots(sessionId, slots);
+      await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+      return { reply };
+    }
+  }
+
+  // Same one-at-a-time resolution, for a child/infant additional passenger
+  // whose date of birth is still missing — the airline portal's own form
+  // requires it for that passenger type (see VarsBookOnHold.ts), so this
+  // blocks progress the same way title confirmation does, resolved AFTER
+  // any pending titles so the two questions never pile up together.
+  if (slots.pendingAdditionalDateOfBirthConfirmations?.length) {
+    const [current, ...rest] = slots.pendingAdditionalDateOfBirthConfirmations;
+    const resolved = parseDateOfBirthReply(rawMessage);
+    if (!resolved) {
+      const reply = `What's ${current.firstName} ${current.lastName}'s date of birth (or age)?`;
+      await ChatMemoryRepository.updateSlots(sessionId, slots);
+      await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
+      return { reply };
+    }
+    if (slots.additionalPassengers?.[current.index]) {
+      slots.additionalPassengers[current.index].dateOfBirth = resolved;
+    }
+    slots.pendingAdditionalDateOfBirthConfirmations = rest.length ? rest : null;
+    if (slots.pendingAdditionalDateOfBirthConfirmations) {
+      const next = slots.pendingAdditionalDateOfBirthConfirmations[0];
+      const reply = `Got it. And ${next.firstName} ${next.lastName}'s date of birth (or age)?`;
       await ChatMemoryRepository.updateSlots(sessionId, slots);
       await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
       return { reply };
@@ -1078,26 +1270,26 @@ async function handleBookOnHold(
   // already exposes for regular flight-search chat queries (callSearch,
   // below) — no separate mechanism needed for this.
   if (!slots.selectedDepartureTime) {
-    const outbound = await callSearch("ENUGU", slots.origin!, slots.destination!, slots.date!);
+    const outbound = await callSearchWithRetry("ENUGU", slots.origin!, slots.destination!, slots.date!);
     const outcome = resolveLegFlightChoice(outbound, "outbound", rawMessage);
     if (outcome.reply) {
       if (outcome.pendingOptions) slots.pendingDepartureTimeOptions = outcome.pendingOptions;
-      else resetBookingSlots(slots);
+      // retryable: leave every slot untouched so a plain "try again" simply
+      // re-runs this same check next turn — resetting here would make the
+      // user re-supply route/passenger details over a transient hiccup.
+      else if (!outcome.retryable) resetBookingSlots(slots);
       await ChatMemoryRepository.updateSlots(sessionId, slots);
       await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", outcome.reply);
       return { reply: outcome.reply };
     }
-    // outcome.time is null either when exactly one flight was found (use
-    // it) or when the disambiguation search itself failed (proceed without
-    // a preference rather than blocking the booking on a check that erred).
     if (outcome.time) slots.selectedDepartureTime = outcome.time;
   }
   if (slots.isRoundTrip && !slots.selectedReturnTime) {
-    const inbound = await callSearch("ENUGU", slots.destination!, slots.origin!, slots.returnDate!);
+    const inbound = await callSearchWithRetry("ENUGU", slots.destination!, slots.origin!, slots.returnDate!);
     const outcome = resolveLegFlightChoice(inbound, "return", rawMessage);
     if (outcome.reply) {
       if (outcome.pendingOptions) slots.pendingReturnTimeOptions = outcome.pendingOptions;
-      else resetBookingSlots(slots);
+      else if (!outcome.retryable) resetBookingSlots(slots);
       await ChatMemoryRepository.updateSlots(sessionId, slots);
       await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", outcome.reply);
       return { reply: outcome.reply };
@@ -1129,9 +1321,11 @@ async function handleBookOnHold(
     preferredDepartureTime: slots.selectedDepartureTime,
     preferredReturnTime: slots.selectedReturnTime,
     additionalPassengers: slots.additionalPassengers?.map((p) => ({
-      title: p.title ?? "Mr",
+      type: p.type,
+      title: p.title ?? (p.type === "CHILD" ? "Mstr" : "Mr"),
       firstName: p.firstName,
       lastName: p.lastName,
+      dateOfBirth: p.dateOfBirth ?? undefined,
     })),
     createdBy: sessionKey,
   });
@@ -1190,6 +1384,27 @@ async function searchAllAirlines(
   });
 
   return { query: { origin, destination, date }, options, searchedAt: new Date().toISOString(), failedAirlines };
+}
+
+// Booking-time disambiguation is more failure-sensitive than a general
+// flight search — confirmed live that a single flaky attempt here doesn't
+// just miss a result, it can let a multi-flight booking automation run
+// blind and fail confusingly deep inside Playwright (see
+// resolveLegFlightChoice's search-error handling). One retry after a short
+// delay costs a couple of seconds but closes most of that gap for a
+// transient portal hiccup — used only at the two booking-disambiguation
+// call sites, not the general multi-airline search path.
+async function callSearchWithRetry(
+  airline: string,
+  origin: string,
+  destination: string,
+  date: string
+): Promise<FlightSearchResult & { error?: string }> {
+  const first = await callSearch(airline, origin, destination, date);
+  if (!first.error) return first;
+  console.warn(`[travel-assistant] ${airline} disambiguation search failed once, retrying: ${first.error}`);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  return callSearch(airline, origin, destination, date);
 }
 
 async function callSearch(
