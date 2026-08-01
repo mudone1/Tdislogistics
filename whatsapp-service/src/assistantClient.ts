@@ -4,6 +4,8 @@ export interface QuoteResponse {
   reply: string;
   bookingJobId?: string;
   balanceUpdateTriggeredAt?: string;
+  issueTicketJobId?: string;
+  issueTicketPnr?: string;
 }
 
 // Same endpoint the browser ChatBubble posts to — a WhatsApp chat is just
@@ -27,12 +29,65 @@ export async function askAssistant(sessionKey: string, displayName: string | nul
     reply: data.reply ?? "Sorry, I couldn't process that just now.",
     bookingJobId: data.bookingJobId,
     balanceUpdateTriggeredAt: data.balanceUpdateTriggeredAt,
+    issueTicketJobId: data.issueTicketJobId,
+    issueTicketPnr: data.issueTicketPnr,
   };
+}
+
+export interface PassportResponse {
+  isIdDocument: boolean;
+  readable?: boolean;
+  reply?: string;
+}
+
+// Same endpoint the browser ChatBubble posts an attached image to — see
+// PassportParser.ts. Accepts any official photo ID (passport, National ID,
+// driver's license, voter's card, ...), not just passports. Node 24 (this
+// service's runtime, per its Dockerfile) has native FormData/Blob, so no
+// multipart library is needed.
+export async function sendPassportImage(
+  sessionKey: string,
+  displayName: string | null,
+  buffer: Buffer,
+  mimeType: string
+): Promise<PassportResponse> {
+  const form = new FormData();
+  form.set("sessionKey", sessionKey);
+  if (displayName) form.set("displayName", displayName);
+  form.set("isAuthenticated", "false");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- BlobPart isn't a globally available
+  // type name under this tsconfig's ES2022-only lib; `any` avoids depending on a DOM type existing.
+  form.append("file", new Blob([buffer as any], { type: mimeType }), "id-document.jpg");
+
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/passport`, { method: "POST", body: form });
+  if (!res.ok) {
+    throw new Error(`Passport API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as PassportResponse;
+}
+
+export interface AdditionalPassenger {
+  type?: "ADULT" | "CHILD" | "INFANT";
+  title: string;
+  firstName: string;
+  lastName: string;
 }
 
 export interface BookingJobStatus {
   jobId: string;
   status: "PENDING" | "RUNNING" | "SUCCESS" | "FAILED";
+  airline: string;
+  route: {
+    origin: string;
+    destination: string;
+    departureDate: string;
+    returnDate: string | null;
+    departureTime: string | null;
+    returnTime: string | null;
+  };
+  passenger: { title: string; firstName: string; lastName: string };
+  additionalPassengers: AdditionalPassenger[] | null;
+  ticketStatus: "BOOKED" | "ISSUING" | "ISSUED" | "VOIDED" | "EXPIRED";
   result?: {
     pnr: string | null;
     holdExpiresAt: string | null;
@@ -69,6 +124,29 @@ export async function getBookingScreenshot(screenshotUrl: string): Promise<Buffe
   }
   const arrayBuffer = await res.arrayBuffer();
   return Buffer.from(arrayBuffer);
+}
+
+export interface IssueTicketStatus {
+  jobId: string;
+  pnr: string | null;
+  ticketStatus: "BOOKED" | "ISSUING" | "ISSUED" | "VOIDED" | "EXPIRED";
+  result?: {
+    ticketNumber: string | null;
+    totalPayable: number | null;
+    currency: string | null;
+    issuedAt: string | null;
+    hasScreenshot: boolean;
+    screenshotUrl: string | null;
+  };
+  error?: { detail: string };
+}
+
+export async function getIssueTicketStatus(jobId: string): Promise<IssueTicketStatus> {
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/issue-ticket/status?jobId=${encodeURIComponent(jobId)}`);
+  if (!res.ok) {
+    throw new Error(`Issue-ticket status API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as IssueTicketStatus;
 }
 
 export interface BalanceUpdateStatus {

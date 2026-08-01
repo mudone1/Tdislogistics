@@ -1,7 +1,13 @@
-import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } from "@whiskeysockets/baileys";
+import makeWASocket, {
+  DisconnectReason,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  downloadMediaMessage,
+} from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import P from "pino";
 import { handleIncomingMessage, type IncomingMessage } from "./messageHandler";
+import { handleIncomingImage } from "./imageHandler";
 
 // Persisted WhatsApp session credentials — see README for why this must
 // survive restarts. Configurable so a Railway (or similar) deployment can
@@ -72,8 +78,42 @@ export async function connectWhatsApp(): Promise<void> {
       const chatId = m.key.remoteJid;
       if (!chatId) continue;
 
+      const sender = {
+        sendText: async (targetChatId: string, text: string) => {
+          await sock.sendMessage(targetChatId, { text });
+        },
+        sendImage: async (targetChatId: string, buffer: Buffer, caption?: string) => {
+          await sock.sendMessage(targetChatId, { image: buffer, caption });
+        },
+        // WhatsApp's "typing…" indicator — makes a multi-second (or
+        // multi-minute, for a Book-on-Hold/balance sync) wait feel like
+        // the bot is actually working rather than just gone silent. The
+        // indicator times out client-side after a while, so callers doing
+        // long operations re-send this periodically rather than once.
+        setTyping: async (targetChatId: string) => {
+          await sock.sendPresenceUpdate("composing", targetChatId).catch(() => {});
+        },
+      };
+
+      // Passport photos need no @tdisbot mention even in a group (per
+      // product decision — see imageHandler.ts), so this branch runs
+      // BEFORE the group mention gate that guards the text branch below.
+      if (m.message.imageMessage) {
+        const buffer = await downloadMediaMessage(m, "buffer", {});
+        await handleIncomingImage(
+          {
+            chatId,
+            senderName: m.pushName ?? null,
+            buffer,
+            mimeType: m.message.imageMessage.mimetype || "image/jpeg",
+          },
+          sender
+        ).catch((err) => console.error(`[whatsapp] handling image from ${chatId} failed:`, err));
+        continue;
+      }
+
       const text = m.message.conversation || m.message.extendedTextMessage?.text || "";
-      if (!text.trim()) continue; // non-text message (image, audio, etc.) — not handled yet
+      if (!text.trim()) continue; // non-text, non-image message (audio, etc.) — not handled
 
       const incoming: IncomingMessage = {
         chatId,
@@ -82,22 +122,9 @@ export async function connectWhatsApp(): Promise<void> {
         text,
       };
 
-      await handleIncomingMessage(incoming, {
-        sendText: async (targetChatId, text) => {
-          await sock.sendMessage(targetChatId, { text });
-        },
-        sendImage: async (targetChatId, buffer, caption) => {
-          await sock.sendMessage(targetChatId, { image: buffer, caption });
-        },
-        // WhatsApp's "typing…" indicator — makes a multi-second (or
-        // multi-minute, for a Book-on-Hold/balance sync) wait feel like
-        // the bot is actually working rather than just gone silent. The
-        // indicator times out client-side after a while, so callers doing
-        // long operations re-send this periodically rather than once.
-        setTyping: async (targetChatId) => {
-          await sock.sendPresenceUpdate("composing", targetChatId).catch(() => {});
-        },
-      }).catch((err) => console.error(`[whatsapp] handling message from ${chatId} failed:`, err));
+      await handleIncomingMessage(incoming, sender).catch((err) =>
+        console.error(`[whatsapp] handling message from ${chatId} failed:`, err)
+      );
     }
   });
 }

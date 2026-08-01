@@ -68,6 +68,11 @@ export interface ConversationSlots {
   passengerLastName: string | null;
   passengerPhone: string | null;
   passengerEmail: string | null;
+  // Set only via passport-photo OCR upload (never LLM-extracted from free
+  // text) — see PassportParser.ts / POST /api/assistant/passport. ISO
+  // YYYY-MM-DD, matching every other date field in this interface; only
+  // formatted DD/MM/YYYY at the point of display.
+  passengerDateOfBirth: string | null;
   // Book-on-Hold flight disambiguation: set when a leg's search turned up
   // more than one flight and the assistant is waiting on the user to pick
   // one. Cleared once resolved into selectedDepartureTime/selectedReturnTime.
@@ -106,8 +111,12 @@ export interface ChatEntities {
   airline: string | null;
   cabinClass: string | null;
   passengerTitle: string | null;
-  passengerFirstName: string | null;
-  passengerLastName: string | null;
+  // The passenger's full name AS GIVEN, title already excluded — splitting
+  // this into firstName/lastName is deliberately NOT the LLM's job (see
+  // splitPassengerName in ConversationOrchestrator.ts): a fixed word-count
+  // rule needs to apply 100% reliably, which a written prompt instruction
+  // can't guarantee as consistently as code can.
+  passengerFullName: string | null;
   passengerPhone: string | null;
   passengerEmail: string | null;
   // Only meaningful when passengerTitle is null (no title/honorific was
@@ -118,10 +127,10 @@ export interface ChatEntities {
   passengerGenderGuess: "male" | "female" | "unsure" | null;
   // Any passengers named IN ADDITION to the lead one above, for a
   // multi-passenger Book-on-Hold on the same PNR (e.g. "book for John Doe
-  // and Mary Smith ..."). Each still follows the last-word-is-surname rule.
-  // Empty/null when only one passenger was named.
+  // and Mary Smith ..."). fullName is split the same deterministic way as
+  // the lead passenger's. Empty/null when only one passenger was named.
   additionalPassengers:
-    | { firstName: string; lastName: string; title: string | null; genderGuess: "male" | "female" | "unsure" | null }[]
+    | { fullName: string; title: string | null; genderGuess: "male" | "female" | "unsure" | null }[]
     | null;
 }
 

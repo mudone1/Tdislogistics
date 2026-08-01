@@ -54,14 +54,26 @@ export interface BookOnHoldPassenger {
   email: string;
 }
 
-// A passenger beyond the lead one on a multi-passenger PNR — per explicit
-// product direction, additional passengers share the lead passenger's phone
-// and email rather than supplying their own (this form only ever exposes one
-// contact-details section), so only title/firstName/lastName are needed here.
+// A passenger beyond the lead one on a multi-passenger PNR. Confirmed live
+// (via screen recording) that the portal renders a DIFFERENT form per
+// passenger type:
+// - ADULT: title/firstName/lastName + their OWN mobile number field (no
+//   email — email is collected once, from the lead passenger only). Per
+//   explicit product direction, additional adults share the lead
+//   passenger's phone number (the same value is typed into their own
+//   mobile field, not left blank).
+// - CHILD / INFANT: title/firstName/lastName + Date of Birth instead of a
+//   mobile number — no phone/email field exists for these types at all.
+//   The portal enforces the age band purely via the date-picker's allowed
+//   year range (Child: roughly 2-12 years old; Infant: under 2), not a
+//   validation message — dateOfBirth must already fall in the right band.
 export interface AdditionalBookOnHoldPassenger {
-  title: string; // one of ENUGU_SUPPORTED_TITLES above
+  type?: "ADULT" | "CHILD" | "INFANT"; // defaults to ADULT when omitted
+  title: string; // ADULT: one of ENUGU_SUPPORTED_TITLES; CHILD: Mstr/Mr/Miss/Ms; INFANT: usually Mr
   firstName: string;
   lastName: string;
+  // Required for CHILD/INFANT, ignored for ADULT. "YYYY-MM-DD".
+  dateOfBirth?: string;
 }
 
 export interface BookOnHoldRequest {
@@ -89,11 +101,12 @@ export interface BookOnHoldRequest {
   preferredDepartureTime?: string;
   preferredReturnTime?: string;
   passenger: BookOnHoldPassenger;
-  // Passengers beyond the lead one, same PNR — each gets their own
-  // title/firstName/lastName, but shares the lead passenger's phone/email
-  // (see AdditionalBookOnHoldPassenger). Omit for a single-passenger hold
-  // (today's default, unchanged). When present, the Adults count on the
-  // search form is set to 1 + this array's length before Search runs.
+  // Passengers beyond the lead one, same PNR — see
+  // AdditionalBookOnHoldPassenger for what's needed per type. Omit for a
+  // single-passenger hold (today's default, unchanged). When present, the
+  // Adults/Children/Infants counts on the search form are set from this
+  // array's type breakdown (lead passenger always counts as one ADULT)
+  // before Search runs.
   additionalPassengers?: AdditionalBookOnHoldPassenger[];
 }
 
@@ -218,35 +231,58 @@ export async function establishSession(
   return { context, page };
 }
 
-// Sets the Adults count on the search form before the initial Search/
-// Continue click — only needed once a booking has more than one passenger
-// (every hold to date has been single-passenger, so this control has never
-// been exercised live). No selector has been independently confirmed yet;
-// this tries the ID/name patterns VARS/Videcom deployments commonly use for
-// a passenger-count control and fails LOUDLY with a diagnostic dump rather
-// than silently proceeding with the form's default of 1 adult while
-// claiming to book more — a wrong silent guess here would risk holding the
-// wrong number of seats for real money.
-async function setAdultsCount(page: import("playwright").Page, adults: number, logTag: string): Promise<void> {
-  if (adults <= 1) return;
-  const candidates = ["#Adults", "#NoOfAdults", "#txtAdults", "#ddlAdults", "select[name='Adults']", "select[name*='dult' i]"];
-  for (const sel of candidates) {
-    const locator = page.locator(sel);
-    if (await locator.count().catch(() => 0)) {
-      await locator.selectOption(String(adults)).catch(() => locator.fill(String(adults)));
-      console.log(`[${logTag}] set adults count to ${adults} via "${sel}"`);
-      return;
+// Sets the Adults/Children/Infants counts on the search form before the
+// initial Search/Continue click. Confirmed live (Enugu Air, via screen
+// recording) that this exact "Refine Search" panel has three separate
+// dropdowns labeled precisely "Adults :", "Children :", "Infants :" — #Adults
+// is tried first for each as the most likely id given the platform's plain
+// "#Origin"/"#Destination" naming convention, with broader fallbacks tried
+// after. Fails LOUDLY with a diagnostic dump rather than silently proceeding
+// with the form's default counts while claiming to book more/fewer — a
+// wrong silent guess here would risk holding the wrong number of seats (or
+// the wrong passenger mix) for real money.
+async function setPassengerCounts(
+  page: import("playwright").Page,
+  counts: { adults: number; children: number; infants: number },
+  logTag: string
+): Promise<void> {
+  const fields: Array<{ key: keyof typeof counts; candidates: string[] }> = [
+    { key: "adults", candidates: ["#Adults", "#NoOfAdults", "#txtAdults", "#ddlAdults", "select[name='Adults']", "select[name*='dult' i]"] },
+    { key: "children", candidates: ["#Children", "#NoOfChildren", "#txtChildren", "#ddlChildren", "select[name='Children']", "select[name*='hild' i]"] },
+    { key: "infants", candidates: ["#Infants", "#NoOfInfants", "#txtInfants", "#ddlInfants", "select[name='Infants']", "select[name*='nfant' i]"] },
+  ];
+
+  for (const field of fields) {
+    const value = counts[field.key];
+    // Adults defaults to 1 on the form already; Children/Infants default to
+    // 0 — only touch a dropdown when a non-default count is actually needed,
+    // same "don't exercise a control that's never been confirmed unless we
+    // have to" caution as before.
+    const isDefault = field.key === "adults" ? value <= 1 : value <= 0;
+    if (isDefault) continue;
+
+    let found = false;
+    for (const sel of field.candidates) {
+      const locator = page.locator(sel);
+      if (await locator.count().catch(() => 0)) {
+        await locator.selectOption(String(value)).catch(() => locator.fill(String(value)));
+        console.log(`[${logTag}] set ${field.key} count to ${value} via "${sel}"`);
+        found = true;
+        break;
+      }
     }
+    if (found) continue;
+
+    const diagnostic = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>("select, input"))
+        .map((el) => ({ tag: el.tagName, id: el.id, name: (el as HTMLInputElement).name }))
+        .filter((f) => f.id || f.name)
+    );
+    console.error(`DIAGNOSTIC [${logTag}] no ${field.key} control found among: ${JSON.stringify(diagnostic).slice(0, 2000)}`);
+    throw new Error(
+      `${value} ${field.key} requested but no ${field.key}-count control was found on the search form — this needs a one-time live check of the real field id before this passenger mix can be booked on this airline.`
+    );
   }
-  const diagnostic = await page.evaluate(() =>
-    Array.from(document.querySelectorAll<HTMLElement>("select, input"))
-      .map((el) => ({ tag: el.tagName, id: el.id, name: (el as HTMLInputElement).name }))
-      .filter((f) => f.id || f.name)
-  );
-  console.error(`DIAGNOSTIC [${logTag}] no Adults control found among: ${JSON.stringify(diagnostic).slice(0, 2000)}`);
-  throw new Error(
-    `${adults} passengers requested but no Adults-count control was found on the search form — this needs a one-time live check of the real field id before multi-passenger bookings can work on this airline.`
-  );
 }
 
 function withCarriedSessionId(targetUrl: string, currentPageUrl: string): string {
@@ -304,7 +340,10 @@ export async function bookVarsPlatformOnHold(
       }
     );
 
-    await setAdultsCount(page, 1 + (request.additionalPassengers?.length ?? 0), logTag);
+    const extraAdults = request.additionalPassengers?.filter((p) => !p.type || p.type === "ADULT").length ?? 0;
+    const childrenCount = request.additionalPassengers?.filter((p) => p.type === "CHILD").length ?? 0;
+    const infantsCount = request.additionalPassengers?.filter((p) => p.type === "INFANT").length ?? 0;
+    await setPassengerCounts(page, { adults: 1 + extraAdults, children: childrenCount, infants: infantsCount }, logTag);
 
     // Two different search-form URLs across VARS deployments use two
     // different submit controls for the exact same #Origin/#Destination/
@@ -382,48 +421,85 @@ export async function bookVarsPlatformOnHold(
 
     // Additional passengers on the same PNR — same form, indexed fields
     // (passenger2title/firstname/lastname, passenger3..., following the
-    // confirmed passenger1 naming convention). Per explicit product
-    // direction they share the lead passenger's phone/email above rather
-    // than filling their own, so only title/name fields are touched here.
+    // confirmed passenger1 naming convention), but the fields touched per
+    // passenger depend on type (confirmed live via screen recording):
+    // - ADULT: also has its own mobilephonenumber field — filled with the
+    //   LEAD passenger's number per explicit product direction (shared
+    //   contact info), not left blank.
+    // - CHILD/INFANT: has Date of Birth instead of a phone field — no
+    //   phone/email exists for these types at all.
     if (request.additionalPassengers?.length) {
       for (let i = 0; i < request.additionalPassengers.length; i++) {
         const idx = i + 2;
         const p = request.additionalPassengers[i];
-        console.log(`[${logTag}] filling passenger ${idx} details`);
+        const type = p.type ?? "ADULT";
+        console.log(`[${logTag}] filling passenger ${idx} details (${type})`);
         await page.locator(`#passenger${idx}title`).selectOption({ label: p.title });
         await page.locator(`#passenger${idx}firstname`).fill(p.firstName);
         await page.locator(`#passenger${idx}lastname`).fill(p.lastName);
+        if (type === "ADULT") {
+          await page.locator(`#passenger${idx}mobilephonenumber`).fill(request.passenger.mobileNumber.replace(/^0+/, ""));
+        } else {
+          if (!p.dateOfBirth) {
+            throw new Error(`Passenger ${idx} is a ${type} but has no dateOfBirth set — required for this passenger type.`);
+          }
+          await fillPassengerDateOfBirth(page, idx, p.dateOfBirth, logTag);
+        }
       }
     }
 
     // The payment section is a Bootstrap accordion (#pay-accordion) of
-    // payment-option panels (Invoice/Pay Now/Book Now Pay Later — the
-    // underlying radio VALUE strings are airline-specific, e.g. Enugu uses
-    // "BuyNowPayLater" while United/Rano use "NoPaymentRequered" for the
-    // same hold option — so match by the stable, airline-independent panel
-    // heading TEXT instead). The radio input itself is CSS-hidden
-    // (zero-size) with no wrapping <label> — confirmed live that the real,
-    // human-facing control is the ".panel-heading" above it, and clicking
-    // it (a genuine click, not the radio) reveals a REQUIRED
-    // "#txtAgentPassword" field that must be filled with the agent's own
-    // login password before the hold can actually be submitted. Skipping
-    // this (as an earlier version of this code did, via direct
-    // radio.checked + dispatchEvent) submitted with that field empty —
-    // functionally created a real PNR in one live test, but does not match
-    // the actual portal flow and risks breaking if that leniency is ever
-    // tightened server-side.
-    // The heading click TOGGLES the panel (Bootstrap accordion) — if
-    // "Book Now, Pay Later" already happens to be the default-expanded
-    // option (confirmed live it isn't always "Invoice" by default, unlike
-    // the one case this was first verified against), clicking it again
-    // would COLLAPSE it and hide the password field instead of revealing
-    // it. Only click if the field isn't already visible.
+    // payment-option panels. The VISIBLE panel-heading TEXT for the hold
+    // option is wildly different per airline — confirmed live: Enugu says
+    // "Book Now, Pay Later", United says "I want to book on hold", Rano
+    // says "I want to Buy Now Pay Later" — so matching on heading text (an
+    // earlier version of this code did, hardcoded to Enugu's exact
+    // wording) silently finds NOTHING on United/Rano. The underlying radio
+    // VALUE, by contrast, is confirmed identical across all three:
+    // "BuyNowPayLater". Match on that instead — airline-independent by
+    // construction, and it can never resolve to "Invoice" or any other
+    // option since we're searching for this exact literal value, not
+    // "whichever panel looks right".
+    const holdRadioSelector = 'input[name="optpaymentformofpayment"][value="BuyNowPayLater"]';
+    const holdRadioCount = await page.locator(holdRadioSelector).count();
+    if (holdRadioCount === 0) {
+      throw new Error('No "BuyNowPayLater" payment option found on this page — refusing to guess at a different one');
+    }
+
+    // The radio input itself is CSS-hidden (zero-size) with no wrapping
+    // <label> — the real, human-facing control is the ".panel-heading"
+    // above it, and clicking it (a genuine click, not the radio) reveals a
+    // REQUIRED "#txtAgentPassword" field that must be filled with the
+    // agent's own login password before the hold can actually be
+    // submitted. Skipping this (as an earlier version of this code did,
+    // via direct radio.checked + dispatchEvent with no heading click)
+    // submitted with that field empty — functionally created a real PNR in
+    // one live test, but does not match the actual portal flow and risks
+    // breaking if that leniency is ever tightened server-side.
+    // The heading click TOGGLES the panel (Bootstrap accordion) — if the
+    // hold option already happens to be the default-expanded one
+    // (confirmed live it isn't always "Invoice" by default), clicking it
+    // again would COLLAPSE it and hide the password field instead of
+    // revealing it. Only click if the field isn't already visible.
     const passwordField = page.locator("#txtAgentPassword");
     if (!(await passwordField.isVisible().catch(() => false))) {
-      await page
-        .locator(".panel-heading", { hasText: /book now,?\s*pay later/i })
-        .first()
-        .click();
+      // Plain JS closest()/querySelector() here rather than a Playwright
+      // xpath ancestor lookup — confirmed live that an xpath like
+      // ancestor::*[contains(@class,'panel')] matches the WRONG (too
+      // narrow) ancestor, since "panel-body"/"panel-heading" themselves
+      // contain the substring "panel". closest(".panel") does real
+      // word-boundary class-token matching and doesn't have that problem.
+      const headingClicked = await page.evaluate((selector) => {
+        const radio = document.querySelector<HTMLInputElement>(selector);
+        const panel = radio?.closest(".panel");
+        const heading = panel?.querySelector<HTMLElement>(".panel-heading");
+        if (!heading) return false;
+        heading.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        return true;
+      }, holdRadioSelector);
+      if (!headingClicked) {
+        throw new Error('Found the "BuyNowPayLater" radio but not its enclosing panel-heading to click');
+      }
       await passwordField.waitFor({ state: "visible", timeout: 10000 });
     }
     await passwordField.fill(credentials.password);
@@ -431,28 +507,14 @@ export async function bookVarsPlatformOnHold(
     // The heading click above only expands/collapses the accordion panel —
     // confirmed live it does NOT also select the underlying radio (the
     // submit call came back "ErrorMsg":"Select Form Of Payment" even with
-    // the panel expanded and password filled). Explicitly set the radio
-    // within that same panel, same direct-state-set approach as before
-    // (plain .click() doesn't reliably stick on this CSS-hidden control),
-    // but scoped to whichever radio lives inside the "Book Now, Pay Later"
-    // panel rather than a hardcoded value string — airline-specific values
-    // (Enugu: "BuyNowPayLater", United/Rano: "NoPaymentRequered") would
-    // otherwise need per-airline hardcoding here.
-    const radioSet = await page.evaluate(() => {
-      const heading = Array.from(document.querySelectorAll<HTMLElement>(".panel-heading")).find((el) =>
-        /book now,?\s*pay later/i.test(el.textContent ?? "")
-      );
-      const panel = heading?.closest(".panel");
-      const radio = panel?.querySelector<HTMLInputElement>('input[name="optpaymentformofpayment"]');
-      if (!radio) return false;
+    // the panel expanded and password filled). Explicitly set it — same
+    // direct-state-set approach as before (plain .click() doesn't reliably
+    // stick on this CSS-hidden control).
+    await page.locator(holdRadioSelector).first().evaluate((radio: HTMLInputElement) => {
       radio.checked = true;
       radio.dispatchEvent(new Event("click", { bubbles: true }));
       radio.dispatchEvent(new Event("change", { bubbles: true }));
-      return true;
     });
-    if (!radioSet) {
-      throw new Error('Could not find the "Book Now, Pay Later" payment radio to select');
-    }
 
     await page.evaluate(() => {
       const tnc = document.getElementById("chkAgreeTermsAndConditions") as HTMLInputElement | null;
@@ -613,6 +675,45 @@ async function verifyBookingReference(
 function dateParts(dateISO: string): { y: number; m: number; d: number } {
   const [y, m, d] = dateISO.split("-").map(Number);
   return { y, m: m - 1, d };
+}
+
+// Sets a Child/Infant passenger's Date of Birth. Confirmed live (via screen
+// recording) that this control is a text box + calendar-icon date picker —
+// the SAME jQuery UI datepicker widget already used for departuredate/
+// returndate above, just on a different field id (not independently
+// confirmed — every id here is a best-effort guess following the confirmed
+// passengerNfirstname/lastname naming convention). The portal enforces the
+// age band by restricting the picker's own year dropdown (Child: ~2014-2024,
+// Infant: ~2024-2026 relative to "today" in the recording) rather than a
+// validation message — so an out-of-band dateOfBirth would simply fail to
+// set here rather than surface a clean error; the caller is responsible for
+// supplying a plausible date for the passenger's stated type.
+async function fillPassengerDateOfBirth(page: import("playwright").Page, idx: number, dateISO: string, logTag: string): Promise<void> {
+  const { y, m, d } = dateParts(dateISO);
+  const candidates = [`#passenger${idx}dateofbirth`, `#passenger${idx}dob`, `#Passenger${idx}DateOfBirth`];
+  for (const sel of candidates) {
+    if (await page.locator(sel).count().catch(() => 0)) {
+      const ok = await page.evaluate(
+        ({ selector, y, m, d }) => {
+          const w = window as unknown as { $: (sel: string) => { datepicker: (op: string, d: Date) => void } };
+          try {
+            w.$(selector).datepicker("setDate", new Date(y, m, d));
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        { selector: sel, y, m, d }
+      );
+      if (ok) {
+        console.log(`[${logTag}] set passenger ${idx} date of birth (${dateISO}) via "${sel}"`);
+        return;
+      }
+    }
+  }
+  throw new Error(
+    `Could not find/set a Date of Birth control for passenger ${idx} (tried ${candidates.join(", ")}) — this needs a one-time live check of the real field id before Child/Infant bookings can work on this airline.`
+  );
 }
 
 async function selectCheapestFare(
