@@ -17,31 +17,20 @@ function errorContactNote(reason: string): string {
   return ` Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
 }
 
-function passengerName(p: { title: string; firstName: string; lastName: string }): string {
-  return [p.title, p.firstName, p.lastName].filter(Boolean).join(" ");
-}
-
-// Full "Booking Successful" format: passenger name(s), PNR, airline, route,
-// date, time, fare amount, then the numbered issue-ticket options. Fare is
-// whatever was captured at hold-time (an estimate — the authoritative figure
-// gets extracted again, and overwrites this, at actual issue time).
+// Deliberately terse — per explicit product direction, the full
+// passenger/airline/route/date write-up was too verbose next to the
+// screenshot (which already shows all of that visually as the caption's
+// attached image). Just the two pieces of info that actually matter as
+// TEXT, then the numbered issue-ticket options. Fare is whatever was
+// captured at hold-time (an estimate — the authoritative figure gets
+// extracted again, and overwrites this, at actual issue time).
 function formatSuccessMessage(job: BookingJobStatus): string {
   const result = job.result!;
-  const names = [passengerName(job.passenger), ...(job.additionalPassengers ?? []).map(passengerName)];
-
-  const lines = ["✅ Booking Successful", ""];
-  lines.push(names.length > 1 ? "Passengers:" : "Passenger:");
-  lines.push(...names);
-  lines.push("");
+  const lines = ["✅ Booking Successful"];
   if (result.pnr) lines.push(`PNR: ${result.pnr}`);
-  lines.push(`Airline: ${job.airline}`);
-  lines.push(`Route: ${job.route.origin} → ${job.route.destination}`);
-  lines.push(`Date: ${job.route.departureDate}${job.route.returnDate ? ` (returning ${job.route.returnDate})` : ""}`);
-  if (job.route.departureTime) lines.push(`Time: ${job.route.departureTime}${job.route.returnTime ? ` (returning ${job.route.returnTime})` : ""}`);
   if (result.totalPayable != null) {
     lines.push(`Amount: ${result.currency ? `${result.currency} ` : ""}${result.totalPayable.toLocaleString()}`);
   }
-  if (result.holdExpiresAt) lines.push(`Held until: ${result.holdExpiresAt}`);
 
   if (result.pnr) {
     lines.push("");
