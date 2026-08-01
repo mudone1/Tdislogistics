@@ -23,16 +23,36 @@ interface BookingResult {
   screenshotUrl: string | null;
 }
 
+interface BookingPassenger {
+  title: string;
+  firstName: string;
+  lastName: string;
+}
+
+interface IssueTicketState {
+  status: "processing" | "success" | "failed";
+  ticketNumber?: string | null;
+  totalPayable?: number | null;
+  currency?: string | null;
+  screenshotUrl?: string | null;
+  error?: string;
+}
+
 interface BookingState {
   jobId: string;
   status: "processing" | "success" | "failed";
   result?: BookingResult;
+  airline?: string;
+  route?: { origin: string; destination: string; departureDate: string; returnDate: string | null; departureTime: string | null; returnTime: string | null };
+  passenger?: BookingPassenger;
+  additionalPassengers?: BookingPassenger[] | null;
   // Prefetched as soon as the hold succeeds (see prefetchBookingScreenshot)
   // so the WhatsApp share button's navigator.share() call stays synchronous
   // with the click — same user-activation constraint documented for quote
   // image sharing below.
   screenshotBlob?: Blob;
   error?: { message: string; detail: string | null };
+  issueTicket?: IssueTicketState;
 }
 
 interface DuplicateMatchInfo {
@@ -56,6 +76,11 @@ interface ChatMessage {
   imageBlob?: Blob;
   salesReport?: { reportId: string; status: "pending" | "saved" | "discarded" };
   booking?: BookingState;
+  // Set when ticket-issuing was triggered via the deterministic text
+  // command ("Issue ABC123"/"Pay ABC123") rather than the "Issue Ticket"
+  // button on a BookingResultCard — that card tracks its own issueTicket
+  // sub-state instead (see BookingState.issueTicket).
+  issueTicket?: IssueTicketState;
 }
 
 const SALES_REPORT_AIRLINES: { key: string; label: string; aliases: string[] }[] = [
@@ -84,6 +109,14 @@ const PHONE_PATTERN = /\+?[\d][\d\s-]{8,17}\d/;
 
 function looksLikeBookingRequest(text: string): boolean {
   return BOOKING_VERB_PATTERN.test(text) && (EMAIL_PATTERN.test(text) || PHONE_PATTERN.test(text));
+}
+
+// Per explicit product direction: unlike a public customer-facing bot, this
+// tool's users are TDIS staff — the whole point of surfacing the actual
+// reason is so it can be relayed to Muhammed (the developer) to fix, not
+// hidden from them the way a stack trace would be from an end customer.
+function errorContactNote(reason: string): string {
+  return ` Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
 }
 
 function detectAttachmentKind(file: File): "excel" | "image" | "other" {
@@ -354,7 +387,15 @@ export default function ChatBubble() {
         if (res.ok) {
           const data = await res.json();
           if (data.status === "SUCCESS") {
-            setBooking({ jobId, status: "success", result: data.result });
+            setBooking({
+              jobId,
+              status: "success",
+              result: data.result,
+              airline: data.airline,
+              route: data.route,
+              passenger: data.passenger,
+              additionalPassengers: data.additionalPassengers,
+            });
             if (data.result?.screenshotUrl) prefetchBookingScreenshot(messageId, data.result.screenshotUrl);
             return;
           }
@@ -383,6 +424,100 @@ export default function ChatBubble() {
     // First check after 3s — the run has barely started before then.
     setTimeout(tick, 3000);
   }, [prefetchBookingScreenshot]);
+
+  // Polls a ticket-issuing job until terminal — same shape as
+  // pollBookingJob. `attach` decides where the result lands: a
+  // BookingResultCard's own issueTicket sub-state (button click) or a
+  // standalone message's issueTicket (deterministic "Issue ABC123" text
+  // command, which may not correspond to any card currently on screen).
+  const pollIssueTicketJob = useCallback((messageId: number, jobId: string, attach: "booking" | "standalone" = "booking"): void => {
+    const POLL_MS = 4000;
+    const MAX_ATTEMPTS = 90;
+    let attempts = 0;
+
+    const setIssueTicket = (issueTicket: IssueTicketState) =>
+      setMessages((m: ChatMessage[]) =>
+        m.map((msg) =>
+          msg.id !== messageId
+            ? msg
+            : attach === "booking" && msg.booking
+              ? { ...msg, booking: { ...msg.booking, issueTicket } }
+              : attach === "standalone"
+                ? { ...msg, issueTicket }
+                : msg
+        )
+      );
+
+    const tick = async (): Promise<void> => {
+      if (!mounted.current) return;
+      attempts++;
+      try {
+        const res = await fetch(`/api/assistant/issue-ticket/status?jobId=${encodeURIComponent(jobId)}`, { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ticketStatus === "ISSUED") {
+            setIssueTicket({
+              status: "success",
+              ticketNumber: data.result?.ticketNumber,
+              totalPayable: data.result?.totalPayable,
+              currency: data.result?.currency,
+              screenshotUrl: data.result?.screenshotUrl,
+            });
+            return;
+          }
+          if (data.ticketStatus === "BOOKED" && data.error?.detail) {
+            setIssueTicket({ status: "failed", error: data.error.detail });
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("[assistant] issue-ticket poll failed:", err);
+      }
+      if (attempts >= MAX_ATTEMPTS) {
+        setIssueTicket({ status: "failed", error: "Issuing is taking longer than expected — it may still complete. Check with an admin or try again." });
+        return;
+      }
+      if (mounted.current) setTimeout(tick, POLL_MS);
+    };
+
+    setTimeout(tick, 3000);
+  }, []);
+
+  // Kicks off ticket-issuing for a specific PNR — always the exact PNR this
+  // booking card carries, never "whichever booking is newest," so multiple
+  // active holds in the same chat can never get cross-wired.
+  const handleIssueTicket = useCallback(
+    async (messageId: number, pnr: string): Promise<void> => {
+      setMessages((m: ChatMessage[]) =>
+        m.map((msg) => (msg.id === messageId && msg.booking ? { ...msg, booking: { ...msg.booking, issueTicket: { status: "processing" } } } : msg))
+      );
+      try {
+        const res = await fetch("/api/assistant/issue-ticket/trigger", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pnr }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setMessages((m: ChatMessage[]) =>
+            m.map((msg) =>
+              msg.id === messageId && msg.booking
+                ? { ...msg, booking: { ...msg.booking, issueTicket: { status: "failed", error: data.error || `HTTP ${res.status}` } } }
+                : msg
+            )
+          );
+          return;
+        }
+        pollIssueTicketJob(messageId, data.jobId);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        setMessages((m: ChatMessage[]) =>
+          m.map((msg) => (msg.id === messageId && msg.booking ? { ...msg, booking: { ...msg.booking, issueTicket: { status: "failed", error: reason } } } : msg))
+        );
+      }
+    },
+    [pollIssueTicketJob]
+  );
 
   // Polls after a "balance update" trigger until every airline's balance
   // has synced more recently than the trigger instant, or the poll budget
@@ -489,12 +624,17 @@ export default function ChatBubble() {
             hasResults,
             legs,
             booking: bookingJobId ? { jobId: bookingJobId, status: "processing" } : undefined,
+            issueTicket: data.issueTicketJobId ? { status: "processing" } : undefined,
           },
         ]);
         setPending(data.pending ?? null);
 
         // A Book-on-Hold was just started — poll for the PNR/outcome.
         if (bookingJobId) pollBookingJob(bookingJobId, newId);
+
+        // A ticket-issuing run was just started via the deterministic
+        // "Issue <PNR>"/"Pay <PNR>" text command — poll for the outcome.
+        if (data.issueTicketJobId) pollIssueTicketJob(newId, data.issueTicketJobId, "standalone");
 
         // A "balance update" sync was just triggered — poll for the fresh figures.
         if (data.balanceUpdateTriggeredAt) pollBalanceUpdate(data.balanceUpdateTriggeredAt);
@@ -519,7 +659,7 @@ export default function ChatBubble() {
         setSending(false);
       }
     },
-    [sending, pending, identity, refresh, prefetchQuoteImage, pollBookingJob, pollBalanceUpdate]
+    [sending, pending, identity, refresh, prefetchQuoteImage, pollBookingJob, pollIssueTicketJob, pollBalanceUpdate]
   );
 
   // Builds the chat message for a successfully generated (PENDING_VERIFICATION)
@@ -680,6 +820,40 @@ export default function ChatBubble() {
     }
   }
 
+  // Gates every image upload before it can fall into the sales-report
+  // screenshot flow: a passport photo needs no command, so we always check
+  // first. Non-passport images (e.g. a genuine MCO invoice screenshot) fall
+  // through to the existing, unchanged detection flow.
+  async function attemptPassportDetectOrFallback(file: File): Promise<void> {
+    setGeneratingReport(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.set("sessionKey", identity?.sessionKey ?? "");
+      if (identity?.displayName) form.set("displayName", identity.displayName);
+      form.set("isAuthenticated", String(identity?.isAuthenticated ?? false));
+      const res = await fetch("/api/assistant/passport", { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+      if (!data.isPassport) {
+        await attemptGenerateOrDetect(file, "screenshot");
+        return;
+      }
+
+      setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: data.reply }]);
+    } catch (err) {
+      console.error("[assistant] passport extraction failed:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      setMessages((m: ChatMessage[]) => [
+        ...m,
+        { id: idCounter++, role: "assistant", text: `Couldn't read that photo just now.${errorContactNote(reason)}` },
+      ]);
+    } finally {
+      setGeneratingReport(false);
+    }
+  }
+
   function handleFileSelected(e: ChangeEvent<HTMLInputElement>): void {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-selecting the same file later
@@ -688,11 +862,15 @@ export default function ChatBubble() {
     setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "user", text: `📎 ${file.name}` }]);
 
     const kind = detectAttachmentKind(file);
-    // Excel (.xls/.xlsx) and screenshots (images) both go through the exact
-    // same flow now. Excel parses directly; screenshots are read by a
-    // vision model server-side.
-    if (kind === "excel" || kind === "image") {
-      attemptGenerateOrDetect(file, kind === "image" ? "screenshot" : "sales report");
+    // Images are checked for a passport first (no command required); only
+    // non-passport images fall through to the sales-report screenshot flow.
+    // Excel (.xls/.xlsx) goes straight there, unchanged.
+    if (kind === "image") {
+      attemptPassportDetectOrFallback(file);
+      return;
+    }
+    if (kind === "excel") {
+      attemptGenerateOrDetect(file, "sales report");
       return;
     }
 
@@ -936,15 +1114,7 @@ export default function ChatBubble() {
     prefetchQuoteImage(newId, legs);
   }
 
-  // Per explicit product direction: unlike a public customer-facing bot, this
-// tool's users are TDIS staff — the whole point of surfacing the actual
-// reason is so it can be relayed to Muhammed (the developer) to fix, not
-// hidden from them the way a stack trace would be from an end customer.
-function errorContactNote(reason: string): string {
-  return ` Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
-}
-
-function describeHttpError(status: number): string {
+  function describeHttpError(status: number): string {
     if (status === 504) {
       return `That search is taking longer than expected and timed out — try narrowing it (e.g. name one airline) or try again in a moment.${errorContactNote(`HTTP 504`)}`;
     }
@@ -1040,12 +1210,41 @@ function describeHttpError(status: number): string {
                     <div className="chat-bubble-msg assistant chat-bubble-typing">⏳ Placing the hold — this can take a minute or two…</div>
                   )}
                   {m.booking?.status === "success" && m.booking.result && (
-                    <BookingResultCard booking={m.booking} />
+                    <BookingResultCard booking={m.booking} onIssueTicket={() => m.booking!.result?.pnr && handleIssueTicket(m.id, m.booking!.result.pnr)} />
                   )}
                   {m.booking?.status === "failed" && m.booking.error && (
                     <div className="chat-bubble-msg assistant" style={{ borderLeft: "3px solid #e11d48" }}>
                       ⚠️ {m.booking.error.message}
                       {m.booking.error.detail ? errorContactNote(m.booking.error.detail) : ""}
+                    </div>
+                  )}
+                  {m.issueTicket?.status === "processing" && (
+                    <div className="chat-bubble-msg assistant chat-bubble-typing">⏳ Paying and issuing the ticket — this can take a minute or two…</div>
+                  )}
+                  {m.issueTicket?.status === "success" && (
+                    <div className="chat-bubble-msg assistant" style={{ borderLeft: "3px solid #16a34a", display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div>
+                        <strong>✅ Ticket issued successfully</strong>
+                      </div>
+                      {m.issueTicket.ticketNumber && <div>Ticket number: {m.issueTicket.ticketNumber}</div>}
+                      <div>Payment status: Paid</div>
+                      {m.issueTicket.totalPayable != null && (
+                        <div>
+                          Amount paid: {m.issueTicket.currency ? `${m.issueTicket.currency} ` : ""}
+                          {m.issueTicket.totalPayable.toLocaleString()}
+                        </div>
+                      )}
+                      {m.issueTicket.screenshotUrl && (
+                        <a href={m.issueTicket.screenshotUrl} target="_blank" rel="noopener noreferrer">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={m.issueTicket.screenshotUrl} alt="Ticket issued confirmation" style={{ maxWidth: "100%", borderRadius: 6, marginTop: 4 }} />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {m.issueTicket?.status === "failed" && (
+                    <div className="chat-bubble-msg assistant" style={{ borderLeft: "3px solid #e11d48" }}>
+                      ⚠️ Couldn&apos;t issue the ticket.{m.issueTicket.error ? errorContactNote(m.issueTicket.error) : ""}
                     </div>
                   )}
                 </div>
@@ -1124,9 +1323,16 @@ function describeHttpError(status: number): string {
 
 // Confirmation card for a successful Book-on-Hold: PNR, hold expiry, total,
 // and the captured confirmation screenshot (same-origin, click to enlarge).
-function BookingResultCard({ booking }: { booking: BookingState }) {
+function passengerFullName(p: BookingPassenger): string {
+  return [p.title, p.firstName, p.lastName].filter(Boolean).join(" ");
+}
+
+function BookingResultCard({ booking, onIssueTicket }: { booking: BookingState; onIssueTicket: () => void }) {
   const result = booking.result;
   if (!result) return null;
+
+  const names = booking.passenger ? [passengerFullName(booking.passenger), ...(booking.additionalPassengers ?? []).map(passengerFullName)] : [];
+  const issue = booking.issueTicket;
 
   return (
     <div
@@ -1134,20 +1340,43 @@ function BookingResultCard({ booking }: { booking: BookingState }) {
       style={{ borderLeft: "3px solid #16a34a", display: "flex", flexDirection: "column", gap: 6 }}
     >
       <div>
-        <strong>✅ Hold confirmed</strong>
+        <strong>✅ Booking Successful</strong>
       </div>
-      {result.pnr && (
+      {names.length > 0 && (
         <div>
-          Booking reference (PNR): <strong>{result.pnr}</strong>
+          {names.length > 1 ? "Passengers:" : "Passenger:"} <strong>{names.join(", ")}</strong>
         </div>
       )}
-      {result.holdExpiresAt && <div>Held until: {result.holdExpiresAt}</div>}
+      {result.pnr && (
+        <div>
+          PNR: <strong>{result.pnr}</strong>
+        </div>
+      )}
+      {booking.airline && <div>Airline: {booking.airline}</div>}
+      {booking.route && (
+        <div>
+          Route: {booking.route.origin} → {booking.route.destination}
+        </div>
+      )}
+      {booking.route && (
+        <div>
+          Date: {booking.route.departureDate}
+          {booking.route.returnDate ? ` (returning ${booking.route.returnDate})` : ""}
+        </div>
+      )}
+      {booking.route?.departureTime && (
+        <div>
+          Time: {booking.route.departureTime}
+          {booking.route.returnTime ? ` (returning ${booking.route.returnTime})` : ""}
+        </div>
+      )}
       {result.totalPayable != null && (
         <div>
-          Total payable: {result.currency ? `${result.currency} ` : ""}
+          Amount: {result.currency ? `${result.currency} ` : ""}
           {result.totalPayable.toLocaleString()}
         </div>
       )}
+      {result.holdExpiresAt && <div>Held until: {result.holdExpiresAt}</div>}
       {result.screenshotUrl && (
         <a href={result.screenshotUrl} target="_blank" rel="noopener noreferrer">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1158,11 +1387,41 @@ function BookingResultCard({ booking }: { booking: BookingState }) {
           />
         </a>
       )}
-      {(result.screenshotUrl || booking.screenshotBlob) && (
-        <div className="chat-bubble-msg-actions">
+      <div className="chat-bubble-msg-actions">
+        {(result.screenshotUrl || booking.screenshotBlob) && (
           <button onClick={() => shareBookingToWhatsApp(result, booking.screenshotBlob)}>
             📲 Send to WhatsApp
           </button>
+        )}
+        {result.pnr && !issue && (
+          <button onClick={onIssueTicket}>🎫 Issue Ticket</button>
+        )}
+      </div>
+      {issue?.status === "processing" && <div className="chat-bubble-typing">⏳ Paying and issuing the ticket — this can take a minute or two…</div>}
+      {issue?.status === "failed" && (
+        <div style={{ borderLeft: "3px solid #e11d48", paddingLeft: 8 }}>
+          ⚠️ Couldn&apos;t issue the ticket.{issue.error ? errorContactNote(issue.error) : ""}
+        </div>
+      )}
+      {issue?.status === "success" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div>
+            <strong>✅ Ticket issued successfully</strong>
+          </div>
+          {issue.ticketNumber && <div>Ticket number: {issue.ticketNumber}</div>}
+          <div>Payment status: Paid</div>
+          {issue.totalPayable != null && (
+            <div>
+              Amount paid: {issue.currency ? `${issue.currency} ` : ""}
+              {issue.totalPayable.toLocaleString()}
+            </div>
+          )}
+          {issue.screenshotUrl && (
+            <a href={issue.screenshotUrl} target="_blank" rel="noopener noreferrer">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={issue.screenshotUrl} alt="Ticket issued confirmation" style={{ maxWidth: "100%", borderRadius: 6, marginTop: 4 }} />
+            </a>
+          )}
         </div>
       )}
     </div>

@@ -9,6 +9,8 @@ import { startBookOnHold } from "../booking/startBookOnHold";
 import { ENUGU_SUPPORTED_TITLES } from "../booking/vars-platform/VarsBookOnHold";
 import { handleQuery as handleSalesReportQuery } from "../orchestration/SalesReportAssistant";
 import { triggerBalanceUpdate } from "../../../lib/balanceUpdateService";
+import { BookingJobRepository } from "../storage/BookingJobRepository";
+import { connectorServiceClient } from "../../../lib/connectorServiceClient";
 import type {
   AssistantTurn,
   ConversationSlots,
@@ -40,9 +42,15 @@ export interface OrchestratorOutput {
   // formats and sends the final figures itself (see whatsapp-service's
   // balanceUpdatePoll.ts for the reference implementation).
   balanceUpdateTriggeredAt?: string;
+  // Set when a ticket-issuing run was just triggered for a specific PNR —
+  // the caller polls GET /api/assistant/issue-ticket/status?jobId=<this>
+  // until ticketStatus is terminal (ISSUED, or back to BOOKED with an
+  // issueError on failure).
+  issueTicketJobId?: string;
+  issueTicketPnr?: string;
 }
 
-const EMPTY_SLOTS: ConversationSlots = {
+export const EMPTY_SLOTS: ConversationSlots = {
   origin: null,
   destination: null,
   date: null,
@@ -58,6 +66,7 @@ const EMPTY_SLOTS: ConversationSlots = {
   passengerLastName: null,
   passengerPhone: null,
   passengerEmail: null,
+  passengerDateOfBirth: null,
   pendingDepartureTimeOptions: null,
   pendingReturnTimeOptions: null,
   selectedDepartureTime: null,
@@ -66,6 +75,13 @@ const EMPTY_SLOTS: ConversationSlots = {
   additionalPassengers: null,
   pendingAdditionalTitleConfirmations: null,
 };
+
+// Same defaulting logic used by handleAssistantMessage below — exported so
+// callers outside this module (e.g. the passport-OCR route) merge session
+// slots the same way instead of a second copy that drifts.
+export function loadSlots(session: { slots: unknown }): ConversationSlots {
+  return { ...EMPTY_SLOTS, ...((session.slots as Partial<ConversationSlots>) ?? {}) };
+}
 
 const REQUIRED_SEARCH_SLOTS = ["origin", "destination", "date"] as const;
 
@@ -105,6 +121,16 @@ const REFERENCE_ID_PATTERN = /^TDIS-\d{8}-\d{3}$/i;
 // variance. Fires a real sync across every airline connector (not just a
 // read of whatever's currently stored) — see lib/balanceUpdateService.
 const BALANCE_UPDATE_PATTERN = /\bbalance\s*update\b/i;
+
+// Deterministic ticket-issuing command — "Issue ABC123", "Pay ABC123",
+// "Issue Ticket ABC123", "issue ticket for ABC123" all match, capturing the
+// PNR. Matched directly (never through the LLM) so it behaves identically
+// every time and — critically — so the PNR always comes from what the user
+// actually typed, never inferred from "the most recent booking." A client
+// (WhatsApp/web) offering a numbered "1. Issue Now" option after a booking
+// confirmation rewrites that reply into this exact phrasing (with the PNR
+// it already knows from its own poll) before it ever reaches here.
+const ISSUE_TICKET_COMMAND_PATTERN = /\b(?:issue(?:\s+ticket)?|pay)(?:\s+(?:ticket\s+)?for)?\s+([A-Z0-9]{5,8})\b/i;
 
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
   const session = await ChatMemoryRepository.getOrCreateSession(
@@ -147,8 +173,46 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     }
   }
 
+  const issueMatch = trimmed.match(ISSUE_TICKET_COMMAND_PATTERN);
+  if (issueMatch) {
+    const pnr = issueMatch[1].toUpperCase();
+    await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
+    const job = await BookingJobRepository.findByPnr(pnr);
+    if (!job) {
+      const reply = `I couldn't find a booking with PNR ${pnr} — double-check the reference?`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
+    if (job.ticketStatus === "ISSUED") {
+      const reply = `PNR ${pnr} is already issued — nothing further to do.`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
+    if (job.ticketStatus === "ISSUING") {
+      const reply = `PNR ${pnr} is already being issued — I'll let you know as soon as it's done.`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
+    try {
+      const { ok, status, body } = await connectorServiceClient.issueTicket(job.id);
+      if (!ok) {
+        const reason = (body as { error?: string })?.error || `connector-service returned ${status}`;
+        throw new Error(reason);
+      }
+      const reply = `On it — paying and issuing the ticket for PNR ${pnr} now. This takes a minute or two; I'll confirm right here.`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply, issueTicketJobId: job.id, issueTicketPnr: pnr };
+    } catch (err) {
+      console.error(`[travel-assistant] issue-ticket trigger failed for PNR ${pnr}:`, err);
+      const reason = err instanceof Error ? err.message : String(err);
+      const reply = `I couldn't start issuing PNR ${pnr} just now — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
+  }
+
   const priorMessages = await ChatMemoryRepository.getRecentMessages(session.id, 10);
-  const slots: ConversationSlots = { ...EMPTY_SLOTS, ...((session.slots as Partial<ConversationSlots>) ?? {}) };
+  const slots: ConversationSlots = loadSlots(session);
 
   const turn = await runIntentDetection(input.message, slots, priorMessages);
 
@@ -411,8 +475,7 @@ async function runIntentDetection(
       airline: parsed.entities?.airline ?? null,
       cabinClass: parsed.entities?.cabinClass ?? null,
       passengerTitle: parsed.entities?.passengerTitle ?? null,
-      passengerFirstName: parsed.entities?.passengerFirstName ?? null,
-      passengerLastName: parsed.entities?.passengerLastName ?? null,
+      passengerFullName: parsed.entities?.passengerFullName ?? null,
       passengerPhone: parsed.entities?.passengerPhone ?? null,
       passengerEmail: parsed.entities?.passengerEmail ?? null,
       passengerGenderGuess: parsed.entities?.passengerGenderGuess ?? null,
@@ -420,6 +483,27 @@ async function runIntentDetection(
     },
     missingRequiredSlots: parsed.missingRequiredSlots ?? [],
     reply: parsed.reply ?? "Sorry, could you rephrase that?",
+  };
+}
+
+// Splits a raw full name into firstName/lastName by word count, NOT by
+// "last word = surname" — per explicit product direction, Nigerian names
+// commonly have three or four parts and no part should be silently folded
+// away. Rule: firstName gets the first floor(n/2) words, lastName gets the
+// remaining ceil(n/2) words (the extra word on an odd split goes to the
+// surname, not the first name). This deliberately generalizes both examples
+// given: a 3-word name keeps the first word alone as firstName and combines
+// the middle+last words into lastName; a 4-word name splits evenly in half.
+// Never done by the LLM (see systemPrompt.ts) — this needs to apply
+// identically every single time, which only code can guarantee.
+function splitPassengerName(fullName: string): { firstName: string; lastName: string } {
+  const words = fullName.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return { firstName: "", lastName: "" };
+  if (words.length === 1) return { firstName: words[0], lastName: "" };
+  const firstCount = Math.floor(words.length / 2);
+  return {
+    firstName: words.slice(0, firstCount).join(" "),
+    lastName: words.slice(firstCount).join(" "),
   };
 }
 
@@ -450,8 +534,19 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   // Passenger details (only ever populated on a Book-on-Hold turn). Trimmed;
   // blanks are ignored so a later turn can fill a gap without clobbering.
   if (e.passengerTitle?.trim()) slots.passengerTitle = e.passengerTitle.trim();
-  if (e.passengerFirstName?.trim()) slots.passengerFirstName = e.passengerFirstName.trim();
-  if (e.passengerLastName?.trim()) slots.passengerLastName = e.passengerLastName.trim();
+  if (e.passengerFullName?.trim()) {
+    const words = e.passengerFullName.trim().split(/\s+/).filter(Boolean);
+    if (words.length === 1 && slots.passengerFirstName && !slots.passengerLastName) {
+      // A single word arriving once the first name is already known reads as
+      // answering "what's the last name?" specifically — filling that one
+      // gap, not re-deriving the whole name from a single word.
+      slots.passengerLastName = words[0];
+    } else {
+      const { firstName, lastName } = splitPassengerName(e.passengerFullName);
+      slots.passengerFirstName = firstName;
+      slots.passengerLastName = lastName;
+    }
+  }
   if (e.passengerPhone?.trim()) slots.passengerPhone = e.passengerPhone.trim();
   if (e.passengerEmail?.trim()) slots.passengerEmail = e.passengerEmail.trim();
   // Additional passengers (multi-passenger PNR) — only ever populated once,
@@ -467,15 +562,15 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
     const resolved: { firstName: string; lastName: string; title: string | null }[] = [];
     const pending: { index: number; firstName: string; lastName: string }[] = [];
     e.additionalPassengers
-      .filter((p) => p.firstName?.trim() && p.lastName?.trim())
+      .filter((p) => p.fullName?.trim())
       .forEach((p, index) => {
-        const lastName = p.lastName.trim();
+        const { firstName, lastName } = splitPassengerName(p.fullName);
         const rawTitle = p.title?.trim() || null;
         if (rawTitle && (ENUGU_SUPPORTED_TITLES as readonly string[]).some((t) => t.toLowerCase() === rawTitle.toLowerCase())) {
-          resolved.push({ firstName: p.firstName.trim(), lastName, title: rawTitle });
+          resolved.push({ firstName, lastName, title: rawTitle });
           return;
         }
-        const effectiveFirstName = rawTitle ? `${rawTitle} ${p.firstName.trim()}`.trim() : p.firstName.trim();
+        const effectiveFirstName = rawTitle ? `${rawTitle} ${firstName}`.trim() : firstName;
         if (p.genderGuess === "male") {
           resolved.push({ firstName: effectiveFirstName, lastName, title: "Mr" });
         } else if (p.genderGuess === "female") {
@@ -607,6 +702,7 @@ function resetBookingSlots(slots: ConversationSlots): void {
   slots.passengerLastName = null;
   slots.passengerPhone = null;
   slots.passengerEmail = null;
+  slots.passengerDateOfBirth = null;
   slots.pendingDepartureTimeOptions = null;
   slots.pendingReturnTimeOptions = null;
   slots.selectedDepartureTime = null;
