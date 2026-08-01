@@ -1337,15 +1337,6 @@ async function handleBookOnHold(
     if (outcome.time) slots.selectedReturnTime = outcome.time;
   }
 
-  const paxName = [slots.passengerTitle, slots.passengerFirstName, slots.passengerLastName]
-    .filter(Boolean)
-    .join(" ");
-  const otherPaxNames = (slots.additionalPassengers ?? []).map((p) => [p.title, p.firstName, p.lastName].filter(Boolean).join(" "));
-  const paxLine = [paxName, ...otherPaxNames].join(" and ");
-  const routeLine = `${slots.origin}→${slots.destination} on ${slots.date}${
-    slots.isRoundTrip && slots.returnDate ? `, returning ${slots.returnDate}` : ""
-  }`;
-
   const result = await startBookOnHold({
     airline: "ENUGU",
     sessionKey,
@@ -1381,7 +1372,15 @@ async function handleBookOnHold(
     return { reply };
   }
 
-  const reply = `Got it — I'm placing an Enugu Air hold for ${paxLine}, ${routeLine}. This takes a minute or two; I'll show the PNR right here as soon as it's done.`;
+  // Deliberately just "Copy" — per explicit product direction, this is the
+  // acknowledgement that a booking request was received and IS now being
+  // processed (the typing indicator covers the rest of the wait; the real
+  // outcome — PNR, amount, etc. — arrives as its own follow-up message once
+  // the job finishes). Generated here (not a client-side pre-check) so it
+  // fires reliably even when the message never uses an explicit trigger
+  // word like "book"/"hold" — the LLM already confirmed this IS a genuine
+  // booking by the time this line runs.
+  const reply = "Copy";
   await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
   return { reply, bookingJobId: result.jobId };
 }
