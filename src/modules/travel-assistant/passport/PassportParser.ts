@@ -25,7 +25,7 @@ export interface IdDocumentParseResult {
 // sales-report flow instead of being swallowed here.
 const EXTRACTION_PROMPT = `You are looking at a photo. Determine whether it is an official government-issued photo ID card belonging to a person — e.g. a passport bio page, National ID card (NIN slip), driver's license, or voter's card.
 
-It is NOT an ID document if it's a screenshot, invoice, report, ticket, boarding pass, receipt, or random unrelated photo — even if it happens to have a person's name printed on it. If it is NOT an ID document, return exactly: {"isIdDocument": false}
+It is NOT an ID document if it's a screenshot, invoice, report, ticket, boarding pass, or random unrelated photo — even if it happens to have a person's name printed on it. This explicitly includes any bank transfer receipt, payment confirmation, transaction receipt, or mobile-money receipt (Zenith, OPay, First Bank, or any other bank/fintech) — these always show a sender/beneficiary name and can look superficially similar to an ID, but they are financial records, never an identity document. If it is NOT an ID document, return exactly: {"isIdDocument": false}
 
 If it IS an ID document, extract:
 - "readable": true if the person's full name is clearly legible, false otherwise.
@@ -35,6 +35,7 @@ If it IS an ID document, extract:
 - "dateOfBirth": the date of birth as "YYYY-MM-DD" if this ID shows one and it's legible, otherwise null. Not every ID type shows a date of birth — that's fine, just use null.
 
 Rules:
+- A real ID document is issued BY A GOVERNMENT and has a PHOTO of the person's face printed on it. If there's no face photo and no government issuer, it is not an ID document — a bank logo, "Transaction Receipt"/"Successful"/an amount in Naira/a reference or session ID are all strong signals it's a payment receipt, not an ID, even without a face photo present to rule it out by.
 - For a passport, prefer the MRZ (the two machine-readable OCR-B lines at the bottom of the bio page) for name/DOB when visible, since it's a standardized, reliably-readable fixed format — but if it disagrees with the printed name fields (e.g. truncation, hyphenation), the printed fields are authoritative for exact spelling.
 - Never invent or guess a value — if the name cannot be read, use null for fullName/firstName/lastName and set "readable" to false.
 - Return ONLY a JSON object, e.g.: {"isIdDocument": true, "readable": true, "fullName": "John Michael Doe", "firstName": "John Michael", "lastName": "Doe", "dateOfBirth": "1992-05-12"}`;

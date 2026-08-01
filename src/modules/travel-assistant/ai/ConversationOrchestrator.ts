@@ -9,8 +9,6 @@ import { startBookOnHold } from "../booking/startBookOnHold";
 import { ENUGU_SUPPORTED_TITLES } from "../booking/vars-platform/VarsBookOnHold";
 import { handleQuery as handleSalesReportQuery } from "../orchestration/SalesReportAssistant";
 import { triggerBalanceUpdate } from "../../../lib/balanceUpdateService";
-import { BookingJobRepository } from "../storage/BookingJobRepository";
-import { connectorServiceClient } from "../../../lib/connectorServiceClient";
 import type {
   AssistantTurn,
   ConversationSlots,
@@ -42,12 +40,6 @@ export interface OrchestratorOutput {
   // formats and sends the final figures itself (see whatsapp-service's
   // balanceUpdatePoll.ts for the reference implementation).
   balanceUpdateTriggeredAt?: string;
-  // Set when a ticket-issuing run was just triggered for a specific PNR —
-  // the caller polls GET /api/assistant/issue-ticket/status?jobId=<this>
-  // until ticketStatus is terminal (ISSUED, or back to BOOKED with an
-  // issueError on failure).
-  issueTicketJobId?: string;
-  issueTicketPnr?: string;
 }
 
 export const EMPTY_SLOTS: ConversationSlots = {
@@ -122,16 +114,6 @@ const REFERENCE_ID_PATTERN = /^TDIS-\d{8}-\d{3}$/i;
 // read of whatever's currently stored) — see lib/balanceUpdateService.
 const BALANCE_UPDATE_PATTERN = /\bbalance\s*update\b/i;
 
-// Deterministic ticket-issuing command — "Issue ABC123", "Pay ABC123",
-// "Issue Ticket ABC123", "issue ticket for ABC123" all match, capturing the
-// PNR. Matched directly (never through the LLM) so it behaves identically
-// every time and — critically — so the PNR always comes from what the user
-// actually typed, never inferred from "the most recent booking." A client
-// (WhatsApp/web) offering a numbered "1. Issue Now" option after a booking
-// confirmation rewrites that reply into this exact phrasing (with the PNR
-// it already knows from its own poll) before it ever reaches here.
-const ISSUE_TICKET_COMMAND_PATTERN = /\b(?:issue(?:\s+ticket)?|pay)(?:\s+(?:ticket\s+)?for)?\s+([A-Z0-9]{5,8})\b/i;
-
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
   const session = await ChatMemoryRepository.getOrCreateSession(
     input.sessionKey,
@@ -168,44 +150,6 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
       console.error("[travel-assistant] balance update trigger failed:", err);
       const reason = err instanceof Error ? err.message : String(err);
       const reply = `I couldn't start that sync just now — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
-      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-      return { reply };
-    }
-  }
-
-  const issueMatch = trimmed.match(ISSUE_TICKET_COMMAND_PATTERN);
-  if (issueMatch) {
-    const pnr = issueMatch[1].toUpperCase();
-    await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
-    const job = await BookingJobRepository.findByPnr(pnr);
-    if (!job) {
-      const reply = `I couldn't find a booking with PNR ${pnr} — double-check the reference?`;
-      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-      return { reply };
-    }
-    if (job.ticketStatus === "ISSUED") {
-      const reply = `PNR ${pnr} is already issued — nothing further to do.`;
-      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-      return { reply };
-    }
-    if (job.ticketStatus === "ISSUING") {
-      const reply = `PNR ${pnr} is already being issued — I'll let you know as soon as it's done.`;
-      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-      return { reply };
-    }
-    try {
-      const { ok, status, body } = await connectorServiceClient.issueTicket(job.id);
-      if (!ok) {
-        const reason = (body as { error?: string })?.error || `connector-service returned ${status}`;
-        throw new Error(reason);
-      }
-      const reply = `On it — paying and issuing the ticket for PNR ${pnr} now. This takes a minute or two; I'll confirm right here.`;
-      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-      return { reply, issueTicketJobId: job.id, issueTicketPnr: pnr };
-    } catch (err) {
-      console.error(`[travel-assistant] issue-ticket trigger failed for PNR ${pnr}:`, err);
-      const reason = err instanceof Error ? err.message : String(err);
-      const reply = `I couldn't start issuing PNR ${pnr} just now — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
       await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
       return { reply };
     }
