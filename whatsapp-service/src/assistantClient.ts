@@ -35,14 +35,16 @@ export async function askAssistant(sessionKey: string, displayName: string | nul
 }
 
 export interface PassportResponse {
-  isPassport: boolean;
+  isIdDocument: boolean;
   readable?: boolean;
   reply?: string;
 }
 
 // Same endpoint the browser ChatBubble posts an attached image to — see
-// PassportParser.ts. Node 24 (this service's runtime, per its Dockerfile)
-// has native FormData/Blob, so no multipart library is needed.
+// PassportParser.ts. Accepts any official photo ID (passport, National ID,
+// driver's license, voter's card, ...), not just passports. Node 24 (this
+// service's runtime, per its Dockerfile) has native FormData/Blob, so no
+// multipart library is needed.
 export async function sendPassportImage(
   sessionKey: string,
   displayName: string | null,
@@ -53,7 +55,7 @@ export async function sendPassportImage(
   form.set("sessionKey", sessionKey);
   if (displayName) form.set("displayName", displayName);
   form.set("isAuthenticated", "false");
-  form.append("file", new Blob([buffer as unknown as BlobPart], { type: mimeType }), "passport.jpg");
+  form.append("file", new Blob([buffer as unknown as BlobPart], { type: mimeType }), "id-document.jpg");
 
   const res = await fetch(`${MAIN_APP_URL}/api/assistant/passport`, { method: "POST", body: form });
   if (!res.ok) {

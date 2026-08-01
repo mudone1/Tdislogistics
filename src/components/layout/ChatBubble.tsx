@@ -821,9 +821,10 @@ export default function ChatBubble() {
   }
 
   // Gates every image upload before it can fall into the sales-report
-  // screenshot flow: a passport photo needs no command, so we always check
-  // first. Non-passport images (e.g. a genuine MCO invoice screenshot) fall
-  // through to the existing, unchanged detection flow.
+  // screenshot flow: any official photo ID (passport, National ID,
+  // driver's license, voter's card, ...) needs no command, so we always
+  // check first. Non-ID images (e.g. a genuine MCO invoice screenshot)
+  // fall through to the existing, unchanged detection flow.
   async function attemptPassportDetectOrFallback(file: File): Promise<void> {
     setGeneratingReport(true);
     try {
@@ -836,7 +837,7 @@ export default function ChatBubble() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
-      if (!data.isPassport) {
+      if (!data.isIdDocument) {
         await attemptGenerateOrDetect(file, "screenshot");
         return;
       }
