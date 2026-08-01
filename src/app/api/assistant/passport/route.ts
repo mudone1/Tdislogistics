@@ -6,12 +6,6 @@ import { loadSlots } from "@/modules/travel-assistant/ai/ConversationOrchestrato
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-function toDDMMYYYY(iso: string | null): string {
-  if (!iso) return "";
-  const [y, m, d] = iso.split("-");
-  return `${d}/${m}/${y}`;
-}
-
 // multipart/form-data: "file" (image), "sessionKey" (required), optional
 // "displayName"/"isAuthenticated" — same field set as ChatIdentity, shared
 // by both the web chat and the WhatsApp proxy. Accepts any official photo
@@ -60,11 +54,12 @@ export async function POST(req: Request) {
     if (result.dateOfBirth) slots.passengerDateOfBirth = result.dateOfBirth;
     await ChatMemoryRepository.updateSlots(session.id, slots);
 
-    // Date of birth line only appears when this ID type actually showed
-    // one — never invent it just to keep the format consistent.
-    const reply = result.dateOfBirth
-      ? `Full Name:\n${result.fullName}\nDate of Birth:\n${toDDMMYYYY(result.dateOfBirth)}`
-      : `Full Name:\n${result.fullName}`;
+    // Just the name, no labels — e.g. "Muhammed, Abdulwahab". Date of birth
+    // is still captured into slots above (for booking reuse) but never
+    // shown in the reply. Falls back to fullName when either half is
+    // missing (e.g. a single-word name with no split).
+    const reply =
+      result.firstName && result.lastName ? `${result.firstName}, ${result.lastName}` : result.fullName ?? "";
     await ChatMemoryRepository.appendMessage(session.id, "USER", "[ID image uploaded]");
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
     return NextResponse.json({ isIdDocument: true, readable: true, reply });
