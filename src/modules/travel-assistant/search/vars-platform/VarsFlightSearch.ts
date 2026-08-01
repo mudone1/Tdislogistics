@@ -31,6 +31,16 @@ const MAX_DAY_FORWARD_CLICKS = 60;
 // connector-service cold starts.
 const DATE_NAVIGATION_DEADLINE_MS = 15000;
 
+// Rano Air's single-day-step widget (see hasDayTabs check in
+// navigateToDate) has no separate target-click retry phase afterward — the
+// budget that path spends on retries (~24s), this one spends on stepping
+// itself instead, for the same overall ~52s design target under the 60s
+// Vercel ceiling. Confirmed live: a single forward step takes ~5-7s
+// including its postback wait, so this covers a realistic near-term
+// booking date (up to roughly a week out) without ever risking the
+// function's own hard timeout.
+const SINGLE_STEP_DATE_NAVIGATION_DEADLINE_MS = 35000;
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // Resource types that never affect the booking data we scrape — blocking
@@ -209,6 +219,29 @@ async function navigateToDate(page: Page, targetDateISO: string, logTag: string)
   const targetLabel = toDayTabLabel(targetDateISO);
   const deadline = Date.now() + DATE_NAVIGATION_DEADLINE_MS;
 
+  // Confirmed live: Rano Air's FlightCal.aspx uses a completely different
+  // date-navigation widget from Enugu/United — no "a.dayTab" strip of
+  // individually-clickable dates at all (a locator wait against a
+  // nonexistent "a.dayTab" hung for the full 30s default timeout in a
+  // diagnostic run). Instead there's just a single Forward/Back arrow pair
+  // that steps one day at a time, with no way to jump directly to a named
+  // date. Detect which widget this deployment actually has, once, rather
+  // than assuming the tab-strip shape everywhere.
+  const hasDayTabs = (await page.locator("a.dayTab").count().catch(() => 0)) > 0;
+  if (!hasDayTabs) {
+    // Single-day steps (confirmed live: ~5-7s each including the postback
+    // wait) need more wall-clock budget than the tab-strip path's forward
+    // paging — a tab-strip jump can reveal several days per click, this
+    // reveals exactly one. But this path also has no separate target-click
+    // retry phase afterward (the loop below returns the instant the
+    // content matches), so the ~24s that path spends on retries is budget
+    // this one can spend on stepping instead — same overall ~52s design
+    // target from the caller's function-timeout headroom, spent
+    // differently.
+    const singleStepDeadline = Date.now() + SINGLE_STEP_DATE_NAVIGATION_DEADLINE_MS;
+    return navigateToDateBySingleStepForward(page, targetLabel, singleStepDeadline, logTag);
+  }
+
   for (let i = 0; i < MAX_DAY_FORWARD_CLICKS; i++) {
     if (Date.now() > deadline) {
       throw new Error(
@@ -312,6 +345,73 @@ async function navigateToDate(page: Page, targetDateISO: string, logTag: string)
   // disambiguation flow that feeds a real booking) could act on the wrong
   // date without ever being told. Fail loud instead.
   throw new Error(`Could not find date tab "${targetLabel}" after ${MAX_DAY_FORWARD_CLICKS} forward-page attempts`);
+}
+
+// Rano Air's date-navigation widget (see hasDayTabs check above): no
+// clickable list of dates, just a Forward/Back arrow pair that steps one
+// day at a time. There's nothing to "find and click" — just keep stepping
+// forward, checking the flight panel's content for the target day/month
+// after each step, until it shows up or the deadline is hit. Same
+// content-match check (not a bare diff) as the tab-strip path above, for
+// the same reason: a stale in-flight postback could otherwise clobber the
+// panel back to content that merely LOOKS different without actually being
+// the target date.
+async function navigateToDateBySingleStepForward(
+  page: Page,
+  targetLabel: string,
+  deadline: number,
+  logTag: string
+): Promise<void> {
+  const dayMonth = targetLabel.replace(/\s+\d{4}$/, ""); // "31 Jul 2026" -> "31 Jul"
+
+  for (let i = 0; i < MAX_DAY_FORWARD_CLICKS; i++) {
+    // Explicit short timeout — .textContent() otherwise waits its full
+    // ~30s default for the element to attach, which on an early iteration
+    // (before the panel exists at all, or between forward-postbacks) would
+    // silently burn almost the entire wall-clock deadline on ONE check,
+    // leaving zero budget for any actual forward click. Confirmed live:
+    // without this, the very first check alone exhausted the deadline and
+    // the function gave up having made 0 forward steps.
+    const alreadyThere = await page
+      .locator(".tab-pane.active .flt-panel")
+      .first()
+      .textContent({ timeout: 2000 })
+      .then((t) => (t ?? "").includes(dayMonth))
+      .catch(() => false);
+    if (alreadyThere) {
+      console.log(`[${logTag}] already showing "${dayMonth}"`);
+      return;
+    }
+
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Gave up single-stepping to "${targetLabel}" after ${SINGLE_STEP_DATE_NAVIGATION_DEADLINE_MS}ms (${i} forward steps) — bailing out early to stay inside the caller's function timeout`
+      );
+    }
+
+    const forwardArrow = page.locator("button.dayForward:not(.hidden-lg)").first();
+    if ((await forwardArrow.count().catch(() => 0)) === 0) {
+      throw new Error(
+        `No forward control left to reach "${targetLabel}" — this airline's schedule may not extend that far out`
+      );
+    }
+
+    console.log(`[${logTag}] "${dayMonth}" not showing yet, stepping forward one day (attempt ${i + 1})`);
+    await forwardArrow.evaluate((el) => (el as HTMLElement).click());
+    await page
+      .waitForFunction(
+        (needle) => (document.querySelector(".tab-pane.active .flt-panel")?.textContent ?? "").includes(needle),
+        dayMonth,
+        { timeout: 5000 }
+      )
+      .catch(() => {
+        /* not there yet after this single step — normal when the target is
+           more than one day out; the loop's top-of-iteration check
+           re-verifies from scratch on the next pass regardless */
+      });
+  }
+
+  throw new Error(`Could not reach "${targetLabel}" after ${MAX_DAY_FORWARD_CLICKS} single-day forward steps`);
 }
 
 function toDayTabLabel(dateISO: string): string {
