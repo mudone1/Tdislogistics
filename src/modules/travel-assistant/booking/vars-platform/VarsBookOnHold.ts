@@ -369,12 +369,19 @@ export async function bookVarsPlatformOnHold(
     // --- Fare selection: cheapest of the two given classbands, per leg ---
     const legCount = request.returnDate ? 2 : 1;
     await page.locator(".tab-pane.active .flt-panel").first().waitFor({ state: "visible", timeout: 15000 });
+    // Summed as a FALLBACK total — the hold's own confirmation page doesn't
+    // always show a "Total Payable" line the same way the actual payment
+    // page does (confirmed live: the wording differs), so parseConfirmation
+    // falls back to this real, DOM-read fare sum rather than leaving the
+    // amount blank whenever its own regex doesn't find a match.
+    let fareAmountFallback = 0;
     for (let leg = 0; leg < legCount; leg++) {
       // leg 0 is outbound, leg 1 (round trip only) is the return — each is
       // an independent search with its own possible ambiguity, so each
       // gets its own preferred time rather than reusing one value for both.
       const preferredTime = leg === 0 ? request.preferredDepartureTime : request.preferredReturnTime;
-      await selectCheapestFare(page, leg, request.fareClassPreference, preferredTime, logTag);
+      const selectedFare = await selectCheapestFare(page, leg, request.fareClassPreference, preferredTime, logTag);
+      fareAmountFallback += selectedFare.amount;
     }
 
     await clickNext(page, "fare-selection", logTag);
@@ -609,7 +616,7 @@ export async function bookVarsPlatformOnHold(
     // THEN separately wait for verification (full navigation + form fill +
     // networkidle). Running them concurrently costs only the slower of the
     // two instead of the sum of both.
-    const pnr = parseConfirmation(raw, null).pnr;
+    const pnr = parseConfirmation(raw, null, fareAmountFallback).pnr;
 
     // Independent verification, not just trusting the in-flow page — see
     // the mmbUrl comment above for exactly why that page alone isn't
@@ -622,7 +629,7 @@ export async function bookVarsPlatformOnHold(
       page.screenshot({ fullPage: true }).catch(() => null),
       pnr ? verifyBookingReference(context, mmbUrl, pnr, request.passenger.lastName, logTag) : Promise.resolve(false),
     ]);
-    const result = parseConfirmation(raw, screenshot);
+    const result = parseConfirmation(raw, screenshot, fareAmountFallback);
     if (!verified) {
       throw new Error(
         result.pnr
@@ -722,7 +729,7 @@ async function selectCheapestFare(
   fareClasses: [string, string],
   preferredDepartureTime: string | undefined,
   logTag: string
-): Promise<void> {
+): Promise<{ band: string; amount: number }> {
   const panels = page.locator(".tab-pane.active .flt-panel");
   const panelCount = await panels.count();
 
@@ -752,7 +759,7 @@ async function selectCheapestFare(
   }
 
   const panel = panels.nth(panelIndex);
-  const cheaperBand = await panel.evaluate((panelEl, classes) => {
+  const cheapest = await panel.evaluate((panelEl, classes) => {
     const amounts = classes.map((band) => {
       const card = panelEl.querySelector<HTMLElement>(`[data-classband="${band}"]`);
       const priceEl = card?.querySelector<HTMLElement>("[data-original-amount]");
@@ -768,8 +775,9 @@ async function selectCheapestFare(
     const available = amounts.filter((a) => a.amount != null);
     if (available.length === 0) return null;
     available.sort((a, b) => (a.amount as number) - (b.amount as number));
-    return available[0].band;
+    return available[0] as { band: string; amount: number };
   }, fareClasses);
+  const cheaperBand = cheapest?.band ?? null;
 
   if (!cheaperBand) {
     const diagnostic = await panel.evaluate((panelEl) =>
@@ -821,6 +829,8 @@ async function selectCheapestFare(
   ]).catch(() => {
     /* best-effort confirmation — some deployments may not signal selection this way */
   });
+
+  return { band: cheaperBand, amount: cheapest!.amount };
 }
 
 async function clickNext(
@@ -879,7 +889,7 @@ async function clickNext(
   await page.waitForLoadState("domcontentloaded").catch(() => {});
 }
 
-function parseConfirmation(raw: string, screenshot: Buffer | null): BookOnHoldResult {
+function parseConfirmation(raw: string, screenshot: Buffer | null, fareAmountFallback?: number): BookOnHoldResult {
   // VARS confirmation pages show the PNR as a short, standalone
   // alphanumeric code near "Manage My Booking" — same pattern documented
   // in the XEJET SOP screenshots for this shared platform (e.g.
@@ -887,13 +897,26 @@ function parseConfirmation(raw: string, screenshot: Buffer | null): BookOnHoldRe
   // failed match is still diagnosable rather than a silent black box.
   const pnrMatch = raw.match(/\b([A-Z0-9]{5,8})\b(?=\s*(?:\n|$|\s{2,}))/);
   const holdMatch = raw.match(/held until\s+([0-9A-Za-z: ]+?)(?:\s*\(|\.|$)/i);
-  const totalMatch = raw.match(/Total Payable:?\s*([\d,]+)\s*([A-Z]{3})/i);
+  // "Total Payable: X NGN" is confirmed on the actual PAYMENT page
+  // (mmbpayment.aspx) but NOT reliably present with that exact wording on
+  // the HOLD's own confirmation page — a couple of broader phrasings are
+  // tried too before falling back to the fare amount actually read from
+  // the fare-selection step's DOM (data-original-amount), which is real
+  // captured data rather than a guess, so the amount is never silently
+  // blank just because this page's wording doesn't match "Total Payable".
+  const totalMatch =
+    raw.match(/Total Payable:?\s*([\d,]+)\s*([A-Z]{3})/i) ??
+    raw.match(/Amount outstanding:?\s*([\d,]+)\s*([A-Z]{3})/i) ??
+    raw.match(/Flights? Total:?\s*([\d,]+)\s*([A-Z]{3})/i);
+
+  const totalPayable = totalMatch ? parseFloat(totalMatch[1].replace(/,/g, "")) : (fareAmountFallback ?? null);
+  const currency = totalMatch ? totalMatch[2].toUpperCase() : fareAmountFallback != null ? "NGN" : null;
 
   return {
     pnr: pnrMatch ? pnrMatch[1] : null,
     holdExpiresAt: holdMatch ? holdMatch[1].trim() : null,
-    totalPayable: totalMatch ? parseFloat(totalMatch[1].replace(/,/g, "")) : null,
-    currency: totalMatch ? totalMatch[2].toUpperCase() : null,
+    totalPayable,
+    currency,
     raw,
     screenshot,
   };
