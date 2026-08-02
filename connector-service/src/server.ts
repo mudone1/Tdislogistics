@@ -335,7 +335,13 @@ const ISSUE_TICKET_CONFIGS: Partial<Record<string, VarsAirlineBookingConfig>> = 
   ENUGU: {
     logTag: "enugu-issue",
     loginUrl: "https://booking.enuguairlines.com/vars/public/CustomerPanels/AgentLoginBS.aspx",
-    requirementsUrl: "https://booking.enuguairlines.com/VARS/Public/b/agentSearch.aspx",
+    // Confirmed live (real diagnostic dump from a failed run): landing on
+    // agentSearch.aspx (the booking search form — correct for the BOOKING
+    // flow's own establishSession call) has no "Find Booking" nav item on
+    // it at all — that link only exists on the actual Dashboard page. This
+    // was the root cause of every issue-ticket "Record Locator field never
+    // appeared" failure: the automation was never leaving the search form.
+    requirementsUrl: "https://booking.enuguairlines.com/VARS/Public/b/Dashboard.aspx",
     mmbUrl: "https://booking.enuguairlines.com/vars/public/CustomerPanels/MmbLoginBS.aspx",
     airlineLabel: "Enugu Air",
   },
