@@ -343,6 +343,7 @@ export async function bookVarsPlatformOnHold(
     const extraAdults = request.additionalPassengers?.filter((p) => !p.type || p.type === "ADULT").length ?? 0;
     const childrenCount = request.additionalPassengers?.filter((p) => p.type === "CHILD").length ?? 0;
     const infantsCount = request.additionalPassengers?.filter((p) => p.type === "INFANT").length ?? 0;
+    const totalPassengers = 1 + extraAdults + childrenCount + infantsCount;
     await setPassengerCounts(page, { adults: 1 + extraAdults, children: childrenCount, infants: infantsCount }, logTag);
 
     // Two different search-form URLs across VARS deployments use two
@@ -565,11 +566,20 @@ export async function bookVarsPlatformOnHold(
       throw new Error(`Booking validation failed: ${validationError}`);
     }
 
-    // Wait for the confirmation summary page to appear
+    // Wait for the confirmation summary page to appear. Scaled by party
+    // size — confirmed live that a multi-passenger hold (especially with
+    // children, each needing their own record validated server-side) can
+    // genuinely take longer than the flat 30s a single-passenger hold
+    // needs, timing out here even though the booking was still legitimately
+    // in progress. +12s per passenger beyond the first, capped at 90s total
+    // so a malformed request still fails in reasonable time rather than
+    // hanging indefinitely.
+    const confirmationTimeoutMs = Math.min(30000 + (totalPassengers - 1) * 12000, 90000);
+    console.log(`[${logTag}] waiting up to ${confirmationTimeoutMs}ms for confirmation (party size ${totalPassengers})`);
     await page
       .locator("text=/PNR|Booking Reference|TTL Payment Instructions|Manage My Booking/i")
       .first()
-      .waitFor({ state: "visible", timeout: 30000 })
+      .waitFor({ state: "visible", timeout: confirmationTimeoutMs })
       .catch(async (err) => {
         if (validationError) throw new Error(`Booking validation failed: ${validationError}`);
         const diagnostic = await page.evaluate(() => ({
