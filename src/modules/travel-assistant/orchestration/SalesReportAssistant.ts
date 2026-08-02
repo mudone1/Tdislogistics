@@ -38,7 +38,7 @@ export interface SalesReportQueryResponse {
   data?: unknown;
 }
 
-const INTENT_SYSTEM_PROMPT = `You classify a staff member's question about sales reports/analytics for a Nigerian airline ticketing agency (TDIS). Airlines covered: AIRPEACE, AERO, IBOM, ARIK.
+const INTENT_SYSTEM_PROMPT = `You classify a staff member's question about sales reports/analytics for a Nigerian airline ticketing agency (TDIS). Airlines covered: AIRPEACE, AERO, IBOM, ARIK, UNITED, RANO, ENUGU, XEJET.
 
 Return ONLY JSON of the form:
 {
@@ -47,7 +47,7 @@ Return ONLY JSON of the form:
     "timeExpression": "today" | "yesterday" | "this week" | "last week" | "this month" | "last month" | "this year" | null,
     "dateFrom": "DD/MM/YYYY" | null,
     "dateTo": "DD/MM/YYYY" | null,
-    "airline": "AIRPEACE" | "AERO" | "IBOM" | "ARIK" | null,
+    "airline": "AIRPEACE" | "AERO" | "IBOM" | "ARIK" | "UNITED" | "RANO" | "ENUGU" | "XEJET" | null,
     "staffName": "name mentioned, verbatim" | null,
     "metric": "sales" | "tickets" | "voids" | "commission" | null
   },

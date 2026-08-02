@@ -19,14 +19,23 @@ export interface DetectionResult {
   alternativeMatches: AirlineMatch[];
 }
 
-// Only the four airlines that actually produce these MCO invoice reports
-// (see AIRLINE_RULE_KEYS) — the wider AirlineKey enum used by the
-// connector/sync side of the app covers airlines with no sales-report flow.
+// The airlines that produce a sales report this module can parse (see
+// AIRLINE_RULE_KEYS) — the wider AirlineKey enum used by the
+// connector/sync side of the app also covers airlines with no
+// sales-report flow. UNITED/RANO/ENUGU/XEJET's "ticket sales report"
+// export has no free-text airline name anywhere in its cells (unlike the
+// MCO Invoice Report's banner text), so detectByContent never matches
+// these four — filename-based detectByMetadata is the only signal
+// available for them today.
 const AIRLINE_KEYWORDS: Record<AirlineRuleKey, string[]> = {
   AIRPEACE: ["air peace", "airpeace"],
   AERO: ["aero contractors", "aerocontractors", "aero"],
   IBOM: ["ibom air", "ibom"],
   ARIK: ["arik air", "arik"],
+  UNITED: ["united nigeria", "united"],
+  RANO: ["rano air", "rano"],
+  ENUGU: ["enugu"],
+  XEJET: ["xejet"],
 };
 
 function escapeRegExp(s: string): string {
@@ -78,7 +87,7 @@ function detectByMetadata(filename: string): AirlineMatch[] | null {
   return matches.length > 0 ? matches : null;
 }
 
-const VISION_DETECTION_PROMPT = `You are looking at a Nigerian airline sales/MCO invoice report screenshot. Which airline is this report for? Reply with ONLY a JSON object: {"airline": "AIRPEACE" | "AERO" | "IBOM" | "ARIK" | "UNKNOWN"}`;
+const VISION_DETECTION_PROMPT = `You are looking at a Nigerian airline sales report screenshot (either an MCO invoice report or a ticket sales report). Which airline is this report for? Reply with ONLY a JSON object: {"airline": "AIRPEACE" | "AERO" | "IBOM" | "ARIK" | "UNITED" | "RANO" | "ENUGU" | "XEJET" | "UNKNOWN"}`;
 
 // Priority 3 (last resort, screenshots only): ask a vision model. Reuses the
 // same Groq vision infra as ScreenshotParser rather than introducing a

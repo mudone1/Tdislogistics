@@ -54,5 +54,22 @@ export interface RuleEngineResult {
   ticketCount: number; // count of included PT-kind transactions
 }
 
-export const AIRLINE_RULE_KEYS = ["AERO", "AIRPEACE", "IBOM", "ARIK"] as const;
+// AERO/AIRPEACE/IBOM/ARIK produce MCO Invoice Report exports (see
+// ExcelParser's MCO_COLUMN_ALIASES). UNITED/RANO/ENUGU/XEJET are on the
+// shared VARS/Videcom connector base (see prisma/schema.prisma's
+// AirlineKey enum comment) and produce a different "ticket sales report"
+// export instead — Face-Value/Status/Net Fare/Agent ID columns, no
+// Payment Type/Debit/Credit at all (see ExcelParser's
+// TICKET_REPORT_COLUMN_ALIASES). Both layouts converge on the same
+// RawTransactionRow shape before the rule engine ever sees them.
+export const AIRLINE_RULE_KEYS = [
+  "AERO",
+  "AIRPEACE",
+  "IBOM",
+  "ARIK",
+  "UNITED",
+  "RANO",
+  "ENUGU",
+  "XEJET",
+] as const;
 export type AirlineRuleKey = (typeof AIRLINE_RULE_KEYS)[number];
