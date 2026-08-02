@@ -15,11 +15,15 @@ export interface AmountEntry {
   included: boolean;
 }
 
-// Exact text layout from the spec — no tables, no markdown. One section
-// per staff (SYSTEM always last, per StaffTotal's existing ordering),
-// each line listing that staff's individual included transaction
-// amounts in source order, followed by "TOTAL = X", then a blank line
-// before the next section and a final "GRAND TOTAL = X".
+// WhatsApp-style layout (single asterisks = bold in WhatsApp's own
+// markdown): a bold header line, then one section per staff (SYSTEM
+// always last, per StaffTotal's existing ordering) — bold staff name,
+// each of that staff's individual included transaction amounts in
+// source order, then a bold "TOTAL= X" line (no space between TOTAL and
+// =, matching the exact format staff are used to reading), a blank line
+// before the next section, and a final bold "GRAND TOTAL = X" (this one
+// DOES have a space either side of = — also matching the original
+// format exactly).
 export function renderReportText(
   airlineLabel: string,
   reportDate: string,
@@ -35,11 +39,11 @@ export function renderReportText(
 
   const sections = staffTotals.map((s) => {
     const amounts = amountsByStaff.get(s.staffName) ?? [];
-    return [s.staffName, ...amounts.map(formatAmount), `TOTAL = ${formatAmount(s.amount)}`].join("\n");
+    return [`*${s.staffName}*`, ...amounts.map(formatAmount), `*TOTAL= ${formatAmount(s.amount)}*`].join("\n");
   });
 
   const grandTotal = staffTotals.reduce((sum, s) => sum + s.amount, 0);
-  const header = `${airlineLabel.toUpperCase()} SALES RECORD FOR ${reportDate}`;
+  const header = `*${airlineLabel.toUpperCase()} SALES RECORD FOR ${reportDate}*`;
 
-  return [header, "", sections.join("\n\n"), "", `GRAND TOTAL = ${formatAmount(grandTotal)}`].join("\n");
+  return [header, "", sections.join("\n\n"), "", `*GRAND TOTAL = ${formatAmount(grandTotal)}*`].join("\n");
 }
