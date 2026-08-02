@@ -570,11 +570,15 @@ export async function bookVarsPlatformOnHold(
     // size — confirmed live that a multi-passenger hold (especially with
     // children, each needing their own record validated server-side) can
     // genuinely take longer than the flat 30s a single-passenger hold
-    // needs, timing out here even though the booking was still legitimately
-    // in progress. +12s per passenger beyond the first, capped at 90s total
-    // so a malformed request still fails in reasonable time rather than
-    // hanging indefinitely.
-    const confirmationTimeoutMs = Math.min(30000 + (totalPassengers - 1) * 12000, 90000);
+    // needs. First scaling attempt (+12s/passenger, capped 90s) still
+    // wasn't enough for a real 5-passenger family booking, so this is more
+    // generous — +20s per passenger beyond the first, capped at 150s — and
+    // still bounded so a genuinely stuck/malformed request fails in
+    // reasonable time rather than hanging indefinitely. This is an async
+    // background job (connector-service), not a request holding an HTTP
+    // connection open, so a longer wait here has no other infrastructure
+    // ceiling to worry about.
+    const confirmationTimeoutMs = Math.min(30000 + (totalPassengers - 1) * 20000, 150000);
     console.log(`[${logTag}] waiting up to ${confirmationTimeoutMs}ms for confirmation (party size ${totalPassengers})`);
     await page
       .locator("text=/PNR|Booking Reference|TTL Payment Instructions|Manage My Booking/i")
@@ -592,7 +596,13 @@ export async function bookVarsPlatformOnHold(
           bodyText: document.body.innerText.replace(/\s+/g, " ").trim().slice(0, 1500),
         }));
         console.error(`[${logTag}] confirmation page never appeared. DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
-        throw err;
+        // Diagnostic goes INTO the thrown message (not just console.error)
+        // so it surfaces all the way to the chat error text — no server-log
+        // access needed to see what was actually on the page when this
+        // gave up, same reasoning as the issue-ticket diagnostics.
+        throw new Error(
+          `Confirmation page never appeared after ${confirmationTimeoutMs}ms (party size ${totalPassengers}). Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`
+        );
       });
     page.off("response", validationListener);
     if (validationError) {
