@@ -600,13 +600,17 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   // blanks are ignored so a later turn can fill a gap without clobbering.
   if (e.passengerTitle?.trim()) slots.passengerTitle = e.passengerTitle.trim();
   if (e.passengerFullName?.trim()) {
-    let effectiveFullName = e.passengerFullName;
-    if (!e.passengerTitle?.trim()) {
-      const extracted = extractLeadingTitle(e.passengerFullName);
-      if (extracted.title) {
-        slots.passengerTitle = extracted.title;
-        effectiveFullName = extracted.rest;
-      }
+    // ALWAYS attempt to strip a leading title word from the name, even when
+    // the LLM ALSO gave a separate passengerTitle — confirmed live (e.g.
+    // "Mr TestB emomidue Ibrahim") that the LLM can redundantly leave the
+    // title as the first word of passengerFullName despite already
+    // extracting it into passengerTitle too, otherwise polluting the
+    // firstName with a leftover "Mr " prefix that the airline portal
+    // rejects outright ("Please specify a valid firstname").
+    const extracted = extractLeadingTitle(e.passengerFullName);
+    const effectiveFullName = extracted.title ? extracted.rest : e.passengerFullName;
+    if (!e.passengerTitle?.trim() && extracted.title) {
+      slots.passengerTitle = extracted.title;
     }
     const words = effectiveFullName.trim().split(/\s+/).filter(Boolean);
     if (words.length === 1 && slots.passengerFirstName && !slots.passengerLastName) {
@@ -641,14 +645,12 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
         const type = p.type ?? "ADULT";
         const dateOfBirth = p.dateOfBirth?.trim() || null;
         let rawTitle = p.title?.trim() || null;
-        let effectiveFullName = p.fullName;
-        if (!rawTitle) {
-          const extracted = extractLeadingTitle(p.fullName);
-          if (extracted.title) {
-            rawTitle = extracted.title;
-            effectiveFullName = extracted.rest;
-          }
-        }
+        // ALWAYS strip a leading title word from the name, same reasoning
+        // as the lead passenger above — the LLM can redundantly leave it
+        // there even when it also gave a separate title.
+        const extracted = extractLeadingTitle(p.fullName);
+        const effectiveFullName = extracted.title ? extracted.rest : p.fullName;
+        if (!rawTitle && extracted.title) rawTitle = extracted.title;
         const { firstName, lastName } = splitPassengerName(effectiveFullName);
 
         const queueDobIfNeeded = (name: { firstName: string; lastName: string }) => {
