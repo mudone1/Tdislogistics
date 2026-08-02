@@ -929,20 +929,29 @@ function parseDateOfBirthReply(text: string): string | null {
 // text risks false positives (e.g. a 4-digit year like "2026" is also a
 // valid-looking HHMM). Returns null if no unambiguous time is present —
 // never guesses.
-function parseTimeExpression(text: string): string | null {
+// minute === null means only an HOUR was stated (e.g. "7pm", "7 o'clock") —
+// per explicit product direction, "7pm" should match ANY flight departing
+// 19:00-19:59, not require an exact "19:00". A minute IS present whenever
+// the user gave one explicitly ("7:30pm", "19:45", "1945").
+interface ParsedTime {
+  hour: number;
+  minute: string | null;
+}
+
+function parseTimeExpression(text: string): ParsedTime | null {
   const twelveHour = text.match(/\b(1[0-2]|0?[1-9])(?::([0-5][0-9]))?\s*([ap])\.?m\.?\b/i);
   if (twelveHour) {
     let hour = parseInt(twelveHour[1], 10);
-    const minute = twelveHour[2] ?? "00";
+    const minute = twelveHour[2] ?? null;
     const isPM = /p/i.test(twelveHour[3]);
     if (isPM && hour !== 12) hour += 12;
     if (!isPM && hour === 12) hour = 0;
-    return `${String(hour).padStart(2, "0")}:${minute}`;
+    return { hour, minute };
   }
   const withColon = text.match(/\b([01]?[0-9]|2[0-3]):([0-5][0-9])\b/);
-  if (withColon) return `${withColon[1].padStart(2, "0")}:${withColon[2]}`;
+  if (withColon) return { hour: parseInt(withColon[1], 10), minute: withColon[2] };
   const bareFourDigit = text.trim().match(/^([01][0-9]|2[0-3])([0-5][0-9])$/);
-  if (bareFourDigit) return `${bareFourDigit[1]}:${bareFourDigit[2]}`;
+  if (bareFourDigit) return { hour: parseInt(bareFourDigit[1], 10), minute: bareFourDigit[2] };
   return null;
 }
 
@@ -953,17 +962,32 @@ function normalizeOptionTime(opt: string): string {
   return m ? `${m[1].padStart(2, "0")}:${m[2]}` : opt;
 }
 
+// Resolves a ParsedTime against real flight options: an exact minute match
+// when one was given, or — when only an hour was stated ("7pm") — whichever
+// single option falls within that hour. More than one flight in the same
+// hour is a genuine ambiguity (never guessed between); returns null so the
+// caller falls through to asking, same as no match at all.
+function findMatchingTimeOption(parsed: ParsedTime, options: string[]): string | null {
+  if (parsed.minute !== null) {
+    const exact = `${String(parsed.hour).padStart(2, "0")}:${parsed.minute}`;
+    return options.find((opt) => normalizeOptionTime(opt) === exact) ?? null;
+  }
+  const inHour = options.filter((opt) => parseInt(normalizeOptionTime(opt).split(":")[0], 10) === parsed.hour);
+  return inHour.length === 1 ? inHour[0] : null;
+}
+
 // Matches a free-text reply against a list of candidate departure times
 // (e.g. "08:45"). Tries, in order: an explicit 12-hour or 24-hour time
 // expression (so "4pm", "4:00 PM", and "16:00" all correctly match an
-// option shown as "16:00"), then a looser exact/substring digit match (so
-// "the 08:45 one" still matches "08:45" even without am/pm), then an
-// ordinal/position word ("first", "second", "1", "2").
+// option shown as "16:00"; a bare hour like "7pm" matches any option in
+// that hour), then a looser exact/substring digit match (so "the 08:45
+// one" still matches "08:45" even without am/pm), then an ordinal/position
+// word ("first", "second", "1", "2").
 // Returns null if nothing in the message plausibly picks one option.
 function matchTimeSelection(message: string, options: string[]): string | null {
-  const explicit = parseTimeExpression(message);
-  if (explicit) {
-    const byExplicitTime = options.find((opt) => normalizeOptionTime(opt) === explicit);
+  const parsed = parseTimeExpression(message);
+  if (parsed) {
+    const byExplicitTime = findMatchingTimeOption(parsed, options);
     if (byExplicitTime) return byExplicitTime;
   }
 
@@ -1098,7 +1122,7 @@ function resolveLegFlightChoice(
   // direct reply to a shown list) would risk matching an unrelated number.
   const stated = parseTimeExpression(rawMessage);
   if (stated) {
-    const match = times.find((t) => normalizeOptionTime(t) === stated);
+    const match = findMatchingTimeOption(stated, times);
     if (match) return { reply: null, pendingOptions: null, time: match, retryable: false };
   }
 

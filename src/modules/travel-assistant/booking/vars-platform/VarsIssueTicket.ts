@@ -86,15 +86,38 @@ export async function openBookingByPnr(
       if (count < 2) {
         const visibleNav = await page.evaluate(() => document.body.innerText.slice(0, 1500));
         console.error(`DIAGNOSTIC [${logTag}] only ${count} "Find Booking" match(es) found. Page text: ${visibleNav}`);
-        throw new Error('Could not find the "Find Booking" dropdown submenu item');
+        throw new Error(`Could not find the "Find Booking" dropdown submenu item. Page text: ${visibleNav.slice(0, 400)}`);
       }
       await matches.nth(1).click();
     });
 
     console.log(`[${logTag}] filling Basic Find PNR modal`);
-    const modal = page.locator("text=/Basic Find PNR/i").locator("xpath=ancestor::*[self::div][1]").first();
-    const recordLocatorField = page.getByLabel(/Record Locator/i).or(page.locator('input[name*="ecord" i], input[id*="ecord" i]')).first();
-    await recordLocatorField.waitFor({ state: "visible", timeout: 10000 });
+    const recordLocatorField = page
+      .getByLabel(/Record Locator/i)
+      .or(page.locator('input[name*="ecord" i], input[id*="ecord" i], input[name*="pnr" i], input[id*="pnr" i], input[placeholder*="ecord" i], input[placeholder*="pnr" i]'))
+      .first();
+    const foundField = await recordLocatorField
+      .waitFor({ state: "visible", timeout: 12000 })
+      .then(() => true)
+      .catch(() => false);
+    if (!foundField) {
+      // Diagnostic goes INTO the thrown message, not just console.error —
+      // this surfaces all the way to the chat error text (no Railway log
+      // access needed to see it), so the very next failure shows exactly
+      // what's on the page instead of a bare timeout again.
+      const diagnostic = await page.evaluate(() => ({
+        url: window.location.href,
+        inputs: Array.from(document.querySelectorAll("input")).map((el) => ({
+          id: el.id,
+          name: el.name,
+          type: el.type,
+          placeholder: el.placeholder,
+        })),
+        visibleHeadings: Array.from(document.querySelectorAll("h1,h2,h3,h4,.modal-title,label")).map((el) => el.textContent?.trim()).filter(Boolean).slice(0, 20),
+      }));
+      console.error(`DIAGNOSTIC [${logTag}] Record Locator field never appeared: ${JSON.stringify(diagnostic)}`);
+      throw new Error(`Could not find the Record Locator field to search PNR "${pnr}". Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`);
+    }
     await recordLocatorField.fill(pnr);
     await page
       .locator('button, a, input[type="submit"], input[type="button"]')
