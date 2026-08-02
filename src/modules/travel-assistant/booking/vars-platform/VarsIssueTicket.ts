@@ -151,16 +151,34 @@ export async function openBookingByPnr(
       throw new Error(`Could not find the Record Locator field to search PNR "${pnr}". Page state: ${JSON.stringify(diagnostic).slice(0, 1400)}`);
     }
     await recordLocatorField.fill(pnr);
-    await page
-      .locator('button, a, input[type="submit"], input[type="button"]')
-      .filter({ hasText: /^search$/i })
-      .first()
-      .click();
 
-    console.log(`[${logTag}] waiting for Manage Booking page`);
-    await page.waitForURL(/ManageBooking\.aspx/i, { timeout: 20000 }).catch(() => {
-      /* some deployments may not change the URL casing/path exactly — proceed and let the verification below fail loudly if it truly didn't navigate */
-    });
+    // Confirmed live: the first "Search"-labeled match on this page is
+    // `<a href="#search" data-toggle="tab">Search</a>` — a Bootstrap TAB
+    // switcher, not the form's real submit control, and it stays
+    // permanently invisible (its own tab is never the active one), so a
+    // direct click on it just times out. Press Enter in the field first —
+    // the natural submission trigger for a single-field search form, and
+    // it can't accidentally hit an unrelated tab-nav link the way a
+    // text-based button search can.
+    await recordLocatorField.press("Enter");
+    let navigated = await page.waitForURL(/ManageBooking\.aspx/i, { timeout: 8000 }).then(() => true).catch(() => false);
+
+    if (!navigated) {
+      // Enter didn't submit — fall back to an explicit control, but
+      // restricted to real submit/button elements (never a plain <a>,
+      // which is what the known-bad tab-toggle link is) so it can't match
+      // that same dead end again.
+      const searchButton = page
+        .locator('button, input[type="submit"], input[type="button"]')
+        .filter({ hasText: /^search$/i })
+        .first();
+      await searchButton.click({ timeout: 10000 }).catch((err) => {
+        console.warn(`[${logTag}] restricted Search button click failed too: ${err}`);
+      });
+      navigated = await page.waitForURL(/ManageBooking\.aspx/i, { timeout: 15000 }).then(() => true).catch(() => false);
+    }
+
+    console.log(`[${logTag}] waiting for Manage Booking page (navigated=${navigated})`);
     await page.waitForLoadState("domcontentloaded").catch(() => {});
 
     const bodyText = await page.locator("body").innerText();
