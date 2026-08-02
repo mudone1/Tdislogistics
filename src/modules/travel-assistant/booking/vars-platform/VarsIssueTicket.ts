@@ -178,6 +178,38 @@ export async function openBookingByPnr(
       navigated = await page.waitForURL(/ManageBooking\.aspx/i, { timeout: 15000 }).then(() => true).catch(() => false);
     }
 
+    if (!navigated) {
+      // Neither Enter nor the restricted button click actually submitted —
+      // confirmed live twice now that the search silently fails to
+      // progress (landing back on a near-blank Dashboard state). Diagnose
+      // PRECISELY here, at the submission step itself, rather than letting
+      // the generic PNR-verification check downstream report a vaguer
+      // failure several steps later.
+      const diagnostic = await page.evaluate(() => {
+        const clickable = Array.from(document.querySelectorAll("button, a, input[type='submit'], input[type='button']"))
+          .filter((el) => {
+            const style = window.getComputedStyle(el);
+            return style.display !== "none" && style.visibility !== "hidden";
+          })
+          .map((el) => ({
+            tag: el.tagName,
+            text: el.textContent?.trim().slice(0, 40) || (el as HTMLInputElement).value,
+            class: el.className,
+          }))
+          .filter((el) => el.text)
+          .slice(0, 25);
+        const recordField = document.querySelector<HTMLInputElement>('input[name*="ecord" i], input[id*="ecord" i], input[name*="pnr" i], input[id*="pnr" i]');
+        return {
+          url: window.location.href,
+          recordFieldStillPresent: !!recordField,
+          recordFieldValue: recordField?.value ?? null,
+          visibleClickableElements: clickable,
+        };
+      });
+      console.error(`DIAGNOSTIC [${logTag}] PNR search never submitted: ${JSON.stringify(diagnostic)}`);
+      throw new Error(`Filled PNR "${pnr}" into the Record Locator field but neither Enter nor a button click actually submitted the search. Page state: ${JSON.stringify(diagnostic).slice(0, 1400)}`);
+    }
+
     console.log(`[${logTag}] waiting for Manage Booking page (navigated=${navigated})`);
     await page.waitForLoadState("domcontentloaded").catch(() => {});
 
