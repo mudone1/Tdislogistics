@@ -70,53 +70,85 @@ export async function openBookingByPnr(
     const { context, page } = await establishSession(browser, loginUrl, requirementsUrl, credentials, logTag);
 
     console.log(`[${logTag}] opening Find Booking for PNR "${pnr}"`);
-    // The nav trigger and the revealed dropdown item share the same visible
-    // text ("Find Booking") per the recording — hover/click the trigger
-    // first, then scope the actual click to a dropdown/submenu container so
-    // it doesn't just re-click the trigger itself.
+    // Confirmed live (real diagnostic dump): landing on the right page
+    // (Dashboard.aspx) alone isn't enough — the "Find Booking" click still
+    // doesn't reveal the modal. Try several distinct interaction patterns
+    // rather than assuming one: (1) hover then click, in case this is a
+    // CSS :hover-revealed dropdown a bare click() doesn't fully trigger the
+    // hover-state prerequisites for; (2) a Playwright click on the second
+    // DOM match (trigger vs. revealed item both read "Find Booking"); (3) a
+    // raw JS-dispatched click as a last resort, for custom widgets that
+    // don't respond to Playwright's synthetic pointer events the same way
+    // they do to a real mouse. Each is a no-op if the previous one already
+    // worked (checked via the Record Locator field appearing).
     const trigger = page.getByText("Find Booking", { exact: true }).first();
-    await trigger.click();
-    const submenuItem = page.locator(".dropdown-menu, .dropdown, .submenu").getByText("Find Booking", { exact: true }).first();
-    await submenuItem.click({ timeout: 8000 }).catch(async () => {
-      // Fallback: some deployments render the dropdown without a
-      // conventional Bootstrap class — try the second "Find Booking" match
-      // on the page instead (the first is the trigger itself).
-      const matches = page.getByText("Find Booking", { exact: true });
-      const count = await matches.count();
-      if (count < 2) {
-        const visibleNav = await page.evaluate(() => document.body.innerText.slice(0, 1500));
-        console.error(`DIAGNOSTIC [${logTag}] only ${count} "Find Booking" match(es) found. Page text: ${visibleNav}`);
-        throw new Error(`Could not find the "Find Booking" dropdown submenu item. Page text: ${visibleNav.slice(0, 400)}`);
-      }
-      await matches.nth(1).click();
-    });
+    await trigger.hover().catch(() => {});
+    await trigger.click().catch(() => {});
 
-    console.log(`[${logTag}] filling Basic Find PNR modal`);
     const recordLocatorField = page
       .getByLabel(/Record Locator/i)
       .or(page.locator('input[name*="ecord" i], input[id*="ecord" i], input[name*="pnr" i], input[id*="pnr" i], input[placeholder*="ecord" i], input[placeholder*="pnr" i]'))
       .first();
-    const foundField = await recordLocatorField
-      .waitFor({ state: "visible", timeout: 12000 })
-      .then(() => true)
-      .catch(() => false);
+
+    let foundField = await recordLocatorField.waitFor({ state: "visible", timeout: 3000 }).then(() => true).catch(() => false);
+
+    if (!foundField) {
+      for (const scope of [".dropdown-menu", ".dropdown", ".submenu", ".navbar-nav", "ul", "nav"]) {
+        const item = page.locator(scope).getByText("Find Booking", { exact: true }).last();
+        if (await item.count().catch(() => 0)) {
+          await item.click({ timeout: 3000 }).catch(() => {});
+          foundField = await recordLocatorField.waitFor({ state: "visible", timeout: 3000 }).then(() => true).catch(() => false);
+          if (foundField) break;
+        }
+      }
+    }
+
+    if (!foundField) {
+      // Last resort — a raw JS click on whatever the SECOND "Find Booking"
+      // text match actually is (any element type, not just links/buttons),
+      // bypassing Playwright's hover/visibility actionability checks
+      // entirely in case those are what's actually blocking it.
+      await page.evaluate(() => {
+        const matches = Array.from(document.querySelectorAll("a,button,li,span,div")).filter(
+          (el) => el.textContent?.trim() === "Find Booking" && el.children.length === 0
+        );
+        const target = matches[1] ?? matches[0];
+        target?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+      foundField = await recordLocatorField.waitFor({ state: "visible", timeout: 5000 }).then(() => true).catch(() => false);
+    }
+
+    console.log(`[${logTag}] filling Basic Find PNR modal`);
     if (!foundField) {
       // Diagnostic goes INTO the thrown message, not just console.error —
       // this surfaces all the way to the chat error text (no Railway log
       // access needed to see it), so the very next failure shows exactly
-      // what's on the page instead of a bare timeout again.
-      const diagnostic = await page.evaluate(() => ({
-        url: window.location.href,
-        inputs: Array.from(document.querySelectorAll("input")).map((el) => ({
-          id: el.id,
-          name: el.name,
-          type: el.type,
-          placeholder: el.placeholder,
-        })),
-        visibleHeadings: Array.from(document.querySelectorAll("h1,h2,h3,h4,.modal-title,label")).map((el) => el.textContent?.trim()).filter(Boolean).slice(0, 20),
-      }));
+      // what's on the page instead of a bare timeout again. Dumps every
+      // element whose text mentions "find" or "booking" (not just headings)
+      // since the earlier diagnostic missed nav-bar links entirely.
+      const diagnostic = await page.evaluate(() => {
+        const navLike = Array.from(document.querySelectorAll("a,button,li"))
+          .filter((el) => /find|booking/i.test(el.textContent ?? "") && el.textContent!.trim().length < 40)
+          .map((el) => ({
+            tag: el.tagName,
+            text: el.textContent?.trim(),
+            class: el.className,
+            href: (el as HTMLAnchorElement).href ?? null,
+          }))
+          .slice(0, 15);
+        return {
+          url: window.location.href,
+          navLike,
+          inputs: Array.from(document.querySelectorAll("input")).map((el) => ({
+            id: el.id,
+            name: el.name,
+            type: el.type,
+            placeholder: el.placeholder,
+          })),
+        };
+      });
       console.error(`DIAGNOSTIC [${logTag}] Record Locator field never appeared: ${JSON.stringify(diagnostic)}`);
-      throw new Error(`Could not find the Record Locator field to search PNR "${pnr}". Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`);
+      throw new Error(`Could not find the Record Locator field to search PNR "${pnr}". Page state: ${JSON.stringify(diagnostic).slice(0, 1400)}`);
     }
     await recordLocatorField.fill(pnr);
     await page
