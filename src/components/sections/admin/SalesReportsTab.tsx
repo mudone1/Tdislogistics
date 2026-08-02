@@ -8,6 +8,10 @@ const AIRLINE_OPTIONS = [
   { value: "AIRPEACE", label: "Airpeace" },
   { value: "IBOM", label: "Ibom" },
   { value: "ARIK", label: "Arik" },
+  { value: "UNITED", label: "United Nigeria" },
+  { value: "RANO", label: "Rano Air" },
+  { value: "ENUGU", label: "Enugu" },
+  { value: "XEJET", label: "Xejet" },
 ];
 
 interface GeneratedReport {
@@ -25,6 +29,23 @@ interface GeneratedReport {
   transactionsIgnoredCount: number;
   unknownStaff: string[];
   warnings: string[];
+  status: "SAVED" | "PENDING_VERIFICATION";
+  wasOverwrite: boolean;
+}
+
+// Returned instead of a GeneratedReport when the uploaded file(s) span more
+// than one date — a historical/monthly import. Every date is already
+// parsed, saved, and (if it collided with an existing date) superseded by
+// the time this response comes back — there's nothing left to confirm.
+interface MonthlyUploadSummary {
+  airline: string;
+  totalDatesProcessed: number;
+  datesOverwritten: string[];
+  totalGrandTotal: number;
+  totalTickets: number;
+  perDate: { reportDate: string; grandTotal: number; ticketCount: number; wasOverwrite: boolean; needsReview: boolean }[];
+  warnings: string[];
+  skippedAsExactDuplicate: boolean;
 }
 
 export default function SalesReportsTab() {
@@ -34,6 +55,7 @@ export default function SalesReportsTab() {
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [report, setReport] = useState<GeneratedReport | null>(null);
+  const [monthlySummary, setMonthlySummary] = useState<MonthlyUploadSummary | null>(null);
   const [corrections, setCorrections] = useState<Record<string, string>>({});
 
   async function generate() {
@@ -43,6 +65,7 @@ export default function SalesReportsTab() {
     }
     setGenerating(true);
     setReport(null);
+    setMonthlySummary(null);
     setCorrections({});
     try {
       const form = new FormData();
@@ -52,7 +75,20 @@ export default function SalesReportsTab() {
       const res = await fetch("/api/sales-reports/generate", { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Generation failed");
-      setReport(data);
+      // A multi-date upload (historical import) comes back as a
+      // MonthlyUploadSummary instead of a single GeneratedReport — every
+      // date in it is already saved server-side, so there's no
+      // review/confirm step to render for it.
+      if (data.isMonthly) {
+        setMonthlySummary(data);
+        if (data.skippedAsExactDuplicate) {
+          showToast("Exact re-upload of already-imported data — nothing changed", "warn");
+        } else {
+          showToast(`✓ Imported ${data.totalDatesProcessed} day(s)`, "success");
+        }
+      } else {
+        setReport(data);
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Generation failed", "warn");
     } finally {
@@ -96,8 +132,9 @@ export default function SalesReportsTab() {
   return (
     <div>
       <p style={{ fontSize: 12.5, color: "var(--gray-400)", marginBottom: 18 }}>
-        Upload an airline&apos;s raw MCO invoice export (.xls/.xlsx). The report is generated but held for your
-        review — nothing is saved or counted toward weekly/monthly totals until you confirm it below.
+        Upload an airline&apos;s raw MCO invoice export (.xls/.xlsx/.csv). A confidently parsed report is saved
+        automatically — a report only stops for your review below when validation flags something (low
+        confidence or an unrecognized staff code).
       </p>
 
       <div className="adm-control-card" style={{ marginBottom: 20 }}>
@@ -114,10 +151,10 @@ export default function SalesReportsTab() {
             </select>
           </div>
           <div className="form-group" style={{ minWidth: 260 }}>
-            <label>Excel file(s)</label>
+            <label>Excel/CSV file(s)</label>
             <input
               type="file"
-              accept=".xls,.xlsx"
+              accept=".xls,.xlsx,.csv"
               multiple
               onChange={(e) => setFiles(e.target.files)}
             />
@@ -132,10 +169,16 @@ export default function SalesReportsTab() {
         <div className="adm-control-card">
           <div className="adm-control-title">
             Generated Report
-            {report.needsReview && (
-              <span className="status-badge cancelled" style={{ marginLeft: 10 }}>
-                Needs review — {Math.round(report.confidence * 100)}% confidence
+            {report.status === "SAVED" ? (
+              <span className="status-badge paid" style={{ marginLeft: 10 }}>
+                {report.wasOverwrite ? "Saved — replaced previous report" : "Saved automatically"}
               </span>
+            ) : (
+              report.needsReview && (
+                <span className="status-badge cancelled" style={{ marginLeft: 10 }}>
+                  Needs review — {Math.round(report.confidence * 100)}% confidence
+                </span>
+              )
             )}
           </div>
 
@@ -169,7 +212,7 @@ export default function SalesReportsTab() {
             </ul>
           </div>
 
-          {report.unknownStaff.length > 0 && (
+          {report.status === "PENDING_VERIFICATION" && report.unknownStaff.length > 0 && (
             <div style={{ marginTop: 16 }}>
               <div className="adm-control-title" style={{ fontSize: 13 }}>
                 Unrecognized staff codes — confirm before saving
@@ -196,14 +239,59 @@ export default function SalesReportsTab() {
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-            <button className="adm-btn adm-btn-secondary" disabled={saving} onClick={discard}>
-              Discard
-            </button>
-            <button className="adm-btn adm-btn-primary" disabled={saving} onClick={save}>
-              {saving ? "Saving…" : "Save Report"}
-            </button>
+          {report.status === "PENDING_VERIFICATION" && (
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <button className="adm-btn adm-btn-secondary" disabled={saving} onClick={discard}>
+                Discard
+              </button>
+              <button className="adm-btn adm-btn-primary" disabled={saving} onClick={save}>
+                {saving ? "Saving…" : "Save Report"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {monthlySummary && (
+        <div className="adm-control-card">
+          <div className="adm-control-title">
+            Historical Import
+            {monthlySummary.skippedAsExactDuplicate ? (
+              <span className="status-badge cancelled" style={{ marginLeft: 10 }}>
+                Skipped — exact duplicate
+              </span>
+            ) : (
+              <span className="status-badge paid" style={{ marginLeft: 10 }}>
+                {monthlySummary.totalDatesProcessed} day(s) saved automatically
+              </span>
+            )}
           </div>
+
+          {monthlySummary.skippedAsExactDuplicate ? (
+            <p style={{ fontSize: 12.5, color: "var(--gray-400)", marginTop: 14 }}>
+              This exact file was already imported — nothing changed, so it was skipped rather than
+              reprocessed. Attach a corrected file if you meant to update existing data.
+            </p>
+          ) : (
+            <ul style={{ fontSize: 12.5, color: "var(--gray-400)", marginTop: 14, lineHeight: 1.8 }}>
+              <li>Airline: {monthlySummary.airline}</li>
+              <li>Total: {monthlySummary.totalGrandTotal.toLocaleString()} across {monthlySummary.totalTickets} tickets</li>
+              {monthlySummary.datesOverwritten.length > 0 && (
+                <li>Replaced existing saved reports for: {monthlySummary.datesOverwritten.join(", ")}</li>
+              )}
+              {monthlySummary.perDate.filter((d) => d.needsReview).length > 0 && (
+                <li>
+                  ⚠️ {monthlySummary.perDate.filter((d) => d.needsReview).length} day(s) had low-confidence parsing
+                  and may be worth a manual look:{" "}
+                  {monthlySummary.perDate
+                    .filter((d) => d.needsReview)
+                    .map((d) => d.reportDate)
+                    .join(", ")}
+                </li>
+              )}
+              {monthlySummary.warnings.length > 0 && <li>Parser warnings: {monthlySummary.warnings.join("; ")}</li>}
+            </ul>
+          )}
         </div>
       )}
     </div>

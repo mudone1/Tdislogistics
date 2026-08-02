@@ -88,6 +88,10 @@ const SALES_REPORT_AIRLINES: { key: string; label: string; aliases: string[] }[]
   { key: "AIRPEACE", label: "Airpeace", aliases: ["airpeace", "air peace"] },
   { key: "IBOM", label: "Ibom", aliases: ["ibom"] },
   { key: "ARIK", label: "Arik", aliases: ["arik"] },
+  { key: "UNITED", label: "United Nigeria", aliases: ["united nigeria", "united"] },
+  { key: "RANO", label: "Rano Air", aliases: ["rano air", "rano"] },
+  { key: "ENUGU", label: "Enugu", aliases: ["enugu"] },
+  { key: "XEJET", label: "Xejet", aliases: ["xejet"] },
 ];
 
 function matchSalesReportAirline(text: string): { key: string; label: string } | null {
@@ -121,7 +125,7 @@ function errorContactNote(reason: string): string {
 
 function detectAttachmentKind(file: File): "excel" | "image" | "other" {
   const name = file.name.toLowerCase();
-  if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "excel";
+  if (name.endsWith(".xls") || name.endsWith(".xlsx") || name.endsWith(".csv")) return "excel";
   if (file.type.startsWith("image/")) return "image";
   return "other";
 }
@@ -662,40 +666,54 @@ export default function ChatBubble() {
     [sending, pending, identity, refresh, prefetchQuoteImage, pollBookingJob, pollIssueTicketJob, pollBalanceUpdate]
   );
 
-  // Builds the chat message for a successfully generated (PENDING_VERIFICATION)
-  // daily report — shared by both the auto-detected and manually-named-
-  // airline paths so the review UI is identical either way. Saving this
-  // report automatically replaces any existing SAVED report for the same
-  // airline/date server-side (see ReportGenerator.confirmReport) — no
-  // separate overwrite choice needed, just an informational heads-up.
+  // Builds the chat message for a successfully generated daily report —
+  // shared by both the auto-detected and manually-named-airline paths.
+  // Most reports arrive already SAVED (server-side auto-save once
+  // validation passes, see ReportGenerator.generateReport) and need no
+  // action here; only a report the server flagged for review
+  // (PENDING_VERIFICATION) still shows the Save/Discard prompt. Either
+  // way, a same-airline/date overwrite is automatic server-side — no
+  // separate overwrite choice, just an informational heads-up.
   function renderGeneratedReport(data: {
     reportId: string;
     reportText: string;
+    status: "SAVED" | "PENDING_VERIFICATION";
     needsReview: boolean;
     confidence: number;
     unknownStaff: string[];
     isDuplicate: boolean;
     duplicateMatch?: DuplicateMatchInfo;
+    wasOverwrite?: boolean;
   }): void {
+    const isSaved = data.status === "SAVED";
+
     const needsReviewNote = data.needsReview
       ? `\n\n⚠️ Confidence ${Math.round(data.confidence * 100)}% — please double-check before saving.`
       : "";
     const unknownStaffNote =
       data.unknownStaff?.length > 0
-        ? `\n\nUnrecognized staff codes (won't block saving, but worth naming in Admin → Sales Reports next time): ${data.unknownStaff.join(", ")}`
+        ? `\n\nUnrecognized staff codes (worth naming in Admin → Sales Reports next time): ${data.unknownStaff.join(", ")}`
         : "";
-    const duplicateNote =
-      data.isDuplicate && data.duplicateMatch
+    // The saved/overwrite case is purely informational — this same-date
+    // supersession is automatic and already done by the time this message
+    // renders, never a separate choice the user has to make.
+    const overwriteNote =
+      isSaved && data.wasOverwrite
+        ? `\n\nℹ️ This replaced the previously saved report for the same airline/date.`
+        : data.isDuplicate && data.duplicateMatch
         ? `\n\nℹ️ There's already a saved report for ${data.duplicateMatch.existingReport.airline} on ${data.duplicateMatch.existingReport.date} (${data.duplicateMatch.existingReport.totals.sales.toLocaleString()} in sales). Saving this will automatically replace it.`
         : "";
+    const trailer = isSaved
+      ? "\n\n✅ Saved automatically."
+      : "\n\nThis report needs a quick check before it's saved — reply Save once it looks right, or Discard to cancel.";
 
     setMessages((m: ChatMessage[]) => [
       ...m,
       {
         id: idCounter++,
         role: "assistant",
-        text: `${data.reportText}${needsReviewNote}${unknownStaffNote}${duplicateNote}\n\nPlease verify this report. Reply Save if everything is correct, or Discard to cancel.`,
-        salesReport: { reportId: data.reportId, status: "pending" },
+        text: `${data.reportText}${needsReviewNote}${unknownStaffNote}${overwriteNote}${trailer}`,
+        salesReport: { reportId: data.reportId, status: isSaved ? "saved" : "pending" },
       },
     ]);
   }
@@ -712,8 +730,22 @@ export default function ChatBubble() {
     totalGrandTotal: number;
     totalTickets: number;
     perDate: { reportDate: string; grandTotal: number; ticketCount: number; wasOverwrite: boolean; needsReview: boolean }[];
+    skippedAsExactDuplicate?: boolean;
   }): void {
     const label = SALES_REPORT_AIRLINES.find((a) => a.key === data.airline)?.label ?? data.airline;
+
+    if (data.skippedAsExactDuplicate) {
+      setMessages((m: ChatMessage[]) => [
+        ...m,
+        {
+          id: idCounter++,
+          role: "assistant",
+          text: `That's an exact re-upload of a ${label} file already imported — nothing changed, so I skipped it. Attach a corrected file if you meant to update existing data.`,
+        },
+      ]);
+      return;
+    }
+
     const flaggedDays = data.perDate.filter((d) => d.needsReview);
     const lines = [
       `Detected a monthly ${label} report — processed ${data.totalDatesProcessed} day(s) automatically, no review needed.`,
@@ -798,7 +830,7 @@ export default function ChatBubble() {
           {
             id: idCounter++,
             role: "assistant",
-            text: `Got it — which airline is this ${inputLabel} for? Aero, Airpeace, Ibom, or Arik? (Reply "cancel" to skip this upload.)`,
+            text: `Got it — which airline is this ${inputLabel} for? Aero, Airpeace, Ibom, Arik, United Nigeria, Rano Air, Enugu, or Xejet? (Reply "cancel" to skip this upload.)`,
           },
         ]);
         return;
@@ -865,7 +897,7 @@ export default function ChatBubble() {
     const kind = detectAttachmentKind(file);
     // Images are checked for a passport first (no command required); only
     // non-passport images fall through to the sales-report screenshot flow.
-    // Excel (.xls/.xlsx) goes straight there, unchanged.
+    // Excel/CSV (.xls/.xlsx/.csv) goes straight there, unchanged.
     if (kind === "image") {
       attemptPassportDetectOrFallback(file);
       return;
@@ -880,7 +912,7 @@ export default function ChatBubble() {
       {
         id: idCounter++,
         role: "assistant",
-        text: "I can process Excel sales-report exports (.xls/.xlsx) or screenshots of a report here — that file type isn't supported.",
+        text: "I can process Excel/CSV sales-report exports (.xls/.xlsx/.csv) or screenshots of a report here — that file type isn't supported.",
       },
     ]);
   }
@@ -957,7 +989,7 @@ export default function ChatBubble() {
 
         const airline = matchSalesReportAirline(text);
         if (!airline) {
-          const notRecognized = 'I didn\'t recognize that airline — please reply Aero, Airpeace, Ibom, or Arik, or "cancel" to skip this upload.';
+          const notRecognized = 'I didn\'t recognize that airline — please reply Aero, Airpeace, Ibom, Arik, United Nigeria, Rano Air, Enugu, or Xejet, or "cancel" to skip this upload.';
           setMessages((m: ChatMessage[]) => [...m, { id: idCounter++, role: "assistant", text: notRecognized }]);
           return notRecognized;
         }
@@ -1273,7 +1305,7 @@ export default function ChatBubble() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".xls,.xlsx,image/*,application/pdf"
+                accept=".xls,.xlsx,.csv,image/*,application/pdf"
                 style={{ display: "none" }}
                 onChange={handleFileSelected}
               />

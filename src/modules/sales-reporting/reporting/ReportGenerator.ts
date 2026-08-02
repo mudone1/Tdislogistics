@@ -7,7 +7,7 @@ import { resolveStaffName, normalizeRawCode } from "../staff/resolveStaffName";
 import { StaffAliasRepository } from "../staff/StaffAliasRepository";
 import { renderReportText } from "./ReportTextRenderer";
 import { scoreConfidence } from "./ConfidenceScorer";
-import { checkDuplicate, recordSupersession, type DuplicateMatch } from "../services/DuplicateCheckService";
+import { checkDuplicate, checkExactFileDuplicate, recordSupersession, type DuplicateMatch } from "../services/DuplicateCheckService";
 import type { AirlineRuleKey, RawTransactionRow } from "../core/types";
 import type { DetectionMethod } from "../services/AirlineDetectionService";
 
@@ -16,6 +16,10 @@ const AIRLINE_LABELS: Record<AirlineRuleKey, string> = {
   AIRPEACE: "Airpeace",
   IBOM: "Ibom",
   ARIK: "Arik",
+  UNITED: "United Nigeria",
+  RANO: "Rano Air",
+  ENUGU: "Enugu",
+  XEJET: "Xejet",
 };
 
 export interface UploadedFile {
@@ -24,11 +28,12 @@ export interface UploadedFile {
   mimeType?: string;
 }
 
-// Excel by extension (the reliable path), otherwise treat anything with an
-// image mime type as a screenshot. Anything else is rejected upstream.
+// Excel/CSV by extension (the reliable path — XLSX.read handles a CSV
+// buffer the same as a workbook), otherwise treat anything else as a
+// screenshot. Anything unsupported is rejected upstream.
 function fileKind(file: UploadedFile): "EXCEL" | "SCREENSHOT" {
   const name = file.name.toLowerCase();
-  if (name.endsWith(".xls") || name.endsWith(".xlsx")) return "EXCEL";
+  if (name.endsWith(".xls") || name.endsWith(".xlsx") || name.endsWith(".csv")) return "EXCEL";
   return "SCREENSHOT";
 }
 
@@ -49,6 +54,8 @@ export interface GeneratedReportSummary {
   warnings: string[];
   isDuplicate: boolean;
   duplicateMatch?: DuplicateMatch;
+  status: "SAVED" | "PENDING_VERIFICATION"; // SAVED means it was auto-saved with no confirmation step
+  wasOverwrite: boolean; // true when this auto-save superseded an existing SAVED report for the same airline/date
 }
 
 export interface DetectionMeta {
@@ -67,6 +74,40 @@ function hashFiles(files: UploadedFile[]): string {
   const hash = createHash("sha256");
   for (const f of files) hash.update(f.buffer);
   return hash.digest("hex");
+}
+
+// Shared final step for both the daily auto-save path (generateReport) and
+// the manual-review path (confirmReport, once a flagged report has been
+// resolved): flips the report to SAVED and, per product decision, always
+// overwrites (never asks) any existing SAVED report already on file for the
+// same airline+date — that's the one and only active report for that
+// airline/date from this point on.
+async function finalizeAsSaved(
+  reportId: string,
+  airline: AirlineRuleKey,
+  reportDate: string,
+  verifiedBy: string,
+  supersessionReason: string
+): Promise<{ wasOverwrite: boolean }> {
+  const existingSaved = await prisma.salesReport.findFirst({
+    where: { airline, reportDate, status: "SAVED", id: { not: reportId } },
+  });
+
+  await prisma.salesReport.update({
+    where: { id: reportId },
+    data: { status: "SAVED", verifiedBy, verifiedAt: new Date() },
+  });
+
+  if (existingSaved) {
+    await recordSupersession(existingSaved.id, reportId, verifiedBy, supersessionReason);
+  }
+
+  // Best-effort: the report is already SAVED at this point regardless of
+  // whether this succeeds — dashboard rollups can be backfilled/retried
+  // separately, but a hiccup here must never undo the save itself.
+  await syncDenormalizedAnalytics(reportId);
+
+  return { wasOverwrite: existingSaved != null };
 }
 
 // Shared by both the daily and monthly upload paths — turns the uploaded
@@ -246,6 +287,31 @@ export async function generateReport(
 
   const transactionsIncludedCount = result.transactions.filter((t) => t.included).length;
 
+  // Auto-save the golden path: a report only needs a human before saving
+  // when validation actually found something wrong with it (low-confidence
+  // parse, or money attributed to a staff code we can't resolve) — not
+  // merely because a report already exists for the same airline/date,
+  // which is the normal, expected replace-the-old-one case (finalizeAsSaved
+  // always supersedes automatically, no separate prompt). A confidently
+  // parsed, fully-resolved report is saved immediately with no confirmation
+  // step at all.
+  const autoSaveEligible = !confidence.needsReview && unknownStaff.size === 0;
+  let status: "SAVED" | "PENDING_VERIFICATION" = "PENDING_VERIFICATION";
+  let wasOverwrite = false;
+
+  if (autoSaveEligible) {
+    const attributedTo = createdBy || options?.importedBy || "auto-save";
+    const saveResult = await finalizeAsSaved(
+      report.id,
+      airline,
+      reportDate,
+      attributedTo,
+      "Automatically superseded — a newer upload for the same airline/date was auto-saved."
+    );
+    status = "SAVED";
+    wasOverwrite = saveResult.wasOverwrite;
+  }
+
   return {
     reportId: report.id,
     airline,
@@ -263,6 +329,8 @@ export async function generateReport(
     warnings: allWarnings,
     isDuplicate: duplicateMatch != null,
     duplicateMatch: duplicateMatch ?? undefined,
+    status,
+    wasOverwrite,
   };
 }
 
@@ -284,6 +352,11 @@ export interface MonthlyUploadSummary {
   totalTickets: number;
   perDate: DailyProcessResult[];
   warnings: string[];
+  // true when this exact file set (byte-identical) was already imported —
+  // nothing was reprocessed or re-saved, per Part 3's "ignore exact
+  // duplicate uploads" (distinct from "update if a newer version is
+  // uploaded", which still goes through the normal supersede path below).
+  skippedAsExactDuplicate: boolean;
 }
 
 // A monthly upload skips the PENDING_VERIFICATION/human-review step
@@ -316,6 +389,24 @@ export async function processMonthlyUpload(
   const primaryFile = files[0];
   const totalFileSize = files.reduce((sum, f) => sum + f.buffer.byteLength, 0);
   const attributedTo = options?.createdBy || options?.importedBy || "monthly-upload";
+
+  // This exact file set (byte-identical) was already saved — every date it
+  // would produce is already on file with the same source, so reprocessing
+  // would only recreate identical reports and spurious supersession
+  // history. Bail out before touching the database at all.
+  const exactDuplicate = await checkExactFileDuplicate(fileHash);
+  if (exactDuplicate) {
+    return {
+      airline,
+      totalDatesProcessed: 0,
+      datesOverwritten: [],
+      totalGrandTotal: 0,
+      totalTickets: 0,
+      perDate: [],
+      warnings,
+      skippedAsExactDuplicate: true,
+    };
+  }
 
   const perDate: DailyProcessResult[] = [];
   const datesOverwritten: string[] = [];
@@ -429,6 +520,7 @@ export async function processMonthlyUpload(
     totalTickets: perDate.reduce((sum, d) => sum + d.ticketCount, 0),
     perDate,
     warnings,
+    skippedAsExactDuplicate: false,
   };
 }
 
@@ -452,10 +544,6 @@ export async function confirmReport(
   if (report.status === "SAVED") {
     throw new Error(`Report ${reportId} was already saved.`);
   }
-
-  const existingSaved = await prisma.salesReport.findFirst({
-    where: { airline: report.airline, reportDate: report.reportDate, status: "SAVED", id: { not: reportId } },
-  });
 
   if (staffCorrections && Object.keys(staffCorrections).length > 0) {
     const transactions = await prisma.salesTransaction.findMany({ where: { reportId } });
@@ -514,20 +602,18 @@ export async function confirmReport(
     await prisma.salesReport.update({ where: { id: reportId }, data: { grandTotal, reportText } });
   }
 
-  const updated = await prisma.salesReport.update({
+  const { wasOverwrite } = await finalizeAsSaved(
+    reportId,
+    report.airline as AirlineRuleKey,
+    report.reportDate,
+    verifiedBy,
+    "Automatically superseded — a newer upload for the same airline/date was saved."
+  );
+
+  const updated = await prisma.salesReport.findUniqueOrThrow({
     where: { id: reportId },
-    data: { status: "SAVED", verifiedBy, verifiedAt: new Date() },
     include: { staffSales: true, transactions: true },
   });
-
-  if (existingSaved) {
-    await recordSupersession(existingSaved.id, reportId, verifiedBy, "Automatically superseded — a newer upload for the same airline/date was saved.");
-  }
-
-  // Best-effort: the report is already SAVED at this point regardless of
-  // whether this succeeds — dashboard rollups can be backfilled/retried
-  // separately, but a hiccup here must never undo the save itself.
-  await syncDenormalizedAnalytics(reportId);
 
   return {
     reportId: updated.id,
@@ -545,6 +631,8 @@ export async function confirmReport(
     unknownStaff: [],
     warnings: [],
     isDuplicate: false,
+    status: "SAVED",
+    wasOverwrite,
   };
 }
 
