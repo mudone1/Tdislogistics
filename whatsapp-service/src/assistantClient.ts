@@ -4,8 +4,6 @@ export interface QuoteResponse {
   reply: string;
   bookingJobId?: string;
   balanceUpdateTriggeredAt?: string;
-  issueTicketJobId?: string;
-  issueTicketPnr?: string;
 }
 
 // Same endpoint the browser ChatBubble posts to — a WhatsApp chat is just
@@ -29,8 +27,6 @@ export async function askAssistant(sessionKey: string, displayName: string | nul
     reply: data.reply ?? "Sorry, I couldn't process that just now.",
     bookingJobId: data.bookingJobId,
     balanceUpdateTriggeredAt: data.balanceUpdateTriggeredAt,
-    issueTicketJobId: data.issueTicketJobId,
-    issueTicketPnr: data.issueTicketPnr,
   };
 }
 
@@ -87,7 +83,6 @@ export interface BookingJobStatus {
   };
   passenger: { title: string; firstName: string; lastName: string };
   additionalPassengers: AdditionalPassenger[] | null;
-  ticketStatus: "BOOKED" | "ISSUING" | "ISSUED" | "VOIDED" | "EXPIRED";
   result?: {
     pnr: string | null;
     holdExpiresAt: string | null;
@@ -124,29 +119,6 @@ export async function getBookingScreenshot(screenshotUrl: string): Promise<Buffe
   }
   const arrayBuffer = await res.arrayBuffer();
   return Buffer.from(arrayBuffer);
-}
-
-export interface IssueTicketStatus {
-  jobId: string;
-  pnr: string | null;
-  ticketStatus: "BOOKED" | "ISSUING" | "ISSUED" | "VOIDED" | "EXPIRED";
-  result?: {
-    ticketNumber: string | null;
-    totalPayable: number | null;
-    currency: string | null;
-    issuedAt: string | null;
-    hasScreenshot: boolean;
-    screenshotUrl: string | null;
-  };
-  error?: { detail: string };
-}
-
-export async function getIssueTicketStatus(jobId: string): Promise<IssueTicketStatus> {
-  const res = await fetch(`${MAIN_APP_URL}/api/assistant/issue-ticket/status?jobId=${encodeURIComponent(jobId)}`);
-  if (!res.ok) {
-    throw new Error(`Issue-ticket status API returned HTTP ${res.status}`);
-  }
-  return (await res.json()) as IssueTicketStatus;
 }
 
 export interface BalanceUpdateStatus {

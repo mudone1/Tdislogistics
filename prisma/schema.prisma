@@ -37,6 +37,14 @@ enum AirlineKey {
   XEJET
 }
 
+enum CabinClass {
+  ECONOMY
+  // Compares every Premium Economy/Premium Economy Flex/Business/Business
+  // Flex fare found on the page and books the cheapest available one — see
+  // selectCheapestFare's category mode in VarsBookOnHold.ts.
+  PREMIUM
+}
+
 enum SyncStatus {
   SUCCESS
   FAILED
@@ -603,7 +611,9 @@ enum BookingErrorCategory {
 
 enum TicketStatus {
   BOOKED // Hold created, not yet issued
-  ISSUING // Issue-ticket automation currently running
+  ISSUING // Issue-ticket automation currently running — no longer set by any
+  // in-app code (the ticket-issuing automation was removed), kept in the
+  // enum only because past rows may still hold this value.
   ISSUED // Payment completed, ticket issued
   VOIDED // Ticket was voided
   EXPIRED // Hold expired without payment
@@ -636,17 +646,17 @@ model BookingJob {
   // portal enforces the age band via the date-picker's allowed year range.
   // Null/empty for a single-passenger hold (unchanged default).
   additionalPassengers Json?
+  cabinClass           CabinClass @default(ECONOMY)
 
-  // Ticket-issuing lifecycle — separate from the hold/booking result above,
-  // which only ever describes whether the HOLD (PNR) was created. A hold
-  // can sit at ticketStatus=BOOKED indefinitely; issuing later pays for and
-  // confirms it. Kept on this same row (not a new BookingJob) since it's a
-  // later stage of the exact same booking, not a new automation request.
+  // Ticket-issuing lifecycle columns — the automation that wrote these was
+  // removed (see VarsIssueTicket.ts's deletion), but the columns and their
+  // historical data are kept rather than dropped; no in-app code reads or
+  // writes them anymore.
   ticketStatus     TicketStatus @default(BOOKED)
-  ticketNumber     String? // set once ISSUED, if the portal exposes one distinct from the PNR
+  ticketNumber     String?
   issueStartedAt   DateTime?
   issuedAt         DateTime?
-  issueError       String? // set on a failed issue attempt; ticketStatus stays BOOKED so it can be retried
+  issueError       String?
   // Which specific flight to book on each leg, when that leg's route/date
   // has more than one — resolved by the chat before the job is created
   // (search count -> ask the user if needed). Null means "known to have

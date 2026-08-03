@@ -1,6 +1,5 @@
 import { getBookingJobStatus, getBookingScreenshot, type BookingJobStatus } from "./assistantClient";
 import { keepTypingAlive } from "./typingIndicator";
-import { setPendingIssueOffer } from "./pendingIssueOffers";
 
 const POLL_MS = 4000;
 const MAX_ATTEMPTS = 90; // ~6 min, matching ChatBubble's own budget for a Book-on-Hold run
@@ -21,21 +20,14 @@ function errorContactNote(reason: string): string {
 // passenger/airline/route/date write-up was too verbose next to the
 // screenshot (which already shows all of that visually as the caption's
 // attached image). Just the two pieces of info that actually matter as
-// TEXT, then the numbered issue-ticket options. Fare is whatever was
-// captured at hold-time (an estimate — the authoritative figure gets
-// extracted again, and overwrites this, at actual issue time).
+// TEXT. Fare is whatever was captured at hold-time (an estimate, not a
+// final payable figure — payment itself happens on the airline's own flow).
 function formatSuccessMessage(job: BookingJobStatus): string {
   const result = job.result!;
   const lines = ["✅ Booking Successful"];
   if (result.pnr) lines.push(`PNR: ${result.pnr}`);
   if (result.totalPayable != null) {
     lines.push(`Amount: ${result.currency ? `${result.currency} ` : ""}${result.totalPayable.toLocaleString()}`);
-  }
-
-  if (result.pnr) {
-    lines.push("");
-    lines.push("1. Issue Now");
-    lines.push(`2. Send "ISSUE ${result.pnr}" on WhatsApp to pay anytime.`);
   }
 
   return lines.join("\n");
@@ -47,7 +39,7 @@ function formatSuccessMessage(job: BookingJobStatus): string {
 // state for a WhatsApp chat. When a confirmation screenshot is available
 // (same as the browser's BookingResultCard image), it's sent as the
 // caption-bearing image itself rather than a separate text message.
-export function pollBookingJob(jobId: string, chatId: string, sender: BookingPollSender): void {
+export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
   let attempts = 0;
   const stopTyping = keepTypingAlive(sender.setTyping);
 
@@ -58,7 +50,6 @@ export function pollBookingJob(jobId: string, chatId: string, sender: BookingPol
       if (job.status === "SUCCESS" && job.result) {
         stopTyping();
         const text = formatSuccessMessage(job);
-        if (job.result.pnr) setPendingIssueOffer(chatId, job.result.pnr);
         if (job.result.hasScreenshot && job.result.screenshotUrl) {
           try {
             const screenshot = await getBookingScreenshot(job.result.screenshotUrl);

@@ -1,6 +1,6 @@
 import { BookingJobRepository } from "../storage/BookingJobRepository";
 import { connectorServiceClient } from "../../../lib/connectorServiceClient";
-import type { AirlineKey } from "@prisma/client";
+import type { AirlineKey, CabinClass } from "@prisma/client";
 
 // Airlines with a Book-on-Hold automation wired up. Others are rejected up
 // front rather than creating a job that could never run. Keep in sync with
@@ -43,6 +43,7 @@ export interface StartBookOnHoldInput {
   // have exactly one flight.
   preferredDepartureTime?: string | null;
   preferredReturnTime?: string | null;
+  cabinClass?: CabinClass | null;
   createdBy?: string | null;
 }
 
@@ -74,6 +75,7 @@ export async function startBookOnHold(input: StartBookOnHoldInput): Promise<Star
     additionalPassengers: input.additionalPassengers,
     preferredDepartureTime: input.preferredDepartureTime ?? null,
     preferredReturnTime: input.preferredReturnTime ?? null,
+    cabinClass: input.cabinClass ?? null,
     createdBy: input.createdBy ?? null,
   });
 

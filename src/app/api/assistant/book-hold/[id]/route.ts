@@ -29,7 +29,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     // Additional passengers beyond the lead one, if this was a
     // multi-passenger hold — same shape as what was stored at creation time.
     additionalPassengers: job.additionalPassengers ?? null,
-    ticketStatus: job.ticketStatus,
     ...(job.status === "SUCCESS" && {
       result: {
         pnr: job.pnr,

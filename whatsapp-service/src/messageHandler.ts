@@ -1,10 +1,8 @@
 import { BOT_MENTION_TRIGGER } from "./config";
 import { askAssistant } from "./assistantClient";
 import { pollBookingJob } from "./bookingPoll";
-import { pollIssueTicketJob } from "./issueTicketPoll";
 import { pollBalanceUpdate } from "./balanceUpdatePoll";
 import { keepTypingAlive } from "./typingIndicator";
-import { resolvePendingIssueOffer } from "./pendingIssueOffers";
 
 export interface IncomingMessage {
   chatId: string; // group JID (ends @g.us) or individual JID (ends @s.whatsapp.net)
@@ -74,19 +72,8 @@ function looksLikeBookingRequest(text: string): boolean {
 export async function handleIncomingMessage(msg: IncomingMessage, sender: MessageSender): Promise<void> {
   if (msg.isGroup && !mentionsBot(msg.text)) return;
 
-  const rawMessage = msg.isGroup ? stripTrigger(msg.text) : msg.text.trim();
-  if (!rawMessage) return;
-
-  // A bare "1" or "Issue Now" reply to the numbered option list sent right
-  // after a booking confirmation (see bookingPoll.ts) resolves to whatever
-  // PNR THIS chat was just offered — rewritten into the same "Issue <PNR>"
-  // phrasing the full text-command path already handles server-side, so
-  // there's exactly one place (ConversationOrchestrator) that actually
-  // triggers issuing. A message that isn't a bare "1"/"Issue Now" reply (in
-  // particular the full "Issue ABC123"/"Pay ABC123" commands, which already
-  // carry their own PNR) passes through untouched.
-  const offeredPnr = resolvePendingIssueOffer(msg.chatId, rawMessage);
-  const message = offeredPnr ? `Issue ${offeredPnr}` : rawMessage;
+  const message = msg.isGroup ? stripTrigger(msg.text) : msg.text.trim();
+  if (!message) return;
 
   const sessionKey = `whatsapp:${msg.chatId}`;
   const reply = async (text: string) => sender.sendText(msg.chatId, text);
@@ -109,14 +96,7 @@ export async function handleIncomingMessage(msg: IncomingMessage, sender: Messag
     stopTyping();
     await reply(result.reply);
     if (result.bookingJobId) {
-      pollBookingJob(result.bookingJobId, msg.chatId, {
-        sendText: reply,
-        sendImage: (buffer, caption) => sender.sendImage(msg.chatId, buffer, caption),
-        setTyping: () => sender.setTyping(msg.chatId),
-      });
-    }
-    if (result.issueTicketJobId && result.issueTicketPnr) {
-      pollIssueTicketJob(result.issueTicketJobId, result.issueTicketPnr, {
+      pollBookingJob(result.bookingJobId, {
         sendText: reply,
         sendImage: (buffer, caption) => sender.sendImage(msg.chatId, buffer, caption),
         setTyping: () => sender.setTyping(msg.chatId),
