@@ -382,16 +382,41 @@ export async function bookVarsPlatformOnHold(
     // falls back to this real, DOM-read fare sum rather than leaving the
     // amount blank whenever its own regex doesn't find a match.
     let fareAmountFallback = 0;
+    const PREMIUM_BUSINESS_FALLBACK: FareSelection = {
+      mode: "category",
+      keywords: ["premium", "business"],
+      categoryLabel: "Premium/Business",
+    };
     const fareSelection: FareSelection =
       request.cabinClass === "PREMIUM"
-        ? { mode: "category", keywords: ["premium", "business"], categoryLabel: "Premium/Business" }
+        ? PREMIUM_BUSINESS_FALLBACK
         : { mode: "explicit", classbands: request.fareClassPreference };
     for (let leg = 0; leg < legCount; leg++) {
       // leg 0 is outbound, leg 1 (round trip only) is the return — each is
       // an independent search with its own possible ambiguity, so each
       // gets its own preferred time rather than reusing one value for both.
       const preferredTime = leg === 0 ? request.preferredDepartureTime : request.preferredReturnTime;
-      const selectedFare = await selectCheapestFare(page, leg, fareSelection, preferredTime, logTag);
+      let selectedFare;
+      try {
+        selectedFare = await selectCheapestFare(page, leg, fareSelection, preferredTime, logTag);
+      } catch (err) {
+        // Economy is the default and Premium/Business is request-only — EXCEPT
+        // when Economy is sold out entirely, in which case Premium/Business is
+        // the only seat actually available on this route, so fall back to it
+        // rather than failing the hold outright. Narrowly matched to the
+        // specific "nothing available" error (selectCheapestFare's own
+        // message) so an unrelated failure (e.g. unresolved time ambiguity)
+        // still propagates instead of being silently retried.
+        const economySoldOut =
+          fareSelection.mode === "explicit" && err instanceof Error && /are available on leg/.test(err.message);
+        if (!economySoldOut) throw err;
+        console.log(
+          `[${logTag}] leg ${leg}: Economy sold out, falling back to Premium/Business as the only remaining cabin — ${
+            err instanceof Error ? err.message : err
+          }`
+        );
+        selectedFare = await selectCheapestFare(page, leg, PREMIUM_BUSINESS_FALLBACK, preferredTime, logTag);
+      }
       fareAmountFallback += selectedFare.amount;
     }
 
