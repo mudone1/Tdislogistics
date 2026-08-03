@@ -582,7 +582,9 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   // selectCheapestFare's category mode in VarsBookOnHold.ts, which
   // compares every Premium Economy/Premium Economy Flex/Business/Business
   // Flex fare and books the cheapest available one).
-  if (e.cabinClass && /premium|business/i.test(e.cabinClass)) slots.cabinClass = "PREMIUM";
+  if (e.cabinClass && /premium|business/i.test(e.cabinClass) && messageActuallyRequestsPremiumCabin(rawMessage)) {
+    slots.cabinClass = "PREMIUM";
+  }
   // Passenger details (only ever populated on a Book-on-Hold turn). Trimmed;
   // blanks are ignored so a later turn can fill a gap without clobbering.
   if (e.passengerTitle?.trim()) slots.passengerTitle = e.passengerTitle.trim();
@@ -726,6 +728,18 @@ function messageActuallyNamesAirline(rawMessage: string, airline: string): boole
   // come from conversation history, not this message, so it's rejected.
   if (m.includes(airline.toLowerCase())) return true;
   return Object.keys(AIRLINE_NAME_MATCHERS).some((alias) => m.includes(alias));
+}
+
+// Same reproduced-bug shape as messageActuallyNamesAirline above: the LLM
+// set entities.cabinClass to "Premium" on a turn that never mentioned
+// premium/business at all, apparently pulled from earlier conversation
+// context rather than the current message — confirmed live (a plain
+// Economy request got booked into Premium/Business unprompted). Cabin
+// class must default to Economy unless the CURRENT message explicitly
+// asks for it, so this is checked directly against the raw text instead
+// of trusting the LLM's extraction on faith.
+function messageActuallyRequestsPremiumCabin(rawMessage: string): boolean {
+  return /\b(premium|business)\b/i.test(rawMessage);
 }
 
 function resetRouteSlots(slots: ConversationSlots): void {
