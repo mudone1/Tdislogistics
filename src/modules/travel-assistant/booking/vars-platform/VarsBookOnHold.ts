@@ -89,6 +89,12 @@ export interface BookOnHoldRequest {
   // guess or fall back to Enugu's names, since picking the wrong classband
   // could silently select a more expensive fare.
   fareClassPreference: [string, string];
+  // "PREMIUM" compares every Premium Economy/Premium Economy Flex/
+  // Business/Business Flex classband found on the fare page (matched by
+  // keyword, not exact name — see selectCheapestFare) and books the
+  // cheapest available one, ignoring fareClassPreference entirely. Omit or
+  // "ECONOMY" keeps today's default behavior unchanged.
+  cabinClass?: "ECONOMY" | "PREMIUM";
   // When a leg's route/date has more than one flight, the caller must
   // resolve that ambiguity (see searchVarsPlatformFlights in
   // VarsFlightSearch.ts to discover the options, and prompt the user)
@@ -376,12 +382,16 @@ export async function bookVarsPlatformOnHold(
     // falls back to this real, DOM-read fare sum rather than leaving the
     // amount blank whenever its own regex doesn't find a match.
     let fareAmountFallback = 0;
+    const fareSelection: FareSelection =
+      request.cabinClass === "PREMIUM"
+        ? { mode: "category", keywords: ["premium", "business"], categoryLabel: "Premium/Business" }
+        : { mode: "explicit", classbands: request.fareClassPreference };
     for (let leg = 0; leg < legCount; leg++) {
       // leg 0 is outbound, leg 1 (round trip only) is the return — each is
       // an independent search with its own possible ambiguity, so each
       // gets its own preferred time rather than reusing one value for both.
       const preferredTime = leg === 0 ? request.preferredDepartureTime : request.preferredReturnTime;
-      const selectedFare = await selectCheapestFare(page, leg, request.fareClassPreference, preferredTime, logTag);
+      const selectedFare = await selectCheapestFare(page, leg, fareSelection, preferredTime, logTag);
       fareAmountFallback += selectedFare.amount;
     }
 
@@ -743,10 +753,24 @@ async function fillPassengerDateOfBirth(page: import("playwright").Page, idx: nu
   );
 }
 
+// Two selection modes: "explicit" is the original behavior — compare
+// exactly the two named classbands (airline-verified, e.g. Enugu's
+// "Economy Promo"/"Economy Saver") and pick whichever is cheaper.
+// "category" is for Premium/Business cabin requests — the exact
+// data-classband codes for those tiers were never live-verified (and the
+// visible fare-card names have already been seen to drift from the coded
+// value, e.g. "Economy Saver" vs. a page showing "Economy Standard"), so
+// instead of guessing exact strings, every classband card on the panel is
+// enumerated and matched by keyword against its readable name — safer
+// than risking a wrong-tier silent selection.
+type FareSelection =
+  | { mode: "explicit"; classbands: string[] }
+  | { mode: "category"; keywords: string[]; categoryLabel: string };
+
 async function selectCheapestFare(
   page: import("playwright").Page,
   legIndex: number,
-  fareClasses: [string, string],
+  fareSelection: FareSelection,
   preferredDepartureTime: string | undefined,
   logTag: string
 ): Promise<{ band: string; amount: number }> {
@@ -779,36 +803,57 @@ async function selectCheapestFare(
   }
 
   const panel = panels.nth(panelIndex);
-  const cheapest = await panel.evaluate((panelEl, classes) => {
-    const amounts = classes.map((band) => {
-      const card = panelEl.querySelector<HTMLElement>(`[data-classband="${band}"]`);
-      const priceEl = card?.querySelector<HTMLElement>("[data-original-amount]");
-      const amount = priceEl?.getAttribute("data-original-amount");
+  // Enumerate every classband card on the panel (not just the two
+  // originally-named ones) — needed for "category" mode, and harmless for
+  // "explicit" mode since it's filtered right back down to the same named
+  // pair. Card identity is tracked by index rather than the data-classband
+  // attribute value, since that attribute isn't guaranteed present on
+  // every deployment/tier (VarsFlightSearch.ts already falls back to a
+  // ".class-band-name" text element for the same reason).
+  const winner = await panel.evaluate((panelEl, selection) => {
+    const cards = Array.from(panelEl.querySelectorAll<HTMLElement>('[class*="classband-panel"]'));
+    const candidates = cards.map((card, index) => {
+      const name =
+        card.getAttribute("data-classband") ?? card.querySelector(".class-band-name")?.textContent?.trim() ?? "Unknown";
+      const priceEl = card.querySelector<HTMLElement>("[data-original-amount]");
+      const rawAmount = priceEl?.getAttribute("data-original-amount");
       // A sold-out fare can still show a price (data-original-amount) but
       // has no clickable "Select this fare" element — same soldOut signal
       // VarsFlightSearch.ts's extractFlightOptions already uses. Confirmed
       // via a real run: picking a sold-out band by price alone hung
       // waiting for .flight-class-select-fare-text that doesn't exist.
-      const soldOut = !!card?.querySelector(".seats-none") || /sold out/i.test(card?.textContent ?? "");
-      return { band, amount: amount && !soldOut ? parseFloat(amount) : null };
+      const soldOut = !!card.querySelector(".seats-none") || /sold out/i.test(card.textContent ?? "");
+      const amount = rawAmount && !soldOut ? parseFloat(rawAmount) : null;
+      return { index, name, amount };
     });
-    const available = amounts.filter((a) => a.amount != null);
+    const matching =
+      selection.mode === "explicit"
+        ? candidates.filter((c) => selection.classbands.includes(c.name))
+        : candidates.filter((c) => selection.keywords.some((kw) => c.name.toLowerCase().includes(kw)));
+    const available = matching.filter((c) => c.amount != null);
     if (available.length === 0) return null;
     available.sort((a, b) => (a.amount as number) - (b.amount as number));
-    return available[0] as { band: string; amount: number };
-  }, fareClasses);
-  const cheaperBand = cheapest?.band ?? null;
+    return available[0] as { index: number; name: string; amount: number };
+  }, fareSelection);
 
-  if (!cheaperBand) {
+  if (!winner) {
     const diagnostic = await panel.evaluate((panelEl) =>
-      Array.from(panelEl.querySelectorAll("[data-classband]")).map((card) => ({
-        band: card.getAttribute("data-classband"),
+      Array.from(panelEl.querySelectorAll('[class*="classband-panel"]')).map((card) => ({
+        name: card.getAttribute("data-classband") ?? card.querySelector(".class-band-name")?.textContent?.trim() ?? "Unknown",
         hasSelectText: !!card.querySelector(".flight-class-select-fare-text"),
         text: (card.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200),
       }))
     );
+    const wanted =
+      fareSelection.mode === "explicit"
+        ? fareSelection.classbands.join(", ")
+        : `${fareSelection.categoryLabel} (matching: ${fareSelection.keywords.join("/")})`;
     console.log(`DIAGNOSTIC [${logTag}] leg ${legIndex} classbands: ${JSON.stringify(diagnostic)}`);
-    throw new Error(`Neither of ${fareClasses.join(", ")} is available on leg ${legIndex}`);
+    throw new Error(
+      `None of the requested fares (${wanted}) are available on leg ${legIndex}. On-page classbands: ${diagnostic
+        .map((d) => d.name)
+        .join(", ")}`
+    );
   }
 
   // Two confirmed-different selection mechanisms across VARS deployments:
@@ -823,8 +868,9 @@ async function selectCheapestFare(
   // focusable/clickable as a whole unit), gaining a "panel-active" class
   // on click. Try Enugu's mechanism first since it's the one proven
   // through an actual completed booking; fall back to United's.
-  const clicked = await panel.evaluate((panelEl, band) => {
-    const card = panelEl.querySelector<HTMLElement>(`[data-classband="${band}"]`);
+  const clicked = await panel.evaluate((panelEl, cardIndex) => {
+    const cards = Array.from(panelEl.querySelectorAll<HTMLElement>('[class*="classband-panel"]'));
+    const card = cards[cardIndex];
     if (!card) return false;
     const selectEl = card.querySelector<HTMLElement>(".flight-class-select-fare-text");
     if (selectEl) {
@@ -833,24 +879,28 @@ async function selectCheapestFare(
     }
     card.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
     return true;
-  }, cheaperBand);
+  }, winner.index);
 
   if (!clicked) {
-    throw new Error(`"${cheaperBand}" fare card not found on leg ${legIndex}`);
+    throw new Error(`"${winner.name}" fare card not found on leg ${legIndex}`);
   }
 
   // Best-effort confirmation — whichever signal this deployment actually
   // uses (Enugu's toggled span, or United's "panel-active" class on the
   // card itself). Non-blocking either way: a deployment using neither just
   // times out and proceeds, same as before.
+  const winnerCard = panel.locator('[class*="classband-panel"]').nth(winner.index);
   await Promise.race([
-    panel.locator(`[data-classband="${cheaperBand}"] .flight-class-selected-text`).waitFor({ state: "visible", timeout: 8000 }),
-    panel.locator(`[data-classband="${cheaperBand}"].panel-active`).waitFor({ state: "attached", timeout: 8000 }),
+    winnerCard.locator(".flight-class-selected-text").waitFor({ state: "visible", timeout: 8000 }),
+    // United's mechanism marks the card ITSELF active (not a descendant) —
+    // checked for presence anywhere on the panel rather than pinned to
+    // winner.index, since this is a best-effort, non-blocking signal only.
+    panel.locator('[class*="classband-panel"].panel-active').first().waitFor({ state: "attached", timeout: 8000 }),
   ]).catch(() => {
     /* best-effort confirmation — some deployments may not signal selection this way */
   });
 
-  return { band: cheaperBand, amount: cheapest!.amount };
+  return { band: winner.name, amount: winner.amount };
 }
 
 async function clickNext(

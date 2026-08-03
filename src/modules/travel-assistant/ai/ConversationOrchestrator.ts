@@ -9,8 +9,7 @@ import { startBookOnHold } from "../booking/startBookOnHold";
 import { ENUGU_SUPPORTED_TITLES } from "../booking/vars-platform/VarsBookOnHold";
 import { handleQuery as handleSalesReportQuery } from "../orchestration/SalesReportAssistant";
 import { triggerBalanceUpdate } from "../../../lib/balanceUpdateService";
-import { BookingJobRepository } from "../storage/BookingJobRepository";
-import { connectorServiceClient } from "../../../lib/connectorServiceClient";
+import { toSurnameCase, toTitleCase } from "../nameFormat";
 import type {
   AssistantTurn,
   ConversationSlots,
@@ -42,12 +41,6 @@ export interface OrchestratorOutput {
   // formats and sends the final figures itself (see whatsapp-service's
   // balanceUpdatePoll.ts for the reference implementation).
   balanceUpdateTriggeredAt?: string;
-  // Set when a ticket-issuing run was just triggered for a specific PNR —
-  // the caller polls GET /api/assistant/issue-ticket/status?jobId=<this>
-  // until ticketStatus is terminal (ISSUED, or back to BOOKED with an
-  // issueError on failure).
-  issueTicketJobId?: string;
-  issueTicketPnr?: string;
 }
 
 export const EMPTY_SLOTS: ConversationSlots = {
@@ -151,17 +144,16 @@ const REFERENCE_ID_PATTERN = /^TDIS-\d{8}-\d{3}$/i;
 // behaves identically every single time regardless of classification
 // variance. Fires a real sync across every airline connector (not just a
 // read of whatever's currently stored) — see lib/balanceUpdateService.
-const BALANCE_UPDATE_PATTERN = /\bbalance\s*update\b/i;
+// Requires "update" alongside "bal"/"balance" — bare "balance" (e.g. "what's
+// my balance") must NOT trigger a sync, per explicit product direction.
+const BALANCE_UPDATE_PATTERN = /\bbal(?:ance)?\s*update\b/i;
 
-// Deterministic ticket-issuing command — "Issue ABC123", "Pay ABC123",
-// "Issue Ticket ABC123", "issue ticket for ABC123" all match, capturing the
-// PNR. Matched directly (never through the LLM) so it behaves identically
-// every time and — critically — so the PNR always comes from what the user
-// actually typed, never inferred from "the most recent booking." A client
-// (WhatsApp/web) offering a numbered "1. Issue Now" option after a booking
-// confirmation rewrites that reply into this exact phrasing (with the PNR
-// it already knows from its own poll) before it ever reaches here.
-const ISSUE_TICKET_COMMAND_PATTERN = /\b(?:issue(?:\s+ticket)?|pay)(?:\s+(?:ticket\s+)?for)?\s+([A-Z0-9]{5,8})\b/i;
+// Deterministic "abandon this booking" command — matched directly (never
+// through the LLM) so it behaves identically every time regardless of
+// classification variance, same reasoning as BALANCE_UPDATE_PATTERN above.
+// Clears every route/passenger slot so the next message starts a
+// completely fresh booking, no leftover info carried over.
+const CLOSE_SESSION_PATTERN = /\b(?:close\s+session|cancel(?:\s+booking)?|start\s+over|reset\s+booking)\b/i;
 
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
   const session = await ChatMemoryRepository.getOrCreateSession(
@@ -192,7 +184,7 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
     try {
       const { triggeredAt } = await triggerBalanceUpdate();
-      const reply = "🔄 Syncing every airline now — I'll have fresh balances for you in a moment.";
+      const reply = "Copy";
       await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
       return { reply, balanceUpdateTriggeredAt: triggeredAt };
     } catch (err) {
@@ -204,42 +196,15 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     }
   }
 
-  const issueMatch = trimmed.match(ISSUE_TICKET_COMMAND_PATTERN);
-  if (issueMatch) {
-    const pnr = issueMatch[1].toUpperCase();
+  const closeSessionMatch = CLOSE_SESSION_PATTERN.test(trimmed);
+  if (closeSessionMatch) {
     await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
-    const job = await BookingJobRepository.findByPnr(pnr);
-    if (!job) {
-      const reply = `I couldn't find a booking with PNR ${pnr} — double-check the reference?`;
-      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-      return { reply };
-    }
-    if (job.ticketStatus === "ISSUED") {
-      const reply = `PNR ${pnr} is already issued — nothing further to do.`;
-      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-      return { reply };
-    }
-    if (job.ticketStatus === "ISSUING") {
-      const reply = `PNR ${pnr} is already being issued — I'll let you know as soon as it's done.`;
-      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-      return { reply };
-    }
-    try {
-      const { ok, status, body } = await connectorServiceClient.issueTicket(job.id);
-      if (!ok) {
-        const reason = (body as { error?: string })?.error || `connector-service returned ${status}`;
-        throw new Error(reason);
-      }
-      const reply = `On it — paying and issuing the ticket for PNR ${pnr} now. This takes a minute or two; I'll confirm right here.`;
-      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-      return { reply, issueTicketJobId: job.id, issueTicketPnr: pnr };
-    } catch (err) {
-      console.error(`[travel-assistant] issue-ticket trigger failed for PNR ${pnr}:`, err);
-      const reason = err instanceof Error ? err.message : String(err);
-      const reply = `I couldn't start issuing PNR ${pnr} just now — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
-      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-      return { reply };
-    }
+    const slots: ConversationSlots = loadSlots(session);
+    resetBookingSlots(slots);
+    await ChatMemoryRepository.updateSlots(session.id, slots);
+    const reply = "Session closed — cleared, ready for a fresh booking whenever you are.";
+    await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+    return { reply };
   }
 
   const priorMessages = await ChatMemoryRepository.getRecentMessages(session.id, 10);
@@ -536,13 +501,29 @@ async function runIntentDetection(
 // airline's real passenger data. Never done by the LLM (see
 // systemPrompt.ts) — this needs to apply identically every single time,
 // which only code can guarantee.
+// A word typed/spoken back in ALL CAPS (e.g. "ABDULWAHAB Muhammad") is
+// treated as an explicit surname marker — mirrors how the airline's own ID
+// documents print the surname, and lets a user flag the surname regardless
+// of where it falls in the name. Only fires when exactly one such word
+// exists; two or more is ambiguous, so it falls back to the default rule.
+function findCapsSurnameHint(words: string[]): number | null {
+  const capsIndexes = words
+    .map((w, i) => (/^[A-Z]+$/.test(w) && w.length > 1 ? i : -1))
+    .filter((i) => i !== -1);
+  return capsIndexes.length === 1 ? capsIndexes[0] : null;
+}
+
 function splitPassengerName(fullName: string): { firstName: string; lastName: string } {
   const words = fullName.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return { firstName: "", lastName: "" };
-  if (words.length === 1) return { firstName: words[0], lastName: "" };
+  if (words.length === 1) return { firstName: toTitleCase(words[0]), lastName: "" };
+
+  const capsIndex = findCapsSurnameHint(words);
+  const lastName = capsIndex != null ? words[capsIndex] : words[words.length - 1];
+  const firstWords = capsIndex != null ? words.filter((_, i) => i !== capsIndex) : words.slice(0, -1);
   return {
-    firstName: words.slice(0, -1).join(" "),
-    lastName: words[words.length - 1],
+    firstName: toTitleCase(firstWords.join(" ")),
+    lastName: toSurnameCase(lastName),
   };
 }
 
@@ -595,7 +576,13 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   if (e.airline && messageActuallyNamesAirline(rawMessage, e.airline)) {
     slots.airline = e.airline;
   }
-  if (e.cabinClass) slots.cabinClass = e.cabinClass;
+  // Normalized to a controlled value — never stores the LLM's raw free
+  // text verbatim. "Premium Class"/"Premium"/"Business Class"/"Business"
+  // all collapse to the same "PREMIUM" cabin-class preference (see
+  // selectCheapestFare's category mode in VarsBookOnHold.ts, which
+  // compares every Premium Economy/Premium Economy Flex/Business/Business
+  // Flex fare and books the cheapest available one).
+  if (e.cabinClass && /premium|business/i.test(e.cabinClass)) slots.cabinClass = "PREMIUM";
   // Passenger details (only ever populated on a Book-on-Hold turn). Trimmed;
   // blanks are ignored so a later turn can fill a gap without clobbering.
   if (e.passengerTitle?.trim()) slots.passengerTitle = e.passengerTitle.trim();
@@ -748,6 +735,7 @@ function resetRouteSlots(slots: ConversationSlots): void {
   slots.returnDate = null;
   slots.isRoundTrip = false;
   slots.airline = null;
+  slots.cabinClass = null;
 }
 
 // ─── Book-on-Hold ───────────────────────────────────────────────────────
@@ -1377,6 +1365,7 @@ async function handleBookOnHold(
     email: slots.passengerEmail!,
     preferredDepartureTime: slots.selectedDepartureTime,
     preferredReturnTime: slots.selectedReturnTime,
+    cabinClass: slots.cabinClass === "PREMIUM" ? "PREMIUM" : "ECONOMY",
     additionalPassengers: slots.additionalPassengers?.map((p) => ({
       type: p.type,
       title: p.title ?? (p.type === "CHILD" ? "Mstr" : "Mr"),

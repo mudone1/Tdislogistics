@@ -15,8 +15,6 @@ import { bookUnitedNigeriaOnHold } from "../../src/modules/travel-assistant/book
 import { bookRanoAirOnHold } from "../../src/modules/travel-assistant/booking/rano/RanoBookOnHold";
 import { bookXeJetOnHold } from "../../src/modules/travel-assistant/booking/xejet/XeJetBookOnHold";
 import { BookingJobRepository } from "../../src/modules/travel-assistant/storage/BookingJobRepository";
-import { openBookingByPnr, payAndIssueTicket, voidBooking } from "../../src/modules/travel-assistant/booking/vars-platform/VarsIssueTicket";
-import type { VarsAirlineBookingConfig } from "../../src/modules/travel-assistant/booking/vars-platform/VarsBookOnHold";
 import { categorizeBookingError } from "../../src/modules/travel-assistant/booking/categorizeBookingError";
 import { decryptSecret } from "../../src/modules/airline-connectors/services/CredentialService";
 import { UserCredentialRepository } from "../../src/modules/airline-connectors/storage/UserCredentialRepository";
@@ -285,6 +283,7 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
     departureDate: job.departureDate,
     returnDate: job.returnDate ?? undefined,
     fareClassPreference,
+    cabinClass: job.cabinClass,
     preferredDepartureTime: job.preferredDepartureTime ?? undefined,
     preferredReturnTime: job.preferredReturnTime ?? undefined,
     passenger: {
@@ -326,156 +325,6 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
         console.error(`[book-hold] job=${jobId} could not record failure:`, e);
       });
     });
-});
-
-// Airline config for the ticket-issuing flow (Find Booking -> Pay -> Issue) —
-// only Enugu Air is wired up for now, matching booking's own
-// verified-airline scope. Reuses the exact same URLs as EnuguBookOnHold.ts.
-const ISSUE_TICKET_CONFIGS: Partial<Record<string, VarsAirlineBookingConfig>> = {
-  ENUGU: {
-    logTag: "enugu-issue",
-    loginUrl: "https://booking.enuguairlines.com/vars/public/CustomerPanels/AgentLoginBS.aspx",
-    // Confirmed live (real diagnostic dump from a failed run): landing on
-    // agentSearch.aspx (the booking search form — correct for the BOOKING
-    // flow's own establishSession call) has no "Find Booking" nav item on
-    // it at all — that link only exists on the actual Dashboard page. This
-    // was the root cause of every issue-ticket "Record Locator field never
-    // appeared" failure: the automation was never leaving the search form.
-    requirementsUrl: "https://booking.enuguairlines.com/VARS/Public/b/Dashboard.aspx",
-    mmbUrl: "https://booking.enuguairlines.com/vars/public/CustomerPanels/MmbLoginBS.aspx",
-    airlineLabel: "Enugu Air",
-  },
-};
-
-// Job-based ticket issuing — mirrors book-hold's shape (create-and-poll via
-// the same BookingJob row) but drives a completely different automation:
-// find the booking by its PNR, verify the portal shows that EXACT PNR
-// (mandatory — never proceeds to payment on an unverified page), pay, and
-// report back whatever success signal was found. A failed attempt leaves
-// ticketStatus back at BOOKED (not a new failure state) so it can be
-// retried — the hold itself is still valid even if a payment attempt errors.
-app.post("/internal/travel-assistant/issue-ticket", async (req, res) => {
-  const jobId = req.body?.jobId;
-  if (!jobId || typeof jobId !== "string") {
-    res.status(400).json({ error: "jobId is required" });
-    return;
-  }
-
-  const job = await BookingJobRepository.findById(jobId);
-  if (!job) {
-    res.status(404).json({ error: `No booking job ${jobId}` });
-    return;
-  }
-  if (!job.pnr) {
-    res.status(409).json({ error: `Job ${jobId} has no PNR yet — the hold itself hasn't succeeded` });
-    return;
-  }
-  if (job.ticketStatus === "ISSUED") {
-    res.status(409).json({ error: `PNR ${job.pnr} is already issued`, ticketStatus: job.ticketStatus });
-    return;
-  }
-  if (job.ticketStatus === "ISSUING") {
-    res.status(409).json({ error: `PNR ${job.pnr} is already being issued`, ticketStatus: job.ticketStatus });
-    return;
-  }
-
-  const config = ISSUE_TICKET_CONFIGS[job.airline];
-  if (!config) {
-    const message = `"${job.airline}" has no ticket-issuing automation implemented`;
-    await BookingJobRepository.markIssueFailed(jobId, message);
-    res.status(404).json({ error: message });
-    return;
-  }
-
-  const settings = await AirlineWalletRepository.getSettings(job.airline);
-  if (!settings?.encryptedUsername || !settings.encryptedPassword) {
-    const message = `No credentials configured for ${job.airline}`;
-    await BookingJobRepository.markIssueFailed(jobId, message);
-    res.status(502).json({ error: message });
-    return;
-  }
-  const credentials = {
-    username: decryptSecret(settings.encryptedUsername),
-    password: decryptSecret(settings.encryptedPassword),
-  };
-
-  console.log(`[issue-ticket] starting job=${jobId} PNR=${job.pnr}`);
-  await BookingJobRepository.markIssuing(jobId);
-  const startedAt = Date.now();
-  res.status(202).json({ accepted: true, jobId, pnr: job.pnr });
-
-  const pnr = job.pnr;
-  (async () => {
-    const { browser, page } = await openBookingByPnr(credentials, pnr, config);
-    try {
-      const result = await payAndIssueTicket(page, pnr, credentials.password, config.logTag);
-      const durationMs = Date.now() - startedAt;
-      console.log(`[issue-ticket] job=${jobId} PNR=${pnr} ISSUED in ${durationMs}ms`);
-      await BookingJobRepository.markIssued(jobId, {
-        ticketNumber: result.ticketNumber,
-        totalPayable: result.amountPaid,
-        currency: result.currency,
-        screenshot: result.screenshot,
-      });
-    } finally {
-      await browser.close().catch(() => {});
-    }
-  })().catch(async (err) => {
-    const durationMs = Date.now() - startedAt;
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[issue-ticket] job=${jobId} PNR=${pnr} FAILED after ${durationMs}ms:`, message);
-    await BookingJobRepository.markIssueFailed(jobId, message).catch((e) => {
-      console.error(`[issue-ticket] job=${jobId} could not record failure:`, e);
-    });
-  });
-});
-
-// Best-effort void, callable independently of the issue flow (e.g. staff
-// voiding a mistaken or unwanted ticket). Same PNR-lookup-by-jobId shape.
-app.post("/internal/travel-assistant/void-booking", async (req, res) => {
-  const jobId = req.body?.jobId;
-  if (!jobId || typeof jobId !== "string") {
-    res.status(400).json({ error: "jobId is required" });
-    return;
-  }
-
-  const job = await BookingJobRepository.findById(jobId);
-  if (!job?.pnr) {
-    res.status(404).json({ error: `No booking job ${jobId} with a PNR` });
-    return;
-  }
-
-  const config = ISSUE_TICKET_CONFIGS[job.airline];
-  if (!config) {
-    res.status(404).json({ error: `"${job.airline}" has no void-booking automation implemented` });
-    return;
-  }
-  const settings = await AirlineWalletRepository.getSettings(job.airline);
-  if (!settings?.encryptedUsername || !settings.encryptedPassword) {
-    res.status(502).json({ error: `No credentials configured for ${job.airline}` });
-    return;
-  }
-  const credentials = {
-    username: decryptSecret(settings.encryptedUsername),
-    password: decryptSecret(settings.encryptedPassword),
-  };
-
-  try {
-    const { browser, page } = await openBookingByPnr(credentials, job.pnr, config);
-    try {
-      const result = await voidBooking(page, job.pnr, config.logTag);
-      if (result.voided) {
-        await BookingJobRepository.markVoided(jobId);
-      }
-      res.json({ pnr: result.pnr, voided: result.voided });
-    } finally {
-      await browser.close().catch(() => {});
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[void-booking] job=${jobId} PNR=${job.pnr} FAILED:`, message);
-    res.status(500).json({ error: message });
-  }
 });
 
 const PORT = Number(process.env.PORT) || 4100;

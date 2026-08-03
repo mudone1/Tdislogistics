@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { parseIdDocumentImage } from "@/modules/travel-assistant/passport/PassportParser";
 import { ChatMemoryRepository } from "@/modules/travel-assistant/storage/ChatMemoryRepository";
 import { loadSlots } from "@/modules/travel-assistant/ai/ConversationOrchestrator";
+import { toSurnameCase, toTitleCase } from "@/modules/travel-assistant/nameFormat";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -48,18 +49,25 @@ export async function POST(req: Request) {
       return NextResponse.json({ isIdDocument: true, readable: false, reply });
     }
 
+    // Surname ALL CAPS, given name(s) Title Case — matches how the ID
+    // itself prints the name, e.g. "ABDULWAHAB Muhammad".
+    const formattedFirstName = result.firstName?.trim() ? toTitleCase(result.firstName) : null;
+    const formattedLastName = result.lastName?.trim() ? toSurnameCase(result.lastName) : null;
+
     const slots = loadSlots(session);
-    if (result.firstName?.trim()) slots.passengerFirstName = result.firstName.trim();
-    if (result.lastName?.trim()) slots.passengerLastName = result.lastName.trim();
+    if (formattedFirstName) slots.passengerFirstName = formattedFirstName;
+    if (formattedLastName) slots.passengerLastName = formattedLastName;
     if (result.dateOfBirth) slots.passengerDateOfBirth = result.dateOfBirth;
     await ChatMemoryRepository.updateSlots(session.id, slots);
 
-    // Just the name, no labels — e.g. "Muhammed, Abdulwahab". Date of birth
-    // is still captured into slots above (for booking reuse) but never
-    // shown in the reply. Falls back to fullName when either half is
-    // missing (e.g. a single-word name with no split).
+    // Just the name, no labels — surname first, e.g. "ABDULWAHAB Muhammad".
+    // Date of birth is still captured into slots above (for booking reuse)
+    // but never shown in the reply. Falls back to fullName when either
+    // half is missing (e.g. a single-word name with no split).
     const reply =
-      result.firstName && result.lastName ? `${result.firstName}, ${result.lastName}` : result.fullName ?? "";
+      formattedFirstName && formattedLastName
+        ? `${formattedLastName} ${formattedFirstName}`
+        : result.fullName ?? "";
     await ChatMemoryRepository.appendMessage(session.id, "USER", "[ID image uploaded]");
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
     return NextResponse.json({ isIdDocument: true, readable: true, reply });
