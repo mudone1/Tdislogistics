@@ -52,9 +52,23 @@ function str(v: unknown): string | null {
   return s.length > 0 ? s : null;
 }
 
+// A round-trip (or multi-leg) booking lists the SAME passenger once per
+// leg — confirmed live: a 2-leg round trip returned "SEYI ADEKUNLE" twice.
+// Dedupe case/whitespace-insensitively so a shared PNR with one traveller
+// on multiple legs still returns just the one name, while a booking with
+// genuinely different passengers keeps every distinct one.
 function strArray(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
-  return v.map((item) => str(item)).filter((s): s is string => s != null);
+  const names = v.map((item) => str(item)).filter((s): s is string => s != null);
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const name of names) {
+    const key = name.toLowerCase().replace(/\s+/g, " ").trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(name);
+  }
+  return deduped;
 }
 
 const NOT_A_TICKET: TicketParseResult = {
