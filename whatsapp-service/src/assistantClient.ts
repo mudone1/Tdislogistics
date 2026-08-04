@@ -62,6 +62,37 @@ export async function sendPassportImage(
   return (await res.json()) as PassportResponse;
 }
 
+export interface DocumentResponse {
+  kind: "ID" | "TICKET" | "NONE";
+  readable?: boolean;
+  reply?: string;
+}
+
+// Combined ID-card + airline-ticket endpoint — see DocumentParser.ts.
+// checkTicket controls whether the server even attempts the (extra) ticket
+// vision call, per the private/group gating rules in imageHandler.ts.
+export async function sendDocumentImage(
+  sessionKey: string,
+  displayName: string | null,
+  buffer: Buffer,
+  mimeType: string,
+  checkTicket: boolean
+): Promise<DocumentResponse> {
+  const form = new FormData();
+  form.set("sessionKey", sessionKey);
+  if (displayName) form.set("displayName", displayName);
+  form.set("isAuthenticated", "false");
+  form.set("checkTicket", checkTicket ? "true" : "false");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see sendPassportImage above
+  form.append("file", new Blob([buffer as any], { type: mimeType }), "document.jpg");
+
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/document`, { method: "POST", body: form });
+  if (!res.ok) {
+    throw new Error(`Document API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as DocumentResponse;
+}
+
 export interface AdditionalPassenger {
   type?: "ADULT" | "CHILD" | "INFANT";
   title: string;
