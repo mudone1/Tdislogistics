@@ -82,10 +82,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ kind: "TICKET", readable: false, reply });
     }
 
-    const reply = `Passenger Name: ${ticket.passengerFullName}\nPNR: ${ticket.pnr}`;
+    // One "Passenger Name:" line per passenger on the booking (a single PNR
+    // routinely covers several travelling together — see the screenshot
+    // that prompted this), then the shared PNR once at the end.
+    const reply = [...ticket.passengerNames.map((name) => `Passenger Name: ${name}`), `PNR: ${ticket.pnr}`].join("\n");
     await ChatMemoryRepository.appendMessage(session.id, "USER", "[ticket image uploaded]");
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-    return NextResponse.json({ kind: "TICKET", readable: true, reply, passengerFullName: ticket.passengerFullName, pnr: ticket.pnr });
+    return NextResponse.json({ kind: "TICKET", readable: true, reply, passengerNames: ticket.passengerNames, pnr: ticket.pnr });
   } catch (err) {
     console.error("[assistant/document] failed:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

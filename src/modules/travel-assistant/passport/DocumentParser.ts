@@ -22,7 +22,7 @@ export async function parseUnknownDocumentImage(
     parseIdDocumentImage(buffer, mimeType),
     opts.checkTicket
       ? parseTicketImage(buffer, mimeType)
-      : Promise.resolve<TicketParseResult>({ isTicket: false, readable: false, passengerFullName: null, pnr: null }),
+      : Promise.resolve<TicketParseResult>({ isTicket: false, readable: false, passengerNames: [], pnr: null }),
   ]);
 
   if (id.isIdDocument) return { kind: "ID", id };
