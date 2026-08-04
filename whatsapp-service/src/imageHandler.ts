@@ -5,11 +5,15 @@ import type { MessageSender } from "./messageHandler";
 // Matches a whole message/caption that IS the command — not just contains
 // it somewhere — so an unrelated sentence that happens to include the word
 // "extract" doesn't accidentally trigger this. "X" is intentionally
-// single-letter and exact-match only, per spec's own examples.
+// single-letter and exact-match only, per spec's own examples. The `i` flag
+// already makes this case-insensitive (X/x both match) — the trailing
+// punctuation strip below handles the real-world miss: a phone keyboard's
+// auto-capitalize+auto-punctuate can turn a standalone "X" into "X." since
+// it looks like a sentence, which a bare `$` anchor would reject.
 const EXTRACT_COMMAND_PATTERN = /^(extract|x|use this name)$/i;
 
 export function isExtractCommand(text: string): boolean {
-  return EXTRACT_COMMAND_PATTERN.test(text.trim());
+  return EXTRACT_COMMAND_PATTERN.test(text.trim().replace(/[.!?]+$/, ""));
 }
 
 export interface IncomingImage {

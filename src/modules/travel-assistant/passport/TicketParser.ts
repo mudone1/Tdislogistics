@@ -15,7 +15,9 @@ export interface TicketParseResult {
 // failed" the same way PassportParser's readable flag does for IDs.
 const EXTRACTION_PROMPT = `You are looking at a photo, most likely a screenshot of an airline booking/ticket confirmation.
 
-Determine whether it is an ISSUED AIRLINE TICKET or BOOKING CONFIRMATION belonging to a passenger — it must clearly show BOTH a full passenger name AND a PNR / booking reference / record locator (a short alphanumeric code, typically 5-8 characters, sometimes labeled "PNR", "Booking Reference", "Reservation Code", or similar).
+Determine whether it is an ISSUED AIRLINE TICKET or BOOKING/RESERVATION CONFIRMATION belonging to a passenger — it must clearly show BOTH a full passenger name AND a PNR / booking reference / record locator (a short alphanumeric code, typically 5-8 characters, sometimes labeled "PNR", "Booking Reference", "Reservation Code", or similar).
+
+This includes NOT JUST a classic e-ticket/boarding-pass design — it very often looks like a screenshot of a booking engine's own webpage, e.g. a green-branded "Manage My Booking" page (Enugu Air and similar carriers on the shared VARS/Videcom booking platform) showing the PNR in large text near the top, a "Manage My Booking" heading with the PNR repeated beside it, flight route/date/time, a passenger row (name, "Adult"/"Child", check-in status), and possibly a "TTL Payment Instructions" / "Outstanding payment" / "Payment Summary" section below — that whole page counts as a ticket/booking confirmation for this purpose (it doesn't need to already be paid/issued — a held booking with a visible PNR and passenger name still counts).
 
 It is NOT a ticket for this purpose if:
 - It's a government-issued photo ID card (passport, National ID, driver's license, voter's card) — that's a different document type, handled elsewhere.
