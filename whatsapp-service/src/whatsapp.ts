@@ -7,7 +7,8 @@ import makeWASocket, {
 import qrcode from "qrcode-terminal";
 import P from "pino";
 import { handleIncomingMessage, type IncomingMessage } from "./messageHandler";
-import { handleIncomingImage } from "./imageHandler";
+import { handleIncomingImage, isExtractCommand } from "./imageHandler";
+import { getLastImage } from "./lastImageCache";
 
 // Persisted WhatsApp session credentials — see README for why this must
 // survive restarts. Configurable so a Railway (or similar) deployment can
@@ -95,17 +96,25 @@ export async function connectWhatsApp(): Promise<void> {
         },
       };
 
+      const isGroup = chatId.endsWith("@g.us");
+
       // Passport photos need no @tdisbot mention even in a group (per
       // product decision — see imageHandler.ts), so this branch runs
       // BEFORE the group mention gate that guards the text branch below.
+      // A caption of Extract/X/"use this name" on the image itself is how
+      // a group chat opts a ticket screenshot into extraction (see
+      // imageHandler.ts's checkTicket gating).
       if (m.message.imageMessage) {
         const buffer = await downloadMediaMessage(m, "buffer", {});
+        const caption = m.message.imageMessage.caption ?? "";
         await handleIncomingImage(
           {
             chatId,
+            isGroup,
             senderName: m.pushName ?? null,
             buffer,
             mimeType: m.message.imageMessage.mimetype || "image/jpeg",
+            hasExplicitCommand: isExtractCommand(caption),
           },
           sender
         ).catch((err) => console.error(`[whatsapp] handling image from ${chatId} failed:`, err));
@@ -115,9 +124,54 @@ export async function connectWhatsApp(): Promise<void> {
       const text = m.message.conversation || m.message.extendedTextMessage?.text || "";
       if (!text.trim()) continue; // non-text, non-image message (audio, etc.) — not handled
 
+      // Extract/X/"use this name" sent as its OWN message (not a caption)
+      // targets a previously-sent ticket screenshot — a real WhatsApp
+      // reply-to-the-image when there is one (works in groups, the only
+      // path spec allows there since it's an explicit, unambiguous target),
+      // else the most recently seen image in THIS chat (private chats
+      // only — a group has multiple people's images in flight, so falling
+      // back to "whichever was most recent" there could grab the wrong
+      // person's screenshot). Bypasses the group @tdisbot mention gate
+      // entirely, same as image messages already do above.
+      if (isExtractCommand(text)) {
+        const quotedImage = m.message.extendedTextMessage?.contextInfo?.quotedMessage?.imageMessage;
+        let buffer: Buffer | null = null;
+        let mimeType = "image/jpeg";
+
+        if (quotedImage) {
+          const contextInfo = m.message.extendedTextMessage!.contextInfo!;
+          const quotedMsg = {
+            key: {
+              remoteJid: chatId,
+              id: contextInfo.stanzaId ?? undefined,
+              participant: contextInfo.participant ?? undefined,
+            },
+            message: contextInfo.quotedMessage ?? undefined,
+          };
+          buffer = await downloadMediaMessage(quotedMsg as never, "buffer", {}).catch(() => null);
+          mimeType = quotedImage.mimetype || "image/jpeg";
+        } else if (!isGroup) {
+          const cached = getLastImage(chatId);
+          if (cached) {
+            buffer = cached.buffer;
+            mimeType = cached.mimeType;
+          }
+        }
+
+        if (buffer) {
+          await handleIncomingImage(
+            { chatId, isGroup, senderName: m.pushName ?? null, buffer, mimeType, hasExplicitCommand: true },
+            sender
+          ).catch((err) => console.error(`[whatsapp] handling extract command from ${chatId} failed:`, err));
+          continue;
+        }
+        // No image to act on (nothing cached / not replying to one) — fall
+        // through and let it be handled as an ordinary chat message.
+      }
+
       const incoming: IncomingMessage = {
         chatId,
-        isGroup: chatId.endsWith("@g.us"),
+        isGroup,
         senderName: m.pushName ?? null,
         text,
       };
