@@ -1528,6 +1528,18 @@ async function callSearchWithRetry(
   return callSearch(airline, origin, destination, date);
 }
 
+// One airline's search having no ceiling of its own meant a single
+// hung/slow carrier (a genuinely flaky external portal, confirmed live
+// more than once) could drag the ENTIRE search past Vercel's 60s function
+// limit — searchAllAirlines already isolates a failed airline gracefully
+// via Promise.allSettled, but only if that airline actually settles.
+// 25s leaves real headroom under the 60s ceiling even for the round-trip
+// path (2 legs x up to 4 airlines, all concurrent) — a carrier this slow
+// wasn't going to return usably fast anyway, so failing it fast and
+// letting the others (and the whole quote) still come back is strictly
+// better than one slow carrier taking the whole reply down with it.
+const PER_AIRLINE_SEARCH_TIMEOUT_MS = 25000;
+
 async function callSearch(
   airline: string,
   origin: string,
@@ -1541,6 +1553,7 @@ async function callSearch(
       headers: { "content-type": "application/json", "x-internal-api-key": API_KEY! },
       body: JSON.stringify({ origin, destination, date, airline }),
       cache: "no-store",
+      signal: AbortSignal.timeout(PER_AIRLINE_SEARCH_TIMEOUT_MS),
     });
 
     let data: (FlightSearchResult & { error?: string; stage?: string }) | null = null;
@@ -1560,14 +1573,23 @@ async function callSearch(
     if (!res.ok && data && !data.error) return { ...data, error: `HTTP ${res.status}` };
     return data as FlightSearchResult & { error?: string };
   } catch (err) {
-    // fetch() itself threw — network failure, DNS, connector-service down, etc.
+    // fetch() itself threw — network failure, DNS, connector-service down,
+    // or (AbortError, name-checked so the message is actually informative
+    // instead of a generic "This operation was aborted") the per-airline
+    // timeout above firing on a genuinely hung/slow carrier.
     const durationMs = Date.now() - startedAt;
+    const isTimeout = err instanceof Error && err.name === "TimeoutError";
+    const message = isTimeout
+      ? `timed out after ${PER_AIRLINE_SEARCH_TIMEOUT_MS / 1000}s`
+      : err instanceof Error
+        ? err.message
+        : String(err);
     console.error(`[travel-assistant] ${airline} fetch failed after ${durationMs}ms:`, err);
     return {
       query: { origin, destination, date },
       options: [],
       searchedAt: new Date().toISOString(),
-      error: err instanceof Error ? err.message : String(err),
+      error: message,
     };
   }
 }
