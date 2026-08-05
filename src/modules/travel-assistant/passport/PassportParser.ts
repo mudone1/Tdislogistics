@@ -27,18 +27,19 @@ const EXTRACTION_PROMPT = `You are looking at a photo. Determine whether it is a
 
 It is NOT an ID document if it's a screenshot, invoice, report, ticket, boarding pass, or random unrelated photo — even if it happens to have a person's name printed on it. This explicitly includes any bank transfer receipt, payment confirmation, transaction receipt, or mobile-money receipt (Zenith, OPay, First Bank, or any other bank/fintech) — these always show a sender/beneficiary name and can look superficially similar to an ID, but they are financial records, never an identity document. If it is NOT an ID document, return exactly: {"isIdDocument": false}
 
-If it IS an ID document, extract:
+If it IS an ID document, extract using the document's own STRUCTURE — read whichever field is printed/labeled "Surname" and whichever is printed/labeled "Given Names" (or the MRZ's two equivalent zones) SEPARATELY, exactly as segmented on the document. Never just grab the biggest/most prominent text as the name.
 - "readable": true if the person's full name is clearly legible, false otherwise.
 - "fullName": the person's full name exactly as printed (in natural reading order), preserving exact spelling.
-- "firstName": the given name(s) only.
+- "firstName": the given name(s) ONLY — must NOT repeat, include, or start with the surname/lastName value in any form.
 - "lastName": the surname only.
 - "dateOfBirth": the date of birth as "YYYY-MM-DD" if this ID shows one and it's legible, otherwise null. Not every ID type shows a date of birth — that's fine, just use null.
 
 Rules:
 - A real ID document is issued BY A GOVERNMENT and has a PHOTO of the person's face printed on it. If there's no face photo and no government issuer, it is not an ID document — a bank logo, "Transaction Receipt"/"Successful"/an amount in Naira/a reference or session ID are all strong signals it's a payment receipt, not an ID, even without a face photo present to rule it out by.
 - For a passport, prefer the MRZ (the two machine-readable OCR-B lines at the bottom of the bio page) for name/DOB when visible, since it's a standardized, reliably-readable fixed format — but if it disagrees with the printed name fields (e.g. truncation, hyphenation), the printed fields are authoritative for exact spelling.
+- Double-check before answering: "firstName" must not contain the word(s) already in "lastName" — if you notice the surname bleeding into firstName, remove it before responding.
 - Never invent or guess a value — if the name cannot be read, use null for fullName/firstName/lastName and set "readable" to false.
-- Return ONLY a JSON object, e.g.: {"isIdDocument": true, "readable": true, "fullName": "John Michael Doe", "firstName": "John Michael", "lastName": "Doe", "dateOfBirth": "1992-05-12"}`;
+- Return ONLY a JSON object, e.g.: {"isIdDocument": true, "readable": true, "fullName": "Adesanya Adenrele Muideen", "firstName": "Adenrele Muideen", "lastName": "Adesanya", "dateOfBirth": "1992-05-12"}`;
 
 interface VisionResult {
   isIdDocument?: unknown;
@@ -56,6 +57,24 @@ function str(v: unknown): string | null {
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Confirmed live: the vision model can echo the surname as a LEADING word
+// of firstName too (e.g. lastName "ADESANYA", firstName "ADESANYA
+// ADENRELE" instead of just "ADENRELE MUIDEEN") — assembled downstream as
+// "SURNAME firstName", that duplication becomes "ADESANYA ADESANYA
+// ADENRELE". Prompt-only guidance isn't reliable enough on its own (same
+// reason every other extraction rule in this codebase gets a code-side
+// check), so any leading word(s) of firstName that duplicate lastName are
+// stripped here, deterministically, every time.
+function stripDuplicateSurnameFromFirstName(firstName: string, lastName: string | null): string {
+  if (!lastName) return firstName;
+  const lastWords = new Set(lastName.trim().toLowerCase().split(/\s+/).filter(Boolean));
+  let words = firstName.trim().split(/\s+/).filter(Boolean);
+  while (words.length > 1 && lastWords.has(words[0].toLowerCase())) {
+    words = words.slice(1);
+  }
+  return words.join(" ");
+}
 
 const NOT_AN_ID_DOCUMENT: IdDocumentParseResult = {
   isIdDocument: false,
@@ -91,8 +110,9 @@ export async function parseIdDocumentImage(buffer: Buffer, mimeType: string): Pr
   const dateOfBirthRaw = str(parsed.dateOfBirth);
   const dateOfBirth = dateOfBirthRaw && ISO_DATE_RE.test(dateOfBirthRaw) ? dateOfBirthRaw : null;
   const fullName = str(parsed.fullName);
-  const firstName = str(parsed.firstName);
   const lastName = str(parsed.lastName);
+  const firstNameRaw = str(parsed.firstName);
+  const firstName = firstNameRaw ? stripDuplicateSurnameFromFirstName(firstNameRaw, lastName) : firstNameRaw;
 
   // Readability hinges on the name alone — not every ID type carries a
   // date of birth, and the user only needs the name reliably extracted.

@@ -83,11 +83,19 @@ EXPLICIT TRIGGER PHRASES: "book me", "hold", "place a hold", "reserve", "book on
 EXTRACTION PRIORITY FOR BOOK_ON_HOLD:
 ALWAYS extract origin, destination, date, and passenger fields from the current message if present, even if they're in a single sentence. These are PRIMARY for booking and should NEVER be left null if the user provided them.
 
-Extract route/date fields from THIS message:
+Extract route/date fields from THIS message. Field ORDER in the message must never affect extraction — a date written before the route, or a name written before the route, is exactly as valid as the reverse order. Identify each field type first (which token is a route, which is a date, which is a name/phone/email), THEN decide trip type from what you found — never from position.
+
 - origin: Nigerian airport IATA code or city name (Abuja→ABV, Lagos→LOS, Enugu→ENU, etc.) — case-insensitive
 - destination: Nigerian airport IATA code or city name — case-insensitive
-- date: Resolve relative dates ("tomorrow", "next Friday", "Aug 15") against today's date. Format as YYYY-MM-DD.
-- returnDate: If user mentions a return date, extract it the same way
+- date: Resolve relative dates ("tomorrow", "next Friday", "Aug 15") against today's date. Format as YYYY-MM-DD. If the message gives only ONE travel date total, it ALWAYS goes here as "date", never as "returnDate" — see the trip-type rules below.
+- returnDate: Only set this when the message clearly gives a SECOND, later travel date (or explicitly says "return"/"returning"/"round trip"), meaning a real return leg. Format the same way.
+
+TRIP-TYPE RULES (decide by counting what's actually in the message, never by field order):
+1. One route + one date → ONE WAY. The single date is "date"; "returnDate" stays null.
+2. One route + two dates → ROUND TRIP (same route, out on the earlier date, back on the later one).
+3. Two routes + two dates → ROUND TRIP (an outbound leg and a return leg, possibly reversed routes).
+4. The user explicitly writes "return", "returning", "round trip", or "return ticket" → ROUND TRIP, even if only one date (or none yet) has been given so far — set returnDate to whatever return date IS given, or leave it null if not given yet (the app will ask for it).
+5. If only ONE travel date exists anywhere in the message and there's no explicit return/round-trip wording, NEVER assume a round trip — that one date is the outbound "date", full stop.
 
 Extract the passenger fields whenever the user gives them:
 - passengerTitle: Extract WHATEVER honorific/title precedes the name, even ones an airline might not officially support — Mr, Mrs, Ms, Miss, Dr, Prof, Rev, Mstr, Chief, Honourable, Barrister, Pastor, Apostle, Elder, Alhaji, Alhaja, Otunba, Engineer, Architect, or any other prefix a Nigerian customer might use. Do NOT decide whether it's a "real" airline title — that's handled downstream. Only leave null if no title/honorific of any kind is present. Never invent or default one yourself.
