@@ -76,19 +76,34 @@ export async function POST(req: Request) {
     // result.kind === "TICKET"
     const { ticket } = result;
     if (!ticket.readable) {
-      const reply = "I can see that's a ticket, but the name or PNR isn't clear enough to read — could you send a clearer screenshot?";
+      const reply = "I can see that's a ticket, but I couldn't confidently read the passenger name and a PNR/ticket number — could you send a clearer screenshot?";
       await ChatMemoryRepository.appendMessage(session.id, "USER", "[ticket image uploaded]");
       await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
       return NextResponse.json({ kind: "TICKET", readable: false, reply });
     }
 
     // One "Passenger Name:" line per passenger on the booking (a single PNR
-    // routinely covers several travelling together — see the screenshot
-    // that prompted this), then the shared PNR once at the end.
-    const reply = [...ticket.passengerNames.map((name) => `Passenger Name: ${name}`), `PNR: ${ticket.pnr}`].join("\n");
+    // routinely covers several travelling together), then PNR — "Not Found"
+    // rather than omitted when only a ticket number was legible, so it's
+    // clear that's a deliberate result and not a dropped field — and a
+    // Ticket Number line only when one was actually found (most tickets
+    // won't show a validated one alongside a real PNR).
+    const lines = [
+      ...ticket.passengerNames.map((name) => `Passenger Name: ${name}`),
+      `PNR: ${ticket.pnr ?? "Not Found"}`,
+    ];
+    if (ticket.ticketNumber) lines.push(`Ticket Number: ${ticket.ticketNumber}`);
+    const reply = lines.join("\n");
     await ChatMemoryRepository.appendMessage(session.id, "USER", "[ticket image uploaded]");
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
-    return NextResponse.json({ kind: "TICKET", readable: true, reply, passengerNames: ticket.passengerNames, pnr: ticket.pnr });
+    return NextResponse.json({
+      kind: "TICKET",
+      readable: true,
+      reply,
+      passengerNames: ticket.passengerNames,
+      pnr: ticket.pnr,
+      ticketNumber: ticket.ticketNumber,
+    });
   } catch (err) {
     console.error("[assistant/document] failed:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

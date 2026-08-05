@@ -558,8 +558,32 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   if (e.origin) slots.origin = e.origin.toUpperCase();
   if (e.destination) slots.destination = e.destination.toUpperCase();
   if (e.date) slots.date = e.date;
+  // Trip-type is decided by what's actually IN this message, never by
+  // field order or the LLM's own returnDate claim on faith — see
+  // countDateExpressions/ROUND_TRIP_KEYWORD_PATTERN above. Rules (product
+  // spec): 1 date ⇒ one-way, 2+ dates ⇒ round trip, explicit
+  // return/round-trip wording ⇒ round trip even before a return date is
+  // known.
+  const messageHasReturnKeyword = ROUND_TRIP_KEYWORD_PATTERN.test(rawMessage);
+  const roundTripSupported = messageHasReturnKeyword || countDateExpressions(rawMessage) >= 2;
   if (e.returnDate) {
-    slots.returnDate = e.returnDate;
+    if (roundTripSupported) {
+      slots.returnDate = e.returnDate;
+      slots.isRoundTrip = true;
+    } else if (!slots.date && !e.date) {
+      // Rule 5 safety net: this message only ever gave ONE date and no
+      // return wording, so the LLM's "returnDate" is really just the
+      // outbound date that got misfiled (the exact field-order bug this
+      // guard exists for) — use it as the date rather than discard real
+      // information the user gave, and don't mark this a round trip.
+      slots.date = e.returnDate;
+    }
+    // else: a lone stray returnDate with an outbound date already known
+    // some other way — drop it rather than guess at a round trip.
+  } else if (messageHasReturnKeyword) {
+    // Round trip stated explicitly but no return date given yet (e.g.
+    // "round trip LOS to ABV on 6 August") — mark it so the app asks for
+    // the return date, without inventing one.
     slots.isRoundTrip = true;
   }
   if (e.adults != null) slots.adults = e.adults;
@@ -740,6 +764,35 @@ function messageActuallyNamesAirline(rawMessage: string, airline: string): boole
 // of trusting the LLM's extraction on faith.
 function messageActuallyRequestsPremiumCabin(rawMessage: string): boolean {
   return /\b(premium|business)\b/i.test(rawMessage);
+}
+
+// Same reproduced-bug shape again: the LLM sometimes set entities.returnDate
+// on a message that only ever gave ONE travel date — e.g. a date arriving
+// before the route instead of after apparently got misread as a return
+// date rather than the outbound one, silently turning a one-way request
+// into a round trip. Per explicit product rules: trip type is decided by
+// counting actual dates/routes in the message and checking for explicit
+// return wording, never by field order or trusting the LLM's own claim.
+const ROUND_TRIP_KEYWORD_PATTERN = /\b(return(?:ing)?|round[\s-]?trip)\b/i;
+
+const MONTH_NAMES = "jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?";
+const DATE_EXPRESSION_PATTERN = new RegExp(
+  `\\b(?:${MONTH_NAMES})\\s+\\d{1,2}(?:st|nd|rd|th)?\\b` + // "August 6th"
+    `|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${MONTH_NAMES})\\b` + // "6th August"
+    `|\\b\\d{4}-\\d{1,2}-\\d{1,2}\\b` + // ISO "2026-08-06"
+    `|\\b\\d{1,2}[/-]\\d{1,2}[/-]\\d{2,4}\\b` + // "06/08/2026"
+    `|\\btomorrow\\b|\\btoday\\b|\\btonight\\b` +
+    `|\\b(?:next|this)\\s+(?:mon|tue|wed|thu|fri|sat|sun)[a-z]*\\b`,
+  "gi"
+);
+
+// Counts distinct DATE-LIKE EXPRESSIONS in the message, not distinct
+// calendar dates — "6 August" and "August 6" mentioned once each still
+// count as 2 if both literally appear, which is fine: the rule this backs
+// (Rule 5 — one date ⇒ never a round trip) only needs to distinguish "one
+// date phrase given" from "two or more given", not de-duplicate values.
+function countDateExpressions(rawMessage: string): number {
+  return (rawMessage.match(DATE_EXPRESSION_PATTERN) ?? []).length;
 }
 
 function resetRouteSlots(slots: ConversationSlots): void {
