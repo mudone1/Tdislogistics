@@ -27,19 +27,19 @@ const EXTRACTION_PROMPT = `You are looking at a photo. Determine whether it is a
 
 It is NOT an ID document if it's a screenshot, invoice, report, ticket, boarding pass, or random unrelated photo — even if it happens to have a person's name printed on it. This explicitly includes any bank transfer receipt, payment confirmation, transaction receipt, or mobile-money receipt (Zenith, OPay, First Bank, or any other bank/fintech) — these always show a sender/beneficiary name and can look superficially similar to an ID, but they are financial records, never an identity document. If it is NOT an ID document, return exactly: {"isIdDocument": false}
 
-If it IS an ID document, extract using the document's own STRUCTURE — read whichever field is printed/labeled "Surname" and whichever is printed/labeled "Given Names" (or the MRZ's two equivalent zones) SEPARATELY, exactly as segmented on the document. Never just grab the biggest/most prominent text as the name.
+If it IS an ID document, extract using the document's own LABELED FIELDS — this is the single most important rule. For a passport specifically: read whichever field is printed "Surname" / "Nom" and whichever is printed "Given Names" / "Prénoms" (or the MRZ's two equivalent zones) SEPARATELY, exactly as segmented on the document, and copy each verbatim in the order printed WITHIN that field. The labels on the document are the source of truth, not your own judgment — never infer, rearrange, or re-sort a name based on word order or what "looks like" a typical surname/given-name pattern. Never assume the LAST word of the Given Names field is actually the surname, and never move a word from Given Names into Surname (or vice versa) just because it seems unusual — a short or unfamiliar-looking surname (e.g. "SUO", "UDO", "YAU") is still exactly what's printed in the Surname field, and must be trusted as-is. Never just grab the biggest/most prominent text as the name either.
 - "readable": true if the person's full name is clearly legible, false otherwise.
-- "fullName": the person's full name exactly as printed (in natural reading order), preserving exact spelling.
-- "firstName": the given name(s) ONLY — must NOT repeat, include, or start with the surname/lastName value in any form.
-- "lastName": the surname only.
+- "fullName": Surname followed by Given Names, in that order, exactly as segmented — e.g. Surname "SUO" + Given Names "GOODNESS IDISEIMOKUMO" → fullName "SUO GOODNESS IDISEIMOKUMO". Never reorder the words within Given Names.
+- "firstName": the given name(s) ONLY, copied verbatim in their printed order — must NOT repeat, include, or start with the surname/lastName value in any form, and must NOT have its own word order changed.
+- "lastName": the surname only, copied verbatim exactly as printed in the Surname field — trust it even if it's short or looks unfamiliar.
 - "dateOfBirth": the date of birth as "YYYY-MM-DD" if this ID shows one and it's legible, otherwise null. Not every ID type shows a date of birth — that's fine, just use null.
 
 Rules:
 - A real ID document is issued BY A GOVERNMENT and has a PHOTO of the person's face printed on it. If there's no face photo and no government issuer, it is not an ID document — a bank logo, "Transaction Receipt"/"Successful"/an amount in Naira/a reference or session ID are all strong signals it's a payment receipt, not an ID, even without a face photo present to rule it out by.
-- For a passport, prefer the MRZ (the two machine-readable OCR-B lines at the bottom of the bio page) for name/DOB when visible, since it's a standardized, reliably-readable fixed format — but if it disagrees with the printed name fields (e.g. truncation, hyphenation), the printed fields are authoritative for exact spelling.
-- Double-check before answering: "firstName" must not contain the word(s) already in "lastName" — if you notice the surname bleeding into firstName, remove it before responding.
+- For a passport, prefer the MRZ (the two machine-readable OCR-B lines at the bottom of the bio page) for name/DOB when visible, since it's a standardized, reliably-readable fixed format — but if it disagrees with the printed name fields (e.g. truncation, hyphenation), the printed fields are authoritative for exact spelling, and the MRZ's own surname/given-names segmentation (before/after the first "<<") must be respected the same way, never re-ordered either.
+- Double-check before answering: "firstName" must not contain the word(s) already in "lastName" — if you notice the surname bleeding into firstName, remove it before responding. Also double-check word order within firstName matches the Given Names field exactly.
 - Never invent or guess a value — if the name cannot be read, use null for fullName/firstName/lastName and set "readable" to false.
-- Return ONLY a JSON object, e.g.: {"isIdDocument": true, "readable": true, "fullName": "Adesanya Adenrele Muideen", "firstName": "Adenrele Muideen", "lastName": "Adesanya", "dateOfBirth": "1992-05-12"}`;
+- Return ONLY a JSON object, e.g.: {"isIdDocument": true, "readable": true, "fullName": "Suo Goodness Idiseimokumo", "firstName": "Goodness Idiseimokumo", "lastName": "Suo", "dateOfBirth": "1992-05-12"}`;
 
 interface VisionResult {
   isIdDocument?: unknown;
