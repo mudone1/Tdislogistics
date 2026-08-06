@@ -717,6 +717,25 @@ model BookingJob {
   @@map("booking_jobs")
 }
 
+// One row per configured Enugu Air booking account (see connector-service's
+// EnuguWorkerPool.ts). Mutual exclusion lives HERE, not just in the pool's
+// in-memory state — Railway's rolling deploys briefly run the OLD and NEW
+// connector-service process at once (confirmed live: this in-memory-only
+// gap let two processes both claim the same account simultaneously and
+// collide mid-booking). Postgres is the one thing every process actually
+// shares, so an atomic conditional UPDATE here (claimedByJobId IS NULL ->
+// this job's id) is the real lock; the in-memory pool just decides who's
+// waiting in line, not who's allowed to touch the account right now.
+model EnuguWorkerSlot {
+  id             String    @id @default(cuid())
+  accountLabel   String    @unique
+  claimedByJobId String?
+  claimedAt      DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  @@map("enugu_worker_slots")
+}
+
 // ─── User Credentials & Booking History ───
 // Each user can save their own airline credentials (encrypted).
 // This allows booking automation to use the user's own account, not admin credentials.

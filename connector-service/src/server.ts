@@ -20,6 +20,7 @@ import { decryptSecret } from "../../src/modules/airline-connectors/services/Cre
 import { UserCredentialRepository } from "../../src/modules/airline-connectors/storage/UserCredentialRepository";
 import type { FlightSearchQuery, FlightSearchResult } from "../../src/modules/travel-assistant/core/types";
 import { EnuguWorkerPool, loadEnuguAccountsFromEnv, type EnuguAccount } from "./EnuguWorkerPool";
+import { EnuguWorkerSlotRepository } from "../../src/modules/travel-assistant/storage/EnuguWorkerSlotRepository";
 import type { BookingJob, BookingStage } from "@prisma/client";
 
 const TRAVEL_ASSISTANT_SEARCHERS: Record<string, (query: FlightSearchQuery) => Promise<FlightSearchResult>> = {
@@ -295,6 +296,12 @@ function getEnuguPool(fareClassPreference: [string, string]): Promise<EnuguWorke
         ];
       }
       console.log(`[enugu-pool] initialized with ${accounts.length} account(s): ${accounts.map((a: EnuguAccount) => a.label).join(", ")}`);
+      // Creates the Postgres claim row for each account if it doesn't
+      // already exist — idempotent, and never touches an already-claimed
+      // row (see EnuguWorkerSlotRepository.ensureSlots), so this is safe
+      // to run on every process start, including mid-deploy overlap with
+      // an old process that's still legitimately holding a claim.
+      await EnuguWorkerSlotRepository.ensureSlots(accounts.map((a: EnuguAccount) => a.label));
       return new EnuguWorkerPool(accounts, (job, account) =>
         executeBookingAutomation(job, bookEnuguAirOnHold, account, fareClassPreference, (stage) =>
           BookingJobRepository.updateStage(job.id, stage).catch((err) =>
