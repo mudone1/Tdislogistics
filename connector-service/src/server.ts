@@ -19,6 +19,8 @@ import { categorizeBookingError } from "../../src/modules/travel-assistant/booki
 import { decryptSecret } from "../../src/modules/airline-connectors/services/CredentialService";
 import { UserCredentialRepository } from "../../src/modules/airline-connectors/storage/UserCredentialRepository";
 import type { FlightSearchQuery, FlightSearchResult } from "../../src/modules/travel-assistant/core/types";
+import { EnuguWorkerPool, loadEnuguAccountsFromEnv, type EnuguAccount } from "./EnuguWorkerPool";
+import type { BookingJob, BookingStage } from "@prisma/client";
 
 const TRAVEL_ASSISTANT_SEARCHERS: Record<string, (query: FlightSearchQuery) => Promise<FlightSearchResult>> = {
   ENUGU: searchEnuguAirFlights,
@@ -192,6 +194,125 @@ const FARE_CLASS_PREFERENCE: Partial<Record<string, [string, string]>> = {
   RANO: ["Economy", "Economy"],
 };
 
+// Actually runs the automation for one job and records the outcome — shared
+// by the direct (immediate, unqueued) path and the Enugu worker pool's
+// runJob callback, so both go through identical markRunning/markSuccess/
+// markFailed handling. onStage, when given, mirrors each Playwright
+// milestone into the job row (see VarsBookOnHold.ts's reportStage) so the
+// chat pollers can show live progress; omitted entirely for airlines whose
+// handler doesn't accept it (only bookEnuguAirOnHold does today).
+async function executeBookingAutomation(
+  job: BookingJob,
+  handler: typeof bookEnuguAirOnHold,
+  credentials: { username: string; password: string },
+  fareClassPreference: [string, string],
+  onStage?: (stage: BookingStage) => void
+): Promise<void> {
+  const jobId = job.id;
+  await BookingJobRepository.markRunning(jobId);
+  const startedAt = Date.now();
+
+  try {
+    const result = await handler(
+      credentials,
+      {
+        origin: job.origin,
+        destination: job.destination,
+        departureDate: job.departureDate,
+        returnDate: job.returnDate ?? undefined,
+        fareClassPreference,
+        cabinClass: job.cabinClass,
+        preferredDepartureTime: job.preferredDepartureTime ?? undefined,
+        preferredReturnTime: job.preferredReturnTime ?? undefined,
+        passenger: {
+          title: job.title,
+          firstName: job.firstName,
+          lastName: job.lastName,
+          mobileNumber: job.phone ?? "",
+          email: job.email ?? "",
+        },
+        additionalPassengers: Array.isArray(job.additionalPassengers)
+          ? (job.additionalPassengers as { type?: "ADULT" | "CHILD" | "INFANT"; title: string; firstName: string; lastName: string; dateOfBirth?: string }[])
+          : undefined,
+      },
+      onStage
+    );
+    const durationMs = Date.now() - startedAt;
+    // A confirmation page with no parseable PNR is a soft failure — the
+    // hold may not have gone through — so treat a null PNR as FAILED rather
+    // than reporting a success the staff can't act on.
+    if (!result.pnr) {
+      console.error(`[book-hold] job=${jobId} finished with no PNR after ${durationMs}ms`);
+      await BookingJobRepository.markFailed(jobId, "UNKNOWN", "Completed the flow but no PNR was found on the confirmation page", durationMs);
+      return;
+    }
+    console.log(`[book-hold] job=${jobId} SUCCESS pnr=${result.pnr} in ${durationMs}ms`);
+    await BookingJobRepository.markSuccess(jobId, {
+      pnr: result.pnr,
+      holdExpiresAt: result.holdExpiresAt,
+      totalPayable: result.totalPayable,
+      currency: result.currency,
+      screenshot: result.screenshot,
+      durationMs,
+    });
+  } catch (err) {
+    const durationMs = Date.now() - startedAt;
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[book-hold] job=${jobId} FAILED after ${durationMs}ms:`, message);
+    await BookingJobRepository.markFailed(jobId, categorizeBookingError(message), message, durationMs).catch((e) => {
+      console.error(`[book-hold] job=${jobId} could not record failure:`, e);
+    });
+  }
+}
+
+// Lazily-initialized singleton — built once per connector-service process,
+// first time an Enugu admin-credential booking is submitted. Prefers the
+// explicitly configured multi-account pool (ENUGU_BOOKING_ACCOUNTS); when
+// that's absent, falls back to a pool of exactly one worker wrapping the
+// single stored admin credential (AirlineWalletRepository) — same
+// credential source as before this feature, just now serialized through a
+// queue instead of running with no concurrency control at all, which is
+// the actual bug multiple accounts are meant to fix. Only ENUGU is pooled —
+// per explicit scope, and the only airline with a shared-account collision
+// risk verified live.
+let enuguPoolPromise: Promise<EnuguWorkerPool> | null = null;
+
+function getEnuguPool(fareClassPreference: [string, string]): Promise<EnuguWorkerPool> {
+  if (!enuguPoolPromise) {
+    enuguPoolPromise = (async () => {
+      let accounts = loadEnuguAccountsFromEnv();
+      if (!accounts) {
+        const settings = await AirlineWalletRepository.getSettings("ENUGU");
+        if (!settings?.encryptedUsername || !settings.encryptedPassword) {
+          throw new Error("No credentials configured for ENUGU");
+        }
+        accounts = [
+          {
+            label: "admin",
+            username: decryptSecret(settings.encryptedUsername),
+            password: decryptSecret(settings.encryptedPassword),
+          },
+        ];
+      }
+      console.log(`[enugu-pool] initialized with ${accounts.length} account(s): ${accounts.map((a: EnuguAccount) => a.label).join(", ")}`);
+      return new EnuguWorkerPool(accounts, (job, account) =>
+        executeBookingAutomation(job, bookEnuguAirOnHold, account, fareClassPreference, (stage) =>
+          BookingJobRepository.updateStage(job.id, stage).catch((err) =>
+            console.error(`[enugu-pool] failed to update stage for job ${job.id}:`, err)
+          )
+        )
+      );
+    })().catch((err) => {
+      // A failed init must not wedge every future booking behind a
+      // permanently-rejected promise — clear it so the next submission
+      // retries from scratch (e.g. credentials get fixed in the meantime).
+      enuguPoolPromise = null;
+      throw err;
+    });
+  }
+  return enuguPoolPromise;
+}
+
 // Job-based Book-on-Hold. Unlike the old fire-and-forget version, the
 // outcome (PNR, screenshot, or a categorized error) is now written back to
 // the BookingJob row so any client — the chat today — can poll for it. The
@@ -256,6 +377,30 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
     }
   }
 
+  // A personal (per-user) Enugu login is its own dedicated account — it
+  // never contends with the shared admin pool, so it runs immediately,
+  // same as before this feature. Only the admin-credential fallback case
+  // is a genuinely SHARED resource that needs the worker pool/queue.
+  if (airline === "ENUGU" && credentialSource === "admin") {
+    let pool: EnuguWorkerPool;
+    try {
+      pool = await getEnuguPool(fareClassPreference);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await BookingJobRepository.markFailed(jobId, "LOGIN_FAILED", message, 0);
+      res.status(502).json({ error: message });
+      return;
+    }
+    const position = await pool.submit(job);
+    console.log(
+      `[book-hold] job=${jobId} ENUGU ${job.origin}->${job.destination} ${job.departureDate} — ${
+        position === 0 ? "started immediately" : `queued at position ${position} (${pool.accountCount} account(s) configured)`
+      }`
+    );
+    res.status(202).json({ accepted: true, jobId, airline, queuePosition: position });
+    return;
+  }
+
   // Fall back to admin/connector credentials if user credentials unavailable
   if (!credentials) {
     const settings = await AirlineWalletRepository.getSettings(airline);
@@ -273,58 +418,8 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
   console.log(
     `[book-hold] starting job=${jobId} ${airline} ${job.origin}->${job.destination} ${job.departureDate}${job.returnDate ? ` / return ${job.returnDate}` : ""} [using ${credentialSource} credentials]`
   );
-  await BookingJobRepository.markRunning(jobId);
-  const startedAt = Date.now();
   res.status(202).json({ accepted: true, jobId, airline });
-
-  handler(credentials, {
-    origin: job.origin,
-    destination: job.destination,
-    departureDate: job.departureDate,
-    returnDate: job.returnDate ?? undefined,
-    fareClassPreference,
-    cabinClass: job.cabinClass,
-    preferredDepartureTime: job.preferredDepartureTime ?? undefined,
-    preferredReturnTime: job.preferredReturnTime ?? undefined,
-    passenger: {
-      title: job.title,
-      firstName: job.firstName,
-      lastName: job.lastName,
-      mobileNumber: job.phone ?? "",
-      email: job.email ?? "",
-    },
-    additionalPassengers: Array.isArray(job.additionalPassengers)
-      ? (job.additionalPassengers as { type?: "ADULT" | "CHILD" | "INFANT"; title: string; firstName: string; lastName: string; dateOfBirth?: string }[])
-      : undefined,
-  })
-    .then(async (result) => {
-      const durationMs = Date.now() - startedAt;
-      // A confirmation page with no parseable PNR is a soft failure — the
-      // hold may not have gone through — so treat a null PNR as FAILED rather
-      // than reporting a success the staff can't act on.
-      if (!result.pnr) {
-        console.error(`[book-hold] job=${jobId} finished with no PNR after ${durationMs}ms`);
-        await BookingJobRepository.markFailed(jobId, "UNKNOWN", "Completed the flow but no PNR was found on the confirmation page", durationMs);
-        return;
-      }
-      console.log(`[book-hold] job=${jobId} SUCCESS pnr=${result.pnr} in ${durationMs}ms`);
-      await BookingJobRepository.markSuccess(jobId, {
-        pnr: result.pnr,
-        holdExpiresAt: result.holdExpiresAt,
-        totalPayable: result.totalPayable,
-        currency: result.currency,
-        screenshot: result.screenshot,
-        durationMs,
-      });
-    })
-    .catch(async (err) => {
-      const durationMs = Date.now() - startedAt;
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[book-hold] job=${jobId} FAILED after ${durationMs}ms:`, message);
-      await BookingJobRepository.markFailed(jobId, categorizeBookingError(message), message, durationMs).catch((e) => {
-        console.error(`[book-hold] job=${jobId} could not record failure:`, e);
-      });
-    });
+  await executeBookingAutomation(job, handler, credentials, fareClassPreference);
 });
 
 const PORT = Number(process.env.PORT) || 4100;

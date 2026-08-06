@@ -114,6 +114,13 @@ export interface BookingJobStatus {
   };
   passenger: { title: string; firstName: string; lastName: string };
   additionalPassengers: AdditionalPassenger[] | null;
+  // Worker-pool progress — see BookingStage in schema.prisma. stage is
+  // QUEUED (with queuePosition/estimatedWaitSeconds set) while waiting on a
+  // free Enugu account, then an automation milestone once picked up; all
+  // null before either has happened, or once the job is terminal.
+  stage: "QUEUED" | "SEARCHING" | "FLIGHT_FOUND" | "FILLING_PASSENGER_DETAILS" | "REVIEWING_ITINERARY" | "CREATING_HOLD" | null;
+  queuePosition: number | null;
+  estimatedWaitSeconds: number | null;
   result?: {
     pnr: string | null;
     holdExpiresAt: string | null;

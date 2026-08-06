@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { BookingJobRepository } from "@/modules/travel-assistant/storage/BookingJobRepository";
 import { bookingErrorMessage } from "@/modules/travel-assistant/booking/bookingErrorMessages";
 
+// Rough, single-passenger average — used only to give a queued user a
+// ballpark wait, not a precise ETA. Matches the confirmation-page timeout
+// scaling in VarsBookOnHold.ts (30-150s depending on party size), so this
+// deliberately sits in the middle of that range rather than at either end.
+const AVERAGE_BOOKING_DURATION_SECONDS = 90;
+
 // Poll endpoint for a Book-on-Hold job. Returns lightweight status +
 // result metadata only — the screenshot bytes are served separately from
 // /[id]/screenshot so a poll response stays small. The chat polls this
@@ -29,6 +35,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     // Additional passengers beyond the lead one, if this was a
     // multi-passenger hold — same shape as what was stored at creation time.
     additionalPassengers: job.additionalPassengers ?? null,
+    // Worker-pool progress — see BookingStage in schema.prisma. stage is
+    // QUEUED (with queuePosition set) while waiting on a free account, then
+    // one of the automation milestones once a worker picks it up; both are
+    // null before either has happened yet, or once the job is terminal.
+    stage: job.stage,
+    queuePosition: job.queuePosition,
+    estimatedWaitSeconds: job.queuePosition != null ? job.queuePosition * AVERAGE_BOOKING_DURATION_SECONDS : null,
     ...(job.status === "SUCCESS" && {
       result: {
         pnr: job.pnr,
