@@ -178,9 +178,20 @@ export async function establishSession(
   loginUrl: string,
   requirementsUrl: string,
   credentials: BookOnHoldCredentials,
-  logTag: string
+  logTag: string,
+  // Confirmed live: cache was keyed by logTag ALONE (e.g. "enugu-booking"),
+  // shared across every account and every job in the process — a queued
+  // pool job could reuse a DIFFERENT account's cookies, or a session the
+  // server had already superseded by a later login, and get rejected
+  // downstream (a real "Invalid password" at the payment step traced back
+  // to exactly this). Keying by account username fixes the cross-account
+  // mixup; forceFreshLogin additionally skips the cache entirely — used by
+  // the worker pool per explicit product direction: every pooled booking
+  // gets a brand-new login, never a reused session, full stop.
+  forceFreshLogin = false
 ): Promise<{ context: import("playwright").BrowserContext; page: import("playwright").Page }> {
-  const cached = sessionCache.get(logTag);
+  const cacheKey = `${logTag}:${credentials.username}`;
+  const cached = forceFreshLogin ? undefined : sessionCache.get(cacheKey);
   const cacheUsable = !!cached && Date.now() - cached.savedAt < SESSION_MAX_AGE_MS;
 
   const newContext = () => {
@@ -217,7 +228,7 @@ export async function establishSession(
     }
 
     console.log(`[${logTag}] cached session expired, logging in fresh`);
-    sessionCache.delete(logTag);
+    sessionCache.delete(cacheKey);
     await context.close().catch(() => {});
     context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     context.on("dialog", (dialog) => {
@@ -233,7 +244,11 @@ export async function establishSession(
   await page.locator("#txtPassword").fill(credentials.password);
   await page.locator("#btnOk").click();
   await page.locator(LOGGED_IN_MARKER).waitFor({ state: "visible", timeout: 20000 });
-  sessionCache.set(logTag, { storageState: await context.storageState(), savedAt: Date.now() });
+  // Written regardless of forceFreshLogin — this fresh login is real and
+  // correctly keyed per-account now, so it's still a valid, safe cache
+  // entry for some OTHER (non-pooled) caller on this same account later.
+  // forceFreshLogin only ever skips the READ above, never the write.
+  sessionCache.set(cacheKey, { storageState: await context.storageState(), savedAt: Date.now() });
 
   // Always return with the page already sitting on requirementsUrl, same
   // as the cached-session path above — the caller never needs to know or
@@ -319,7 +334,11 @@ export async function bookVarsPlatformOnHold(
   credentials: BookOnHoldCredentials,
   request: BookOnHoldRequest,
   config: VarsAirlineBookingConfig,
-  onStage?: OnBookingStage
+  onStage?: OnBookingStage,
+  // See establishSession's own doc — the worker pool sets this true so a
+  // pooled booking never reuses a cached session (a stale/superseded one
+  // traced back to a real "Invalid password" failure at the payment step).
+  forceFreshLogin = false
 ): Promise<BookOnHoldResult> {
   const { logTag, loginUrl, requirementsUrl, mmbUrl, airlineLabel } = config;
   const reportStage = (stage: BookingStageName) => {
@@ -339,7 +358,7 @@ export async function bookVarsPlatformOnHold(
   });
 
   try {
-    const { context, page } = await establishSession(browser, loginUrl, requirementsUrl, credentials, logTag);
+    const { context, page } = await establishSession(browser, loginUrl, requirementsUrl, credentials, logTag, forceFreshLogin);
 
     // --- Search (same public CustomerPanels flow, now under the agent
     // session) --- establishSession already leaves the page sitting on

@@ -207,7 +207,11 @@ async function executeBookingAutomation(
   handler: typeof bookEnuguAirOnHold,
   credentials: { username: string; password: string },
   fareClassPreference: [string, string],
-  onStage?: (stage: BookingStage) => void
+  onStage?: (stage: BookingStage) => void,
+  // Only meaningful for bookEnuguAirOnHold (other handlers ignore a 4th
+  // arg they don't accept) — true for every pool-managed job, see
+  // EnuguWorkerPool's runJob callback below.
+  forceFreshLogin?: boolean
 ): Promise<void> {
   const jobId = job.id;
   await BookingJobRepository.markRunning(jobId);
@@ -236,7 +240,8 @@ async function executeBookingAutomation(
           ? (job.additionalPassengers as { type?: "ADULT" | "CHILD" | "INFANT"; title: string; firstName: string; lastName: string; dateOfBirth?: string }[])
           : undefined,
       },
-      onStage
+      onStage,
+      forceFreshLogin
     );
     const durationMs = Date.now() - startedAt;
     // A confirmation page with no parseable PNR is a soft failure — the
@@ -303,10 +308,20 @@ function getEnuguPool(fareClassPreference: [string, string]): Promise<EnuguWorke
       // an old process that's still legitimately holding a claim.
       await EnuguWorkerSlotRepository.ensureSlots(accounts.map((a: EnuguAccount) => a.label));
       return new EnuguWorkerPool(accounts, (job, account) =>
-        executeBookingAutomation(job, bookEnuguAirOnHold, account, fareClassPreference, (stage) =>
-          BookingJobRepository.updateStage(job.id, stage).catch((err) =>
-            console.error(`[enugu-pool] failed to update stage for job ${job.id}:`, err)
-          )
+        executeBookingAutomation(
+          job,
+          bookEnuguAirOnHold,
+          account,
+          fareClassPreference,
+          (stage) =>
+            BookingJobRepository.updateStage(job.id, stage).catch((err) =>
+              console.error(`[enugu-pool] failed to update stage for job ${job.id}:`, err)
+            ),
+          // Every pool-managed booking gets a brand-new login — never a
+          // cached/reused session — per explicit product direction after a
+          // real "Invalid password" failure traced back to session reuse
+          // across queued jobs on the same account.
+          true
         )
       );
     })().catch((err) => {
