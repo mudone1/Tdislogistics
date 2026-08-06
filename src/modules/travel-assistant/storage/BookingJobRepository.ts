@@ -1,5 +1,5 @@
 import { prisma } from "../../airline-connectors/storage/prismaClient";
-import type { AirlineKey, BookingErrorCategory, CabinClass } from "@prisma/client";
+import type { AirlineKey, BookingErrorCategory, BookingStage, CabinClass } from "@prisma/client";
 
 // Coordination row for a Book-on-Hold run (see the BookingJob model in
 // prisma/schema.prisma for the why). Next.js creates it PENDING and hands
@@ -87,7 +87,33 @@ export const BookingJobRepository = {
   markRunning(id: string) {
     return prisma.bookingJob.update({
       where: { id },
-      data: { status: "RUNNING", startedAt: new Date() },
+      data: { status: "RUNNING", startedAt: new Date(), stage: null, queuePosition: null },
+    });
+  },
+
+  // Worker-pool queue state — status stays PENDING (the job hasn't started
+  // running yet, it's just waiting its turn for a free account/worker).
+  // See EnuguWorkerPool.ts.
+  markQueued(id: string, position: number) {
+    return prisma.bookingJob.update({
+      where: { id },
+      data: { stage: "QUEUED", queuePosition: position },
+    });
+  },
+
+  updateQueuePosition(id: string, position: number) {
+    return prisma.bookingJob.update({
+      where: { id },
+      data: { queuePosition: position },
+    });
+  },
+
+  // Fine-grained progress once the automation is actually RUNNING —
+  // queuePosition is meaningless past this point, cleared for clarity.
+  updateStage(id: string, stage: BookingStage) {
+    return prisma.bookingJob.update({
+      where: { id },
+      data: { stage, queuePosition: null },
     });
   },
 

@@ -15,6 +15,22 @@ import { chromium } from "playwright";
 // documents its own verification status; do not assume "shares the login"
 // means "booking works" without a live check per airline.
 
+// Milestone hook — fired synchronously right as each stage of the
+// automation begins, so a caller (connector-service's book-hold route) can
+// mirror it into BookingJob.stage for the chat pollers to pick up. Kept as
+// a plain string union (not importing @prisma/client's BookingStage type)
+// so this browser-automation module has no dependency on the Prisma
+// client — the values are still exactly the enum's members, checked by
+// the one caller that writes them to the DB.
+export type BookingStageName =
+  | "SEARCHING"
+  | "FLIGHT_FOUND"
+  | "FILLING_PASSENGER_DETAILS"
+  | "REVIEWING_ITINERARY"
+  | "CREATING_HOLD";
+
+export type OnBookingStage = (stage: BookingStageName) => void;
+
 export interface VarsAirlineBookingConfig {
   logTag: string;
   loginUrl: string;
@@ -302,9 +318,20 @@ function withCarriedSessionId(targetUrl: string, currentPageUrl: string): string
 export async function bookVarsPlatformOnHold(
   credentials: BookOnHoldCredentials,
   request: BookOnHoldRequest,
-  config: VarsAirlineBookingConfig
+  config: VarsAirlineBookingConfig,
+  onStage?: OnBookingStage
 ): Promise<BookOnHoldResult> {
   const { logTag, loginUrl, requirementsUrl, mmbUrl, airlineLabel } = config;
+  const reportStage = (stage: BookingStageName) => {
+    try {
+      onStage?.(stage);
+    } catch (err) {
+      // A stage-reporting hiccup (e.g. a DB write failing) must never abort
+      // the booking itself — the automation is the thing that actually
+      // matters, progress messaging is best-effort on top of it.
+      console.warn(`[${logTag}] onStage(${stage}) callback threw, continuing:`, err);
+    }
+  };
 
   const browser = await chromium.launch({
     headless: true,
@@ -318,6 +345,7 @@ export async function bookVarsPlatformOnHold(
     // session) --- establishSession already leaves the page sitting on
     // requirementsUrl either way (cached-session probe, or the fresh-login
     // path's own navigation there) — no re-navigation needed here.
+    reportStage("SEARCHING");
     console.log(`[${logTag}] searching ${request.origin}->${request.destination}`);
     await page.locator("#Origin").selectOption(request.origin);
     await page.locator("#Destination").selectOption(request.destination);
@@ -376,6 +404,7 @@ export async function bookVarsPlatformOnHold(
     // --- Fare selection: cheapest of the two given classbands, per leg ---
     const legCount = request.returnDate ? 2 : 1;
     await page.locator(".tab-pane.active .flt-panel").first().waitFor({ state: "visible", timeout: 15000 });
+    reportStage("FLIGHT_FOUND");
     // Summed as a FALLBACK total — the hold's own confirmation page doesn't
     // always show a "Total Payable" line the same way the actual payment
     // page does (confirmed live: the wording differs), so parseConfirmation
@@ -452,6 +481,7 @@ export async function bookVarsPlatformOnHold(
     await clickNext(page, "products", logTag);
 
     // --- Passenger details ---
+    reportStage("FILLING_PASSENGER_DETAILS");
     console.log(`[${logTag}] filling passenger details`);
     await page.locator("#passenger1firstname").waitFor({ state: "visible", timeout: 15000 });
     await page.locator("#passenger1title").selectOption({ label: request.passenger.title });
@@ -490,6 +520,8 @@ export async function bookVarsPlatformOnHold(
         }
       }
     }
+
+    reportStage("REVIEWING_ITINERARY");
 
     // The payment section is a Bootstrap accordion (#pay-accordion) of
     // payment-option panels. The VISIBLE panel-heading TEXT for the hold
@@ -571,6 +603,7 @@ export async function bookVarsPlatformOnHold(
     // "Validation Failed<br/>Surname ... invalid" caught a bad passenger
     // name during live testing. Surface that message on failure instead of
     // only finding out 30s later that the confirmation page never showed.
+    reportStage("CREATING_HOLD");
     console.log(`[${logTag}] submitting hold`);
     let validationError: string | null = null;
     const validationListener = async (res: import("playwright").Response) => {

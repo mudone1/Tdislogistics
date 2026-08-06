@@ -3,9 +3,10 @@ import {
   type BookOnHoldCredentials,
   type BookOnHoldRequest,
   type BookOnHoldResult,
+  type OnBookingStage,
 } from "../vars-platform/VarsBookOnHold";
 
-export type { BookOnHoldCredentials, BookOnHoldRequest, BookOnHoldResult };
+export type { BookOnHoldCredentials, BookOnHoldRequest, BookOnHoldResult, OnBookingStage };
 
 const LOGIN_URL = "https://booking.enuguairlines.com/vars/public/CustomerPanels/AgentLoginBS.aspx";
 // The real agent-portal booking entry point (Dashboard.aspx -> "Standard
@@ -23,13 +24,19 @@ const MMB_URL = "https://booking.enuguairlines.com/vars/public/CustomerPanels/Mm
 // airline still needs to confirm for itself.
 export async function bookEnuguAirOnHold(
   credentials: BookOnHoldCredentials,
-  request: BookOnHoldRequest
+  request: BookOnHoldRequest,
+  onStage?: OnBookingStage
 ): Promise<BookOnHoldResult> {
-  return bookVarsPlatformOnHold(credentials, request, {
-    logTag: "enugu-booking",
-    loginUrl: LOGIN_URL,
-    requirementsUrl: REQUIREMENTS_URL,
-    mmbUrl: MMB_URL,
-    airlineLabel: "Enugu Air",
-  });
+  return bookVarsPlatformOnHold(
+    credentials,
+    request,
+    {
+      logTag: "enugu-booking",
+      loginUrl: LOGIN_URL,
+      requirementsUrl: REQUIREMENTS_URL,
+      mmbUrl: MMB_URL,
+      airlineLabel: "Enugu Air",
+    },
+    onStage
+  );
 }

@@ -75,6 +75,32 @@ common root directory structure into `dist/`. The `start` script in
 `package.json` already points at the right path; this is just worth
 knowing if you're debugging the build output directly.
 
+## Book-on-Hold worker pool (Enugu Air)
+
+Enugu Air holds using the shared admin credential run through
+`EnuguWorkerPool` (`src/EnuguWorkerPool.ts`) — one worker per configured
+account, each with its own isolated Playwright browser/session, so
+concurrent bookings never collide on the same VARS login. Requests beyond
+the number of configured accounts wait in a FIFO queue; the chat pollers
+show queue position and per-stage progress from the `BookingJob` row
+(`stage`/`queuePosition` columns).
+
+To run with more than one account, set `ENUGU_BOOKING_ACCOUNTS` to a JSON
+array — no code change needed to add another:
+
+```
+ENUGU_BOOKING_ACCOUNTS=[{"label":"acct1","username":"...","password":"..."},{"label":"acct2","username":"...","password":"..."}]
+```
+
+Unset (the default) falls back to a pool of exactly one worker, using
+whichever admin credential is already configured under Admin → Airline
+Connectors (same source as before this feature existed) — behavior is
+unchanged for a deployment that hasn't set this yet, just now serialized
+through the same queue instead of running with no concurrency guard at
+all. A booking made with a staff member's own personal Enugu login (not
+the shared admin credential) bypasses the pool entirely — it's not
+contending for the shared resource.
+
 ## Credentials
 
 Never stored in plaintext. `CredentialService` (in the shared framework

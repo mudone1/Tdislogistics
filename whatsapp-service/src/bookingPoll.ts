@@ -33,20 +33,60 @@ function formatSuccessMessage(job: BookingJobStatus): string {
   return lines.join("\n");
 }
 
+// One concise line per automation milestone — see VarsBookOnHold.ts's
+// reportStage for exactly where each of these fires.
+const STAGE_MESSAGES: Partial<Record<NonNullable<BookingJobStatus["stage"]>, string>> = {
+  SEARCHING: "Searching flights...",
+  FLIGHT_FOUND: "Flight found.",
+  FILLING_PASSENGER_DETAILS: "Filling passenger details...",
+  REVIEWING_ITINERARY: "Reviewing itinerary...",
+  CREATING_HOLD: "Creating hold...",
+};
+
+function formatQueuedMessage(job: BookingJobStatus): string {
+  const waitMin = job.estimatedWaitSeconds != null ? Math.max(1, Math.round(job.estimatedWaitSeconds / 60)) : null;
+  const lines = [`You are #${job.queuePosition} in the queue.`];
+  if (waitMin != null) lines.push(`Estimated wait: ~${waitMin} min.`);
+  return lines.join(" ");
+}
+
 // Polls a Book-on-Hold job until it's terminal, then sends exactly one
 // follow-up WhatsApp message with the outcome — mirrors ChatBubble's
 // pollBookingJob, just server-side since there's no browser tab holding
 // state for a WhatsApp chat. When a confirmation screenshot is available
 // (same as the browser's BookingResultCard image), it's sent as the
 // caption-bearing image itself rather than a separate text message.
+//
+// Also sends exactly one message per QUEUED/stage TRANSITION along the way
+// (never one per poll tick, which would spam a message every 4s) — the
+// queue position when first queued, "Booking starting now..." the moment a
+// worker picks it up, then one line per automation milestone.
 export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
   let attempts = 0;
+  let lastStage: BookingJobStatus["stage"] | undefined = undefined;
   const stopTyping = keepTypingAlive(sender.setTyping);
 
   const tick = async (): Promise<void> => {
     attempts++;
     try {
       const job = await getBookingJobStatus(jobId);
+
+      if (job.stage !== lastStage) {
+        const wasQueued = lastStage === "QUEUED";
+        if (job.stage === "QUEUED" && job.queuePosition != null) {
+          await sender.sendText(formatQueuedMessage(job)).catch((err) => console.error(`[whatsapp] queue notice failed for job ${jobId}:`, err));
+        } else {
+          if (wasQueued && job.stage) {
+            await sender.sendText("Booking starting now...").catch((err) => console.error(`[whatsapp] starting notice failed for job ${jobId}:`, err));
+          }
+          const stageText = job.stage ? STAGE_MESSAGES[job.stage] : null;
+          if (stageText) {
+            await sender.sendText(stageText).catch((err) => console.error(`[whatsapp] stage notice failed for job ${jobId}:`, err));
+          }
+        }
+        lastStage = job.stage;
+      }
+
       if (job.status === "SUCCESS" && job.result) {
         stopTyping();
         const text = formatSuccessMessage(job);
@@ -65,7 +105,13 @@ export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
       if (job.status === "FAILED") {
         stopTyping();
         const reason = job.error?.detail || job.error?.message || "unknown error";
-        await sender.sendText(`⚠️ I couldn't complete that hold.${errorContactNote(reason)}`);
+        // Reports the exact stage it died at, when known — the last stage
+        // recorded before failure (BookingJobRepository.markFailed never
+        // clears it), so staff relaying the error to Muhammed can say
+        // exactly where it broke, not just "it failed somewhere."
+        const stageLabel = job.stage ? STAGE_MESSAGES[job.stage] ?? job.stage : null;
+        const stageNote = stageLabel ? ` (failed during: ${stageLabel})` : "";
+        await sender.sendText(`⚠️ I couldn't complete that hold${stageNote}.${errorContactNote(reason)}`);
         return;
       }
     } catch (err) {

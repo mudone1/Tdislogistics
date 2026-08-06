@@ -619,6 +619,23 @@ enum TicketStatus {
   EXPIRED // Hold expired without payment
 }
 
+// Fine-grained progress within a RUNNING (or QUEUED, waiting on) booking job
+// — see connector-service's EnuguWorkerPool.ts and VarsBookOnHold.ts's
+// onStage callback for where each value gets set. QUEUED is set while the
+// job is waiting for a free worker (never during actual automation);
+// everything else fires in order as the Playwright automation progresses.
+// Purely additive to BookingJobStatus, not a replacement — status still
+// carries PENDING/RUNNING/SUCCESS/FAILED, this just adds detail while
+// RUNNING (or ahead of it, while queued).
+enum BookingStage {
+  QUEUED
+  SEARCHING
+  FLIGHT_FOUND
+  FILLING_PASSENGER_DETAILS
+  REVIEWING_ITINERARY
+  CREATING_HOLD
+}
+
 model BookingJob {
   id         String           @id @default(cuid())
   status     BookingJobStatus @default(PENDING)
@@ -664,6 +681,12 @@ model BookingJob {
   // automation falls back to its default first-panel behavior).
   preferredDepartureTime String?
   preferredReturnTime    String?
+
+  // Worker-pool progress — see BookingStage above. queuePosition is only
+  // meaningful while stage is QUEUED (1-based; the poller derives an
+  // estimated wait from it) and is cleared once the job actually starts.
+  stage         BookingStage?
+  queuePosition Int?
 
   // Result (populated on SUCCESS)
   pnr           String?
