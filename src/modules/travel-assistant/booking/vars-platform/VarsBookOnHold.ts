@@ -403,7 +403,29 @@ export async function bookVarsPlatformOnHold(
 
     // --- Fare selection: cheapest of the two given classbands, per leg ---
     const legCount = request.returnDate ? 2 : 1;
-    await page.locator(".tab-pane.active .flt-panel").first().waitFor({ state: "visible", timeout: 15000 });
+    // Was a flat 15s with no diagnostic on failure — confirmed live (a real
+    // "Lagos to Abuja tomorrow" search) that this is genuinely too tight
+    // under real portal latency, and the failure carried zero page-state
+    // info to root-cause from (just Playwright's own generic timeout
+    // text). Raised to match the other multi-step-search waits in this
+    // file (20-30s), and now dumps page state into the thrown error same
+    // as every other failure point fixed this session.
+    await page
+      .locator(".tab-pane.active .flt-panel")
+      .first()
+      .waitFor({ state: "visible", timeout: 30000 })
+      .catch(async (err) => {
+        const diagnostic = await page.evaluate(() => ({
+          url: window.location.href,
+          tabPaneCount: document.querySelectorAll(".tab-pane").length,
+          activeTabPaneCount: document.querySelectorAll(".tab-pane.active").length,
+          bodyText: document.body.innerText.replace(/\s+/g, " ").trim().slice(0, 1200),
+        }));
+        console.error(`[${logTag}] flight results panel never appeared. DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
+        throw new Error(
+          `Flight results never appeared after searching ${request.origin}->${request.destination}. Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`
+        );
+      });
     reportStage("FLIGHT_FOUND");
     // Summed as a FALLBACK total — the hold's own confirmation page doesn't
     // always show a "Total Payable" line the same way the actual payment
