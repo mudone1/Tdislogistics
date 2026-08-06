@@ -239,7 +239,18 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
   }
 
   mergeEntitiesIntoSlots(slots, turn, input.message);
-  if (turn.intent === "FLIGHT_SEARCH_ROUND_TRIP") slots.isRoundTrip = true;
+  // Same reproduced-bug guard as mergeEntitiesIntoSlots' own returnDate
+  // handling — the LLM's INTENT classification itself (not just entities)
+  // can misclassify a plain one-way request as FLIGHT_SEARCH_ROUND_TRIP,
+  // which used to set isRoundTrip unconditionally here, completely
+  // bypassing the date-count/return-wording check. Confirmed live: a
+  // one-way booking with a single date still got asked for a return date.
+  if (
+    turn.intent === "FLIGHT_SEARCH_ROUND_TRIP" &&
+    (ROUND_TRIP_KEYWORD_PATTERN.test(input.message) || countDateExpressions(input.message) >= 2)
+  ) {
+    slots.isRoundTrip = true;
+  }
 
   // Check before asking for any missing route/date — no point collecting
   // details for a search that can never run. Doesn't touch/clear slots, so

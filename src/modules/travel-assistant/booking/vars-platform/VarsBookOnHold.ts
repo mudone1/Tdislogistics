@@ -538,7 +538,29 @@ export async function bookVarsPlatformOnHold(
     const holdRadioSelector = 'input[name="optpaymentformofpayment"][value="BuyNowPayLater"]';
     const holdRadioCount = await page.locator(holdRadioSelector).count();
     if (holdRadioCount === 0) {
-      throw new Error('No "BuyNowPayLater" payment option found on this page — refusing to guess at a different one');
+      // No page.evaluate diagnostic existed here before — this failure
+      // point threw completely blind (confirmed live: a run under the
+      // worker pool's queue failed here with zero data to root-cause from).
+      // Same "embed diagnostic in the thrown message" pattern already
+      // proven for the Record Locator and confirmation-wait failures —
+      // dumps URL, every payment-option radio actually present, and
+      // visible page text, so the next occurrence is diagnosable from the
+      // chat error text alone.
+      const diagnostic = await page.evaluate(() => ({
+        url: window.location.href,
+        paymentRadios: Array.from(document.querySelectorAll<HTMLInputElement>('input[name="optpaymentformofpayment"]')).map((r) => ({
+          value: r.value,
+          checked: r.checked,
+        })),
+        visibleHeadings: Array.from(document.querySelectorAll<HTMLElement>("h1, h2, h3, .panel-heading")).map((h) =>
+          (h.textContent ?? "").trim()
+        ).filter(Boolean).slice(0, 20),
+        bodyText: document.body.innerText.replace(/\s+/g, " ").trim().slice(0, 1200),
+      }));
+      console.error(`[${logTag}] "BuyNowPayLater" payment option missing. DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
+      throw new Error(
+        `No "BuyNowPayLater" payment option found on this page — refusing to guess at a different one. Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`
+      );
     }
 
     // The radio input itself is CSS-hidden (zero-size) with no wrapping
