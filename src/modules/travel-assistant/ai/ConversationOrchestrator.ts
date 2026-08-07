@@ -81,7 +81,7 @@ const REQUIRED_SEARCH_SLOTS = ["origin", "destination", "date"] as const;
 
 const SEARCH_INTENTS = new Set(["FLIGHT_SEARCH_ONE_WAY", "FLIGHT_SEARCH_ROUND_TRIP", "TICKET_AVAILABILITY"]);
 
-const ALL_AIRLINES = ["ENUGU", "UNITED", "XEJET", "RANO"] as const;
+const ALL_AIRLINES = ["ENUGU", "UNITED", "XEJET", "RANO", "VALUEJET"] as const;
 
 const AIRLINE_NAME_MATCHERS: Record<string, string> = {
   united: "UNITED",
@@ -89,18 +89,21 @@ const AIRLINE_NAME_MATCHERS: Record<string, string> = {
   xejet: "XEJET",
   "xe jet": "XEJET",
   rano: "RANO",
+  valuejet: "VALUEJET",
+  "value jet": "VALUEJET",
 };
 
 // These 5 are real airlines the assistant knows about (their balances sync,
 // and 4 of them have sales-report data) but have NO flight-search automation
-// built — a completely different platform (Crane) from the 4 VARS-platform
-// carriers above. Live-confirmed bug this fixes: asking for one of these by
-// name (e.g. "quote AirPeace ABV-LOS") silently searched all 4 OTHER
-// carriers instead and said nothing about AirPeace — confusing, since the
-// user gets a real-looking answer to a question they didn't ask. Checked
-// against the raw message text (not slots.airline) so it fires regardless
-// of whether the LLM happened to populate that entity for a name outside
-// its known searchable set.
+// built — a completely different platform (Crane) from the VARS-platform
+// carriers above, and confirmed Cloudflare-blocked on the results step even
+// via their own public sites (live-verified 2026-08-07, Arik). Live-confirmed
+// bug this fixes: asking for one of these by name (e.g. "quote AirPeace
+// ABV-LOS") silently searched all other carriers instead and said nothing
+// about AirPeace — confusing, since the user gets a real-looking answer to a
+// question they didn't ask. Checked against the raw message text (not
+// slots.airline) so it fires regardless of whether the LLM happened to
+// populate that entity for a name outside its known searchable set.
 const UNSUPPORTED_SEARCH_AIRLINES: Record<string, string> = {
   airpeace: "Air Peace",
   "air peace": "Air Peace",

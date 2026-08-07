@@ -9,6 +9,7 @@ import { EnuguConnector } from "../connectors/enugu/EnuguConnector";
 import { UnitedConnector } from "../connectors/united/UnitedConnector";
 import { RanoConnector } from "../connectors/rano/RanoConnector";
 import { XeJetConnector } from "../connectors/xejet/XeJetConnector";
+import { ValueJetConnector } from "../connectors/valuejet/ValueJetConnector";
 
 export interface ConnectorMeta {
   airline: AirlineKey;
@@ -31,6 +32,7 @@ const factories: Record<AirlineKey, () => IAirlineConnector> = {
   UNITED: () => new UnitedConnector(),
   RANO: () => new RanoConnector(),
   XEJET: () => new XeJetConnector(),
+  VALUEJET: () => new ValueJetConnector(),
 };
 
 export const ConnectorRegistry = {
