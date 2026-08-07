@@ -18,6 +18,7 @@ export const AIRLINE_KEY_TO_DISPLAY_NAME: Record<AirlineKey, string> = {
   UNITED: "United Nigeria",
   RANO: "Rano Air",
   XEJET: "XeJet",
+  VALUEJET: "ValueJet",
 };
 
 export function airlineKeyToDisplayName(key: AirlineKey): string {

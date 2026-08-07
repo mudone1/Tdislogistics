@@ -11,7 +11,8 @@ export type AirlineKey =
   | "ENUGU"
   | "UNITED"
   | "RANO"
-  | "XEJET";
+  | "XEJET"
+  | "VALUEJET";
 
 // Category B airlines (Enugu, United, Rano, XeJet) all share one
 // platform — a VARS/Videcom ASP.NET WebForms agent portal, a different

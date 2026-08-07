@@ -35,6 +35,9 @@ enum AirlineKey {
   RANO
   ENUGU
   XEJET
+  // KIU-platform agent portal (kiu.click) — separate from ValueJet's own
+  // public B2C booking site (flyvaluejet.com), which flight-search uses.
+  VALUEJET
 }
 
 enum CabinClass {

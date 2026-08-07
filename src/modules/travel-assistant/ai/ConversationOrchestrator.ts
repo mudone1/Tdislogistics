@@ -81,7 +81,7 @@ const REQUIRED_SEARCH_SLOTS = ["origin", "destination", "date"] as const;
 
 const SEARCH_INTENTS = new Set(["FLIGHT_SEARCH_ONE_WAY", "FLIGHT_SEARCH_ROUND_TRIP", "TICKET_AVAILABILITY"]);
 
-const ALL_AIRLINES = ["ENUGU", "UNITED", "XEJET", "RANO"] as const;
+const ALL_AIRLINES = ["ENUGU", "UNITED", "XEJET", "RANO", "VALUEJET"] as const;
 
 const AIRLINE_NAME_MATCHERS: Record<string, string> = {
   united: "UNITED",
@@ -89,18 +89,36 @@ const AIRLINE_NAME_MATCHERS: Record<string, string> = {
   xejet: "XEJET",
   "xe jet": "XEJET",
   rano: "RANO",
+  valuejet: "VALUEJET",
+  "value jet": "VALUEJET",
+};
+
+// Airlines the Book-on-Hold flow can actually place a hold with — kept in
+// sync with BOOKABLE_AIRLINES in startBookOnHold.ts. UNITED/RANO/XEJET
+// share Enugu's login mechanism but aren't independently verified
+// end-to-end, so they stay out of this CHAT-facing set even though
+// they're technically reachable via the direct API for testing.
+const BOOKABLE_AIRLINE_KEYS = new Set(["ENUGU", "VALUEJET"]);
+
+// Display names matching each search module's FlightOption.airline field
+// (EnuguAirSearch/ValueJetSearch's own AIRLINE_LABEL constants) — used to
+// match a "book that flight" reference against a shown search result.
+const AIRLINE_KEY_TO_DISPLAY_NAME: Record<string, string> = {
+  ENUGU: "Enugu Air",
+  VALUEJET: "ValueJet",
 };
 
 // These 5 are real airlines the assistant knows about (their balances sync,
 // and 4 of them have sales-report data) but have NO flight-search automation
-// built — a completely different platform (Crane) from the 4 VARS-platform
-// carriers above. Live-confirmed bug this fixes: asking for one of these by
-// name (e.g. "quote AirPeace ABV-LOS") silently searched all 4 OTHER
-// carriers instead and said nothing about AirPeace — confusing, since the
-// user gets a real-looking answer to a question they didn't ask. Checked
-// against the raw message text (not slots.airline) so it fires regardless
-// of whether the LLM happened to populate that entity for a name outside
-// its known searchable set.
+// built — a completely different platform (Crane) from the VARS-platform
+// carriers above, and confirmed Cloudflare-blocked on the results step even
+// via their own public sites (live-verified 2026-08-07, Arik). Live-confirmed
+// bug this fixes: asking for one of these by name (e.g. "quote AirPeace
+// ABV-LOS") silently searched all other carriers instead and said nothing
+// about AirPeace — confusing, since the user gets a real-looking answer to a
+// question they didn't ask. Checked against the raw message text (not
+// slots.airline) so it fires regardless of whether the LLM happened to
+// populate that entity for a name outside its known searchable set.
 const UNSUPPORTED_SEARCH_AIRLINES: Record<string, string> = {
   airpeace: "Air Peace",
   "air peace": "Air Peace",
@@ -1205,8 +1223,8 @@ function resolveLegFlightChoice(
 
 // Drives the Book-on-Hold conversation: gather route + passenger details over
 // as many turns as needed, then create the job and hand its id back for the
-// chat to poll. Enugu Air only for now — a named other carrier is declined
-// rather than silently swapped.
+// chat to poll. Enugu Air and ValueJet only for now — a named other carrier
+// is declined rather than silently swapped.
 async function handleBookOnHold(
   sessionId: string,
   sessionKey: string,
@@ -1217,12 +1235,17 @@ async function handleBookOnHold(
   mergeEntitiesIntoSlots(slots, turn, rawMessage);
 
   const named = resolveNamedAirline(slots.airline);
-  if (named && named !== "ENUGU") {
-    const reply = `Right now I can only place a Book-on-Hold with Enugu Air — ${named} isn't wired up for holds yet. Want me to hold an Enugu Air flight instead?`;
+  if (named && !BOOKABLE_AIRLINE_KEYS.has(named)) {
+    const reply = `Right now I can only place a Book-on-Hold with Enugu Air or ValueJet — ${named} isn't wired up for holds yet. Want me to hold one of those instead?`;
     await ChatMemoryRepository.updateSlots(sessionId, slots);
     await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
     return { reply };
   }
+  // Safe cast — BOOKABLE_AIRLINE_KEYS.has(named) was already checked above
+  // (anything else returned early), so named can only be "ENUGU" or
+  // "VALUEJET" by this point.
+  const bookingAirline = (named ?? "ENUGU") as "ENUGU" | "VALUEJET";
+  const bookingAirlineLabel = AIRLINE_KEY_TO_DISPLAY_NAME[bookingAirline] ?? bookingAirline;
 
   // Passenger title/gender resolution — must happen (and block progress,
   // same as flight-time disambiguation below) BEFORE collectBookingGaps,
@@ -1350,23 +1373,30 @@ async function handleBookOnHold(
     const isRecent = record ? Date.now() - record.createdAt.getTime() < 15 * 60 * 1000 : false;
     if (record && isRecent) {
       const results = record.resultsJson as unknown as FlightSearchResult;
-      // Scoped to Enugu Air only, matching the current booking
-      // restriction — a shown United/Rano/XeJet option can never actually
-      // be held right now, so resolving a reference to one of those would
-      // just be setting the user up for the "not wired up yet" message
-      // moments later instead of now.
-      const enuguOptions = results.options.filter((o) => o.airline === "Enugu Air");
-      if (enuguOptions.length > 0) {
-        const outcome = resolveShownFlightReference(rawMessage, enuguOptions);
+      // Scoped to airlines Book-on-Hold can actually place a hold with —
+      // a shown United/Rano/XeJet option can never actually be held right
+      // now, so resolving a reference to one of those would just be
+      // setting the user up for the "not wired up yet" message moments
+      // later instead of now.
+      const bookableDisplayNames = new Set(Object.values(AIRLINE_KEY_TO_DISPLAY_NAME));
+      const bookableOptions = results.options.filter((o) => bookableDisplayNames.has(o.airline));
+      if (bookableOptions.length > 0) {
+        const outcome = resolveShownFlightReference(rawMessage, bookableOptions);
         if (outcome.matched || outcome.ambiguousCandidates) {
-          slots.airline = "ENUGU";
+          // The matched (or first ambiguous) option's own airline field
+          // tells us which carrier this reference actually resolved to —
+          // never assumed, since a shown search can mix both bookable
+          // airlines' results together.
+          const resolvedDisplayName = (outcome.matched ?? bookableOptions[0]).airline;
+          const resolvedKey = Object.entries(AIRLINE_KEY_TO_DISPLAY_NAME).find(([, label]) => label === resolvedDisplayName)?.[0] ?? "ENUGU";
+          slots.airline = resolvedKey;
           slots.origin = record.origin;
           slots.destination = record.destination;
           slots.date = record.date;
           if (outcome.matched) {
             slots.selectedDepartureTime = outcome.matched.departureTime;
           } else {
-            const reply = `I found more than one Enugu Air option from that search — which one?\n${outcome.ambiguousCandidates!.map((t, i) => `${i + 1}. ${t}`).join("\n")}\nReply with the number or the time.`;
+            const reply = `I found more than one ${resolvedDisplayName} option from that search — which one?\n${outcome.ambiguousCandidates!.map((t, i) => `${i + 1}. ${t}`).join("\n")}\nReply with the number or the time.`;
             slots.pendingDepartureTimeOptions = outcome.ambiguousCandidates!;
             await ChatMemoryRepository.updateSlots(sessionId, slots);
             await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
@@ -1402,7 +1432,7 @@ async function handleBookOnHold(
   // already exposes for regular flight-search chat queries (callSearch,
   // below) — no separate mechanism needed for this.
   if (!slots.selectedDepartureTime) {
-    const outbound = await callSearchWithRetry("ENUGU", slots.origin!, slots.destination!, slots.date!);
+    const outbound = await callSearchWithRetry(bookingAirline, slots.origin!, slots.destination!, slots.date!);
     const outcome = resolveLegFlightChoice(outbound, "outbound", rawMessage);
     if (outcome.reply) {
       if (outcome.pendingOptions) slots.pendingDepartureTimeOptions = outcome.pendingOptions;
@@ -1417,7 +1447,7 @@ async function handleBookOnHold(
     if (outcome.time) slots.selectedDepartureTime = outcome.time;
   }
   if (slots.isRoundTrip && !slots.selectedReturnTime) {
-    const inbound = await callSearchWithRetry("ENUGU", slots.destination!, slots.origin!, slots.returnDate!);
+    const inbound = await callSearchWithRetry(bookingAirline, slots.destination!, slots.origin!, slots.returnDate!);
     const outcome = resolveLegFlightChoice(inbound, "return", rawMessage);
     if (outcome.reply) {
       if (outcome.pendingOptions) slots.pendingReturnTimeOptions = outcome.pendingOptions;
@@ -1430,7 +1460,7 @@ async function handleBookOnHold(
   }
 
   const result = await startBookOnHold({
-    airline: "ENUGU",
+    airline: bookingAirline,
     sessionKey,
     origin: slots.origin!,
     destination: slots.destination!,
@@ -1460,7 +1490,7 @@ async function handleBookOnHold(
   await ChatMemoryRepository.updateSlots(sessionId, slots);
 
   if (result.status === "FAILED") {
-    const reply = `I couldn't start the Enugu Air hold just now — mind trying again in a moment? Please tell Muhammed the reason, and he'll fix it: "${result.error ?? "unknown error"}"`;
+    const reply = `I couldn't start the ${bookingAirlineLabel} hold just now — mind trying again in a moment? Please tell Muhammed the reason, and he'll fix it: "${result.error ?? "unknown error"}"`;
     await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
     return { reply };
   }

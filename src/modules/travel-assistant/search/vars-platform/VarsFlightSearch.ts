@@ -364,6 +364,30 @@ async function navigateToDate(page: Page, targetDateISO: string, logTag: string)
     // way to tell which of the several attempts actually caused it.
     const tabCountAfter = await page.locator("a.dayTab").count().catch(() => -1);
     console.log(`[${logTag}] attempt ${i + 1}: after click — changed=${changed} url=${page.url()} tabCount=${tabCountAfter}`);
+
+    // The tab strip only ever slides forward — once every currently visible
+    // date is past the target, it can never come back into view. Confirmed
+    // live (Rano, SKO->ABV, target "09 Aug 2026", a Sunday): the strip
+    // jumped straight from a window ending "10 Aug 2026" to one ending "14
+    // Aug 2026" without the target ever appearing (this route apparently
+    // doesn't operate that day), then burned the rest of its 15s budget
+    // clicking forward 12 more times before giving up with a generic
+    // "gave up navigating" error — actively misleading, since it reads like
+    // a code/timing bug rather than "no flight this day". Detecting the
+    // overshoot immediately instead saves that wasted budget and reports
+    // the real reason, with the next actually-available date.
+    const targetDate = parseDayTabLabel(targetLabel);
+    if (targetDate) {
+      const visibleDates = await page
+        .evaluate(() => Array.from(document.querySelectorAll("a.dayTab")).map((el) => el.getAttribute("data-newday")))
+        .catch(() => [] as (string | null)[]);
+      const parsedVisible = visibleDates.map((d) => (d ? parseDayTabLabel(d) : null)).filter((d): d is Date => d !== null);
+      if (parsedVisible.length > 0 && parsedVisible.every((d) => d.getTime() > targetDate.getTime())) {
+        const nextAvailable = parsedVisible.reduce((min, d) => (d < min ? d : min));
+        const nextAvailableLabel = `${String(nextAvailable.getDate()).padStart(2, "0")} ${MONTHS[nextAvailable.getMonth()]} ${nextAvailable.getFullYear()}`;
+        throw new Error(`No flight scheduled for ${targetLabel} on this route — the next available date is ${nextAvailableLabel}`);
+      }
+    }
   }
 
   // Reaching here after the fix above is genuinely abnormal (a real page
@@ -452,6 +476,17 @@ function toDayTabLabel(dateISO: string): string {
   // widget's own multi-day-per-click jump and overshoots the target for
   // good, with no way back. Confirmed live via a real run against Enugu Air.
   return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// Inverse of toDayTabLabel, for comparing tab dates against the target —
+// lets date-navigation detect when it has paged PAST the target without
+// ever finding it (see the overshoot check in the tab-strip loop below).
+function parseDayTabLabel(label: string): Date | null {
+  const match = label.match(/^(\d{2}) (\w{3}) (\d{4})$/);
+  if (!match) return null;
+  const monthIndex = MONTHS.indexOf(match[2]);
+  if (monthIndex === -1) return null;
+  return new Date(parseInt(match[3], 10), monthIndex, parseInt(match[1], 10));
 }
 
 async function extractFlightOptions(

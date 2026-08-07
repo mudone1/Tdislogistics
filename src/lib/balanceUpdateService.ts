@@ -19,7 +19,11 @@ import type { AirlineKey } from "@prisma/client";
 // the airlines that actually work, not spend the whole poll budget waiting
 // on ones that will never complete. Remove an entry here once its connector
 // is confirmed working again.
-const BALANCE_UPDATE_EXCLUDED: readonly AirlineKey[] = ["AIRPEACE", "AERO", "ARIK", "IBOM", "NGEAGLE"];
+// VALUEJET added here too — its connector (ValueJetConnector.ts) is a
+// first-pass, unverified against a real login (needs the agent credentials
+// the user enters via Airline Connectors, which this session never sees).
+// Remove once a live sync run confirms it actually reads a balance.
+const BALANCE_UPDATE_EXCLUDED: readonly AirlineKey[] = ["AIRPEACE", "AERO", "ARIK", "IBOM", "NGEAGLE", "VALUEJET"];
 
 /**
  * "Balance update" — fires a manual sync across every WORKING airline

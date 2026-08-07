@@ -11,8 +11,11 @@ import type { AirlineKey, CabinClass } from "@prisma/client";
 // but their booking-flow selectors (fare classband names, passenger form
 // field ids, payment options) are not independently confirmed — listing
 // them here makes them reachable for that verification, not a claim they're
-// production-ready.
-export const BOOKABLE_AIRLINES = new Set<AirlineKey>(["ENUGU", "UNITED", "RANO", "XEJET"]);
+// production-ready. VALUEJET runs on an entirely different platform (KIU,
+// not VARS — see ValueJetBookOnHold.ts) built from a written spec rather
+// than a live-verified DOM; same "reachable for verification, not yet
+// proven" status as UNITED/RANO/XEJET.
+export const BOOKABLE_AIRLINES = new Set<AirlineKey>(["ENUGU", "UNITED", "RANO", "XEJET", "VALUEJET"]);
 
 export interface StartBookOnHoldInput {
   airline: AirlineKey;
