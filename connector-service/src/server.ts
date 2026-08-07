@@ -15,6 +15,7 @@ import { bookEnuguAirOnHold } from "../../src/modules/travel-assistant/booking/e
 import { bookUnitedNigeriaOnHold } from "../../src/modules/travel-assistant/booking/united/UnitedBookOnHold";
 import { bookRanoAirOnHold } from "../../src/modules/travel-assistant/booking/rano/RanoBookOnHold";
 import { bookXeJetOnHold } from "../../src/modules/travel-assistant/booking/xejet/XeJetBookOnHold";
+import { bookValueJetOnHold } from "../../src/modules/travel-assistant/booking/valuejet/ValueJetBookOnHold";
 import { BookingJobRepository } from "../../src/modules/travel-assistant/storage/BookingJobRepository";
 import { categorizeBookingError } from "../../src/modules/travel-assistant/booking/categorizeBookingError";
 import { decryptSecret } from "../../src/modules/airline-connectors/services/CredentialService";
@@ -173,6 +174,7 @@ const BOOK_ON_HOLD_HANDLERS: Record<string, typeof bookEnuguAirOnHold> = {
   UNITED: bookUnitedNigeriaOnHold,
   RANO: bookRanoAirOnHold,
   XEJET: bookXeJetOnHold,
+  VALUEJET: bookValueJetOnHold,
 };
 
 // Fare classband names are airline-specific and not guessable — using the
@@ -195,6 +197,12 @@ const FARE_CLASS_PREFERENCE: Partial<Record<string, [string, string]>> = {
   // Rano Air only offers a single "Economy" classband per flight (confirmed
   // via live search across every ABV destination) — no Promo/Saver split.
   RANO: ["Economy", "Economy"],
+  // Unused placeholder — ValueJetBookOnHold.ts runs on KIU, not VARS, and
+  // picks its class by its own fixed price-priority algorithm (letter
+  // codes like J/C/W/D, not a configured named-classband pair). This
+  // entry exists only so the generic "no verified fare names configured"
+  // gate below doesn't block VALUEJET bookings before they even start.
+  VALUEJET: ["", ""],
 };
 
 // Actually runs the automation for one job and records the outcome — shared
@@ -248,13 +256,16 @@ async function executeBookingAutomation(
     const durationMs = Date.now() - startedAt;
     // A confirmation page with no parseable PNR is a soft failure — the
     // hold may not have gone through — so treat a null PNR as FAILED rather
-    // than reporting a success the staff can't act on.
-    if (!result.pnr) {
+    // than reporting a success the staff can't act on. VALUEJET is the one
+    // exception: per its spec, the automation deliberately stops at "Save
+    // reservation", before PNR generation/TTL/ticketing — a null pnr there
+    // is the EXPECTED successful outcome, not a sign anything went wrong.
+    if (!result.pnr && job.airline !== "VALUEJET") {
       console.error(`[book-hold] job=${jobId} finished with no PNR after ${durationMs}ms`);
       await BookingJobRepository.markFailed(jobId, "UNKNOWN", "Completed the flow but no PNR was found on the confirmation page", durationMs);
       return;
     }
-    console.log(`[book-hold] job=${jobId} SUCCESS pnr=${result.pnr} in ${durationMs}ms`);
+    console.log(`[book-hold] job=${jobId} SUCCESS pnr=${result.pnr ?? "(none — reservation saved, not yet ticketed)"} in ${durationMs}ms`);
     await BookingJobRepository.markSuccess(jobId, {
       pnr: result.pnr,
       holdExpiresAt: result.holdExpiresAt,
