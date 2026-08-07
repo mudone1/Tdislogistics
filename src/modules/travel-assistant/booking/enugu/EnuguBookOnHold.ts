@@ -25,7 +25,8 @@ const MMB_URL = "https://booking.enuguairlines.com/vars/public/CustomerPanels/Mm
 export async function bookEnuguAirOnHold(
   credentials: BookOnHoldCredentials,
   request: BookOnHoldRequest,
-  onStage?: OnBookingStage
+  onStage?: OnBookingStage,
+  forceFreshLogin?: boolean
 ): Promise<BookOnHoldResult> {
   return bookVarsPlatformOnHold(
     credentials,
@@ -37,6 +38,7 @@ export async function bookEnuguAirOnHold(
       mmbUrl: MMB_URL,
       airlineLabel: "Enugu Air",
     },
-    onStage
+    onStage,
+    forceFreshLogin
   );
 }

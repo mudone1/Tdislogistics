@@ -57,13 +57,16 @@ function formatQueuedMessage(job: BookingJobStatus): string {
 // (same as the browser's BookingResultCard image), it's sent as the
 // caption-bearing image itself rather than a separate text message.
 //
-// Also sends exactly one message per QUEUED/stage TRANSITION along the way
-// (never one per poll tick, which would spam a message every 4s) — the
-// queue position when first queued, "Booking starting now..." the moment a
-// worker picks it up, then one line per automation milestone.
+// Deliberately terse per explicit product direction: no per-milestone
+// "Searching flights.../Flight found./..." messages and no "Booking
+// starting now..." — those turned out to add noise, not clarity. The ONLY
+// message before the final result is the queue position (when the job is
+// actually queued behind a busy worker); everything else is silence until
+// success or failure. Stage is still tracked (STAGE_MESSAGES) purely to
+// label which step a failure happened at.
 export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
   let attempts = 0;
-  let lastStage: BookingJobStatus["stage"] | undefined = undefined;
+  let sentQueueNotice = false;
   const stopTyping = keepTypingAlive(sender.setTyping);
 
   const tick = async (): Promise<void> => {
@@ -71,20 +74,9 @@ export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
     try {
       const job = await getBookingJobStatus(jobId);
 
-      if (job.stage !== lastStage) {
-        const wasQueued = lastStage === "QUEUED";
-        if (job.stage === "QUEUED" && job.queuePosition != null) {
-          await sender.sendText(formatQueuedMessage(job)).catch((err) => console.error(`[whatsapp] queue notice failed for job ${jobId}:`, err));
-        } else {
-          if (wasQueued && job.stage) {
-            await sender.sendText("Booking starting now...").catch((err) => console.error(`[whatsapp] starting notice failed for job ${jobId}:`, err));
-          }
-          const stageText = job.stage ? STAGE_MESSAGES[job.stage] : null;
-          if (stageText) {
-            await sender.sendText(stageText).catch((err) => console.error(`[whatsapp] stage notice failed for job ${jobId}:`, err));
-          }
-        }
-        lastStage = job.stage;
+      if (!sentQueueNotice && job.stage === "QUEUED" && job.queuePosition != null) {
+        sentQueueNotice = true;
+        await sender.sendText(formatQueuedMessage(job)).catch((err) => console.error(`[whatsapp] queue notice failed for job ${jobId}:`, err));
       }
 
       if (job.status === "SUCCESS" && job.result) {
