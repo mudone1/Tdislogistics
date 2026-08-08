@@ -37,7 +37,6 @@ export type { BookOnHoldCredentials, BookOnHoldRequest, BookOnHoldResult, OnBook
 // (see connector-service/src/server.ts's VALUEJET carve-out).
 
 const LOGIN_URL = "https://kiu.click/login/";
-const DASHBOARD_MARKER = /dashboard|reservations/i;
 
 // Premium cabin classes, cheapest-first (spec 5.1) — D is the cheapest
 // Premium tier, J the most expensive. Never default to J just because
@@ -201,10 +200,20 @@ export async function bookValueJetOnHold(
         throw err;
       });
     });
+    // Confirmed live: login itself now succeeds and lands on
+    // kiu.click/dashboard/, but the dashboard's own async load (a survey
+    // widget — "Help us improve by answering a few, simple questions!" —
+    // renders alongside it) routinely takes longer than the 20s this used
+    // to wait, even though the "Reservations" button DOES show up soon
+    // after — the diagnostic dump from that exact timeout confirmed
+    // "Reservations" present in visibleButtons moments later. Wait longer,
+    // and target the specific button role rather than any text match
+    // (removes any risk of the survey widget's own text colliding, the
+    // same class of bug the login-button fix above addressed).
     await page
-      .getByText(DASHBOARD_MARKER)
+      .getByRole("button", { name: /^reservations$/i })
       .first()
-      .waitFor({ state: "visible", timeout: 20000 })
+      .waitFor({ state: "visible", timeout: 40000 })
       .catch(() => failWithDiagnostic(page, logTag, "Dashboard never appeared after login"));
 
     // --- 2. Open Reservation Module ---
