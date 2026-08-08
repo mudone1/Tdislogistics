@@ -177,7 +177,13 @@ const BALANCE_UPDATE_PATTERN = /\bbal(?:ance)?\s*update\b/i;
 // classification variance, same reasoning as BALANCE_UPDATE_PATTERN above.
 // Clears every route/passenger slot so the next message starts a
 // completely fresh booking, no leftover info carried over.
-const CLOSE_SESSION_PATTERN = /\b(?:close\s+session|cancel(?:\s+booking)?|start\s+over|reset\s+booking)\b/i;
+// "reset" alone must trigger this too, not just "reset booking" — confirmed
+// live: a user typed bare "Reset" expecting it to clear stuck state, but it
+// fell through to a generic conversational reply instead (the pattern
+// required the "booking" suffix), leaving the actual stale slots untouched
+// and the same error repeating on their very next message. "cancel" already
+// had this same optional-suffix shape; "reset" now matches it.
+const CLOSE_SESSION_PATTERN = /\b(?:close\s+session|cancel(?:\s+booking)?|start\s+over|reset(?:\s+booking)?)\b/i;
 
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
   const session = await ChatMemoryRepository.getOrCreateSession(
