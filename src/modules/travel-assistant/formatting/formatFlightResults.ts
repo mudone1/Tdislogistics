@@ -29,12 +29,7 @@ export function formatLeg(result: FlightSearchResult): string {
       const cheapest = cheapestOf(sorted);
       const header = cheapest === Infinity ? airline : `${airline}\nFrom ${formatNaira(cheapest)}`;
 
-      const lines = sorted.map((o) => {
-        const time = formatTime12h(o.departureTime);
-        if (o.fare == null) return `${time} @ ${o.seatStatus ?? "unavailable"}`;
-        const cabin = shortCabinClass(cheapestFareClassName(o));
-        return `${time} @ ${formatNaira(o.fare)} - ${cabin}`;
-      });
+      const lines = sorted.flatMap((o) => formatCabinLines(o));
 
       return `${header}\n\n${lines.join("\n")}`;
     })
@@ -92,14 +87,67 @@ export function cheapestPerAirline(options: FlightOption[]): FlightOption[] {
 }
 
 // Fare class names vary a lot in the raw data ("Economy Promo", "Economy
-// Saver", "Premium Economy Flex", "Business Flex", ...) — collapse to the
-// three short labels the default view is allowed to show.
+// Saver", "Premium Economy Flex", "Business Flex", "FIRST CLASS",
+// "ValuePlus", "ValueBusiness", ...) — collapse to the three short labels
+// the default view shows. Live-verified bug this fixes (2026-08-08,
+// XeJet ABV-LOS): a genuine "FIRST CLASS" fare (₦260,501) silently fell
+// through to "Economy" because the old check only looked for the literal
+// substrings "business"/"premium" — first-class fares, and ValueJet's
+// "ValuePlus" tier (a premium-cabin tier that doesn't contain the word
+// "premium" at all), both slipped through unclassified. Normalizing
+// whitespace out before matching so "Value Plus"/"ValuePlus" match the
+// same way regardless of the source's exact spacing.
 export function shortCabinClass(rawName: string | null): string {
   if (!rawName) return "Economy";
-  const n = rawName.toLowerCase();
-  if (n.includes("business")) return "Business";
-  if (n.includes("premium")) return "Premium Eco";
+  const n = rawName.toLowerCase().replace(/\s+/g, "");
+  // First class has no dedicated bucket in this 3-tier view — folding it
+  // into "Business" is still far more honest than "Economy" and needs no
+  // new UI category to support it.
+  if (n.includes("business") || n.includes("first") || n.includes("executive")) return "Business";
+  if (n.includes("premium") || n.includes("valueplus")) return "Premium Eco";
   return "Economy";
+}
+
+// Groups a flight's available fare classes by cabin bucket (Economy /
+// Premium Eco / Business) and returns the cheapest fare within EACH
+// present bucket — not just the single overall-cheapest fare. Fixes the
+// reported bug where a flight offering both Economy and Business showed
+// only the Economy line, silently hiding the Business option from the
+// comparison. Bucket order in the output always leads with the cheapest
+// bucket first (almost always Economy, but not assumed).
+function cabinBucketsForFlight(option: FlightOption): { bucket: string; fareClass: FareClassOption }[] {
+  const available = option.fareClasses.filter((c) => !c.soldOut && c.fare != null);
+  const cheapestPerBucket = new Map<string, FareClassOption>();
+  for (const fc of available) {
+    const bucket = shortCabinClass(fc.name);
+    const existing = cheapestPerBucket.get(bucket);
+    if (!existing || (fc.fare as number) < (existing.fare as number)) {
+      cheapestPerBucket.set(bucket, fc);
+    }
+  }
+  return Array.from(cheapestPerBucket.entries())
+    .map(([bucket, fareClass]) => ({ bucket, fareClass }))
+    .sort((a, b) => (a.fareClass.fare as number) - (b.fareClass.fare as number));
+}
+
+// One line per distinct cabin bucket available on this flight departure —
+// e.g. a flight with both Economy and Premium availability produces two
+// lines at the same departure time, so neither gets hidden behind the
+// other. Appends the exact remaining-seat count only when it's below 5
+// AND the source actually reported a number (never invented/estimated).
+function formatCabinLines(option: FlightOption): string[] {
+  const time = formatTime12h(option.departureTime);
+  const buckets = cabinBucketsForFlight(option);
+  if (buckets.length === 0) {
+    return [`${time} @ ${option.seatStatus ?? "unavailable"}`];
+  }
+  return buckets.map(({ bucket, fareClass }) => {
+    const seatsSuffix =
+      fareClass.seatsLeft != null && fareClass.seatsLeft < 5
+        ? ` — ${fareClass.seatsLeft} seat${fareClass.seatsLeft === 1 ? "" : "s"} left`
+        : "";
+    return `${time} @ ${formatNaira(fareClass.fare as number)} - ${bucket}${seatsSuffix}`;
+  });
 }
 
 export function formatTime12h(time24: string): string {
