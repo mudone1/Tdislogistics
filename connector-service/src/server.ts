@@ -264,10 +264,13 @@ async function executeBookingAutomation(
     const durationMs = Date.now() - startedAt;
     // A confirmation page with no parseable PNR is a soft failure — the
     // hold may not have gone through — so treat a null PNR as FAILED rather
-    // than reporting a success the staff can't act on. VALUEJET is the one
-    // exception: per its spec, the automation deliberately stops at "Save
-    // reservation", before PNR generation/TTL/ticketing — a null pnr there
-    // is the EXPECTED successful outcome, not a sign anything went wrong.
+    // than reporting a success the staff can't act on. VALUEJET is a
+    // narrower exception: CORRECTED (2026-08-08) — it does generate a real
+    // reference code on save (confirmed live via screen recording, e.g.
+    // "JLTWRI"), and ValueJetBookOnHold.ts now attempts to capture it, but
+    // that capture is best-effort against an unconfirmed selector — a
+    // capture miss on an otherwise-successful save must not be reported as
+    // a failed booking, so a null pnr here still isn't treated as fatal.
     if (!result.pnr && job.airline !== "VALUEJET") {
       console.error(`[book-hold] job=${jobId} finished with no PNR after ${durationMs}ms`);
       await BookingJobRepository.markFailed(jobId, "UNKNOWN", "Completed the flow but no PNR was found on the confirmation page", durationMs);

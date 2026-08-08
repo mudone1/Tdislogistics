@@ -20,21 +20,28 @@ export type { BookOnHoldCredentials, BookOnHoldRequest, BookOnHoldResult, OnBook
 // executeBookingAutomation machinery doesn't need any per-airline
 // special-casing beyond registering this handler).
 //
-// Built from a written spec (kiu-booking-spec.md, itself derived from
-// mobile-app screenshots), not a live DOM inspection — unlike every other
-// booking module in this codebase, which was hardened against a real
-// portal through several live-test iterations. Selectors here are
-// deliberately GENERIC (by visible text/label/role, not guessed CSS ids),
-// per the spec's own explicit guidance ("target elements by label/
-// function, not fixed coordinates/position"). Expect this to need the
-// same fix-from-real-diagnostic cycle every other module in this codebase
-// went through — every major step below dumps page state into its thrown
-// error on failure for exactly that reason.
+// Originally built from a written spec (kiu-booking-spec.md, itself
+// derived from mobile-app screenshots) with zero live DOM access, then
+// corrected against a real screen-recorded agent walkthrough
+// (2026-08-08) that exposed several mismatches between the spec and the
+// actual kiu.click UI — see the per-step comments below for exactly what
+// changed and why. Selectors are still deliberately GENERIC (by visible
+// text/label/role, not guessed CSS ids) since even the recording doesn't
+// give live DOM access — expect this to keep needing the same
+// fix-from-real-diagnostic cycle every other module in this codebase went
+// through; every major step below dumps page state into its thrown error
+// on failure for exactly that reason.
 //
-// Explicitly, per spec: STOPS AFTER "Save reservation" — no PNR, no TTL,
-// no ticketing. The result's pnr is always null; callers must not treat a
-// null pnr here as failure the way they would for a VARS-platform hold
-// (see connector-service/src/server.ts's VALUEJET carve-out).
+// CORRECTED (was: "stops after Save reservation, no PNR, no TTL, no
+// ticketing, pnr always null"): the recording shows a real reference code
+// (e.g. "JLTWRI") assigned immediately after "Save reservation", on its
+// own confirmation page (URL contains "/ipnr") with both flight segments
+// at status "HK" — this is captured as the result's pnr below. Capture
+// itself is still best-effort against an unconfirmed selector (see
+// capturePnr) — a capture miss on an otherwise-successful save is NOT
+// treated as a failure (see connector-service/src/server.ts's VALUEJET
+// carve-out), so a null pnr can still occasionally reach callers even
+// though ValueJet does generate one.
 
 const LOGIN_URL = "https://kiu.click/login/";
 
@@ -111,8 +118,11 @@ async function clickByText(page: import("playwright").Page, pattern: RegExp, opt
   await locator.click({ timeout: opts?.timeout ?? 15000 });
 }
 
-async function fillByLabel(page: import("playwright").Page, labelPattern: RegExp, value: string): Promise<void> {
-  await page.getByLabel(labelPattern, { exact: false }).first().fill(value);
+// `index` picks the Nth match (0-based) instead of the first — needed for
+// Availability mode's round-trip search form, which duplicates the same
+// Origin/Destination/Date labels for leg 2.
+async function fillByLabel(page: import("playwright").Page, labelPattern: RegExp, value: string, index = 0): Promise<void> {
+  await page.getByLabel(labelPattern, { exact: false }).nth(index).fill(value);
 }
 
 export async function bookValueJetOnHold(
@@ -136,17 +146,24 @@ export async function bookValueJetOnHold(
   const infants = request.additionalPassengers?.filter((p) => p.type === "INFANT").length ?? 0;
   const adults = 1 + additionalAdults;
 
-  // Spec's own screenshots are the mobile interface, and explicitly warns
-  // desktop may position (or even structure) controls differently —
-  // matching that viewport gives the best chance of hitting the same UI
-  // the spec was written against.
+  // CORRECTED: the spec assumed a mobile interface and this used to force
+  // a 390x844 mobile viewport to match it — but the real agent portal
+  // (confirmed via a real screen recording, 2026-08-08) is a full desktop
+  // web app: a fixed left sidebar nav, multi-column layout, data tables —
+  // nothing about it is mobile-responsive. Running it at mobile width was
+  // very likely why the dashboard nav previously collapsed to an
+  // icon-only zero-size "Reservations" element (see the dashboard-wait
+  // comment below). Drive the automation at desktop width to match the
+  // UI it actually is, and only narrow to mobile right before the final
+  // screenshot (per explicit product preference — see near the bottom of
+  // this function).
   const browser = await chromium.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
 
   try {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
+    const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await context.newPage();
 
     // --- 1. Login ---
@@ -315,24 +332,76 @@ export async function bookValueJetOnHold(
     // --- 3/4. Search flights ---
     reportStage("SEARCHING");
     console.log(`[${logTag}] searching ${request.origin}->${request.destination}`);
-    await fillByLabel(page, /origin|from/i, request.origin);
-    await fillByLabel(page, /destination|to/i, request.destination);
-    await fillByLabel(page, /(departure|travel) date/i, request.departureDate);
-    if (isRoundTrip) {
-      await fillByLabel(page, /return date/i, request.returnDate!);
-    }
-    await setPassengerCount(page, "Adult", adults);
-    if (children > 0) await setPassengerCount(page, "Child", children);
-    if (infants > 0) await setPassengerCount(page, "Infant", infants);
+    // CORRECTED: the spec's single Origin/Destination/Date/"Date Of
+    // Return" form is the "Shopping" sale-type tab — but that tab never
+    // shows the letter-coded class-inventory buttons (T3, H9, JC, ...)
+    // this module's whole fare-selection algorithm depends on. The
+    // recording explicitly switches to the "Availability" tab first,
+    // which is also the one whose search form matches the spec's own
+    // class-inventory screenshots. Select it explicitly rather than
+    // trusting whatever sale type happens to be selected by default.
+    await clickByText(page, /^availability$/i).catch(() =>
+      failWithDiagnostic(page, logTag, `Couldn't find the "Availability" sale-type tab`)
+    );
+    await page.waitForTimeout(300);
+
+    // Leg 1 (outbound) — Origin/Destination/Date are the first instance of
+    // each of these labels on the page even in round-trip mode (leg 2, if
+    // added below, duplicates the same labels further down).
+    await fillByLabel(page, /^origin/i, request.origin);
+    await fillByLabel(page, /^destination/i, request.destination);
+    // CORRECTED: Availability mode's date field is labeled plainly "Date"
+    // (not "Departure Date"/"Travel Date" as the spec assumed) — matched
+    // first here since it's confirmed live; the old wording kept as a
+    // fallback in case a different KIU deployment phrases it that way.
+    await fillByLabel(page, /^date$/i, request.departureDate).catch(() =>
+      fillByLabel(page, /(departure|travel) date/i, request.departureDate)
+    );
 
     if (isRoundTrip) {
-      // Spec 4.3: click "Flights" to auto-add the return sector with the
-      // same passenger count — a distinct action from the final search
-      // submission below.
-      await clickByText(page, /^flights$/i).catch(() => {
-        /* some KIU deployments may not need this extra step for a round trip — non-fatal, the Next-click loop below still surfaces a real problem if the return leg genuinely never got added */
-      });
+      // CORRECTED: Availability mode has no single "Date Of Return" field
+      // at all — a round trip is built by clicking "+" to add a SECOND
+      // leg row (its own Origin/Destination/Date), reversed from leg 1,
+      // confirmed live. No confirmed selector for the add-leg control
+      // (icon-only, no visible text) — try several plausible ways to find
+      // it before giving up loudly.
+      const addLegButton = page
+        .locator('button, [role="button"]')
+        .filter({ has: page.locator('svg, [class*="plus" i], [class*="add" i]') })
+        .last();
+      const clickedAdd = await addLegButton
+        .click({ timeout: 5000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!clickedAdd) {
+        await page
+          .getByRole("button", { name: /^\+$/ })
+          .last()
+          .click({ timeout: 5000 })
+          .catch(() => failWithDiagnostic(page, logTag, `Couldn't find the "add leg" (+) button for the return leg`));
+      }
+      await page.waitForTimeout(300);
+      // Leg 2 fields are the SECOND instance of each label — explicitly
+      // filled (not relied upon to auto-populate) even though the
+      // recording showed KIU pre-filling them from leg 1's reversed
+      // route, since that auto-fill is a UI convenience tied to the real
+      // autocomplete interaction and isn't guaranteed to fire the same
+      // way when driven programmatically.
+      await fillByLabel(page, /^origin/i, request.destination, 1);
+      await fillByLabel(page, /^destination/i, request.origin, 1);
+      await fillByLabel(page, /^date$/i, request.returnDate!, 1).catch(() =>
+        fillByLabel(page, /(departure|travel) date/i, request.returnDate!, 1)
+      );
     }
+
+    // CORRECTED: passenger-count fields are labeled "ADT"/"CHD"/"INF"
+    // (abbreviations), not spelled out "Adult"/"Child"/"Infant" — the old
+    // getByLabel(/Adult/i)-based helper would never match. Confirmed live
+    // as plain number inputs directly below their abbreviated label, not
+    // a <select> or a stepper.
+    await setPassengerCountAvailability(page, "ADT", adults);
+    if (children > 0) await setPassengerCountAvailability(page, "CHD", children);
+    if (infants > 0) await setPassengerCountAvailability(page, "INF", infants);
 
     await clickNextUntilFlightsShown(page, logTag);
     reportStage("FLIGHT_FOUND");
@@ -372,26 +441,49 @@ export async function bookValueJetOnHold(
     // --- 10. Save ---
     reportStage("CREATING_HOLD");
     console.log(`[${logTag}] saving reservation`);
-    const saveButton = page.getByRole("button", { name: /save reservation/i }).first();
+    const saveButton = page.getByRole("button", { name: /^save reservation$/i }).first();
     await saveButton.click({ timeout: 15000 }).catch(() => clickByText(page, /save reservation/i));
     // Single click only, then wait for the save to actually settle — per
     // spec's explicit "never click Save repeatedly while it's processing".
+    // CORRECTED: confirmed live (2026-08-08) a successful save navigates to
+    // a dedicated confirmation/itinerary page (URL contains "/ipnr") — wait
+    // for that first as the strongest signal, then the text-based wait
+    // (unchanged) as a second check in case some deployments don't
+    // navigate the same way.
+    await page.waitForURL(/ipnr/i, { timeout: 30000 }).catch(() => {
+      /* URL-based wait is a bonus signal, not required — the text wait below still catches a genuine failure */
+    });
     await page
       .getByText(/reservation saved|itinerary|manage/i)
       .first()
       .waitFor({ state: "visible", timeout: 30000 })
       .catch(() => failWithDiagnostic(page, logTag, "Reservation save never confirmed"));
 
-    // --- 11. Post-save verification (best-effort — a missing confirmation
+    // --- 11. Capture the reference code ---
+    // CORRECTED: was assumed impossible ("no PNR by design") — confirmed
+    // live the confirmation page shows a real short reference code (e.g.
+    // "JLTWRI") right at the top, next to print/email icons. Best-effort:
+    // a capture miss here doesn't mean the save failed (see
+    // connector-service/src/server.ts's VALUEJET carve-out), so this never
+    // throws.
+    const pnr = await capturePnr(page, logTag);
+
+    // --- 12. Post-save verification (best-effort — a missing confirmation
     // signal here doesn't undo an already-successful save, so this never
     // throws; it only affects what ends up in `raw` for visibility) ---
     const diagnostic = await pageDiagnostic(page).catch(() => ({ bodyText: "" }));
     const raw = String((diagnostic as { bodyText?: string }).bodyText ?? "");
 
+    // Final confirmation screenshot in mobile view (explicit product
+    // preference) — everything above this point ran at desktop width to
+    // match the real portal, so narrow down only now, after every real
+    // interaction is already done.
+    await page.setViewportSize({ width: 390, height: 844 }).catch(() => {});
+    await page.waitForTimeout(300);
     const screenshot = await page.screenshot({ fullPage: false }).catch(() => null);
 
     return {
-      pnr: null, // explicitly out of scope for this spec — see module doc comment
+      pnr,
       holdExpiresAt: null,
       totalPayable,
       currency: totalPayable != null ? "NGN" : null,
@@ -403,22 +495,39 @@ export async function bookValueJetOnHold(
   }
 }
 
-async function setPassengerCount(page: import("playwright").Page, label: "Adult" | "Child" | "Infant", count: number): Promise<void> {
-  const pattern = new RegExp(label, "i");
-  const control = page.getByLabel(pattern, { exact: false }).first();
-  await control.selectOption(String(count)).catch(async () => {
-    // A stepper (+/- buttons) rather than a <select> — click "+" (count-1)
-    // times from whatever the default is (Adult defaults to 1, others to 0).
-    const defaultValue = label === "Adult" ? 1 : 0;
-    const clicksNeeded = count - defaultValue;
-    if (clicksNeeded <= 0) return;
-    const incrementButton = page
-      .locator(`text=${label}`)
-      .locator("xpath=following::button[1]")
-      .first();
-    for (let i = 0; i < clicksNeeded; i++) {
-      await incrementButton.click({ timeout: 5000 }).catch(() => {});
-    }
+// CORRECTED: Availability mode's "Number Of Passengers" fields are labeled
+// with abbreviations ("ADT"/"CHD"/"INF") sitting directly above a plain
+// number input — confirmed live (2026-08-08) — not spelled-out
+// "Adult"/"Child"/"Infant" text associated via a semantic <label for>, and
+// not a stepper either. Try the semantic-label approach first anyway (in
+// case a different KIU deployment does associate it properly), then fall
+// back to the confirmed real layout: locate the abbreviation text, then
+// the input immediately following it.
+async function setPassengerCountAvailability(
+  page: import("playwright").Page,
+  code: "ADT" | "CHD" | "INF",
+  count: number
+): Promise<void> {
+  const fullWord = code === "ADT" ? "Adult" : code === "CHD" ? "Child" : "Infant";
+  const filledByLabel = await page
+    .getByLabel(new RegExp(fullWord, "i"), { exact: false })
+    .first()
+    .fill(String(count))
+    .then(() => true)
+    .catch(() => false);
+  if (filledByLabel) return;
+
+  const input = page
+    .getByText(new RegExp(`^${code}$`, "i"))
+    .first()
+    .locator("xpath=following::input[1]");
+  await input.fill(String(count)).catch(() => {
+    // Best-effort — ADT already defaults to 1 and CHD/INF to 0, so a
+    // failed fill for a value matching that default is a silent no-op
+    // anyway. A real mismatch (e.g. 2 adults requested but the form still
+    // shows 1) will surface loudly downstream when only one passenger form
+    // appears on the Passengers step.
+    console.warn(`[valuejet-kiu-booking] couldn't set ${code} passenger count to ${count}`);
   });
 }
 
@@ -449,6 +558,33 @@ async function clickNextUntilFlightsShown(page: import("playwright").Page, logTa
   if (!flightsVisible) await failWithDiagnostic(page, logTag, "Flight results never appeared after clicking Next");
 }
 
+// Confirmed live (2026-08-08 recording): each flight row's class
+// inventory really is rendered as individually clickable buttons whose
+// own text is the exact code (e.g. "T3", "H9", "JC") — clicking one
+// toggles it into a selected/checked state. That part of the spec's
+// design (read raw inventory text, apply the priority algorithm, click
+// the chosen code) holds up. What's unconfirmed is the exact row
+// container — walks up from each flight-number badge to find one, since
+// no real class name was ever observed to guess from.
+async function walkUpToRowContainer(
+  page: import("playwright").Page,
+  badge: ReturnType<typeof page.getByText>
+): Promise<ReturnType<typeof page.getByText> | null> {
+  for (let up = 1; up <= 8; up++) {
+    const ancestor = badge.locator(`xpath=ancestor::*[${up}]`);
+    const text = (await ancestor.textContent().catch(() => "")) ?? "";
+    // A real row's text contains the flight-number badge itself plus
+    // several class-code tokens (e.g. "T3 D6 S9 B9 H9 K9..." per spec
+    // 5.3/5.4) — stop at the SMALLEST ancestor that already has at least
+    // 3, rather than overshooting into a container spanning multiple
+    // flights (which would make the later getByText(chosenClass) click
+    // ambiguous between rows).
+    const classCodeMatches = text.match(/\b[A-Z]{1,2}(?:C|\d{1,2})\b/g) ?? [];
+    if (classCodeMatches.length >= 3) return ancestor;
+  }
+  return null;
+}
+
 // Finds the flight row matching preferredTime (if given — otherwise the
 // first row) and applies the class-priority selection algorithm (spec
 // 5.5) against that row's inventory text.
@@ -459,31 +595,48 @@ async function selectFlightAndClass(
   preferredTime: string | undefined,
   legLabel: string
 ): Promise<void> {
-  const rows = page.locator('[class*="flight" i], [class*="itinerary" i]').filter({ hasText: /\b[A-Z]{2}\d{2,4}\b/ });
-  const rowCount = await rows.count();
-  if (rowCount === 0) await failWithDiagnostic(page, logTag, `No ${legLabel} flight rows found on the results page`);
+  // Strategy A: the original guessed class-name selector — cheap, keep
+  // trying it first in case it's right.
+  let rows: ReturnType<typeof page.getByText>[] = [];
+  const guessed = page.locator('[class*="flight" i], [class*="itinerary" i]').filter({ hasText: /\b[A-Z]{2}\d{2,4}\b/ });
+  const guessedCount = await guessed.count().catch(() => 0);
+  if (guessedCount > 0) {
+    rows = Array.from({ length: guessedCount }, (_, i) => guessed.nth(i));
+  } else {
+    // Strategy B (2026-08-08 correction): derive rows by walking up from
+    // each flight-number badge instead of guessing a container class name
+    // — every flight row is anchored by an exact "VK200"-shaped token.
+    const badges = page.getByText(/^[A-Z]{2}\d{2,4}$/);
+    const badgeCount = await badges.count().catch(() => 0);
+    for (let i = 0; i < badgeCount; i++) {
+      const row = await walkUpToRowContainer(page, badges.nth(i));
+      if (row) rows.push(row);
+    }
+  }
+
+  if (rows.length === 0) await failWithDiagnostic(page, logTag, `No ${legLabel} flight rows found on the results page`);
 
   let rowIndex = 0;
-  if (preferredTime && rowCount > 1) {
-    const texts = await rows.allTextContents();
-    const matchIndex = texts.findIndex((t) => t.includes(preferredTime));
+  if (preferredTime && rows.length > 1) {
+    const texts = await Promise.all(rows.map((r) => r.textContent().catch(() => "")));
+    const matchIndex = texts.findIndex((t) => (t ?? "").includes(preferredTime));
     if (matchIndex === -1) {
       await failWithDiagnostic(
         page,
         logTag,
-        `No ${legLabel} flight departs at "${preferredTime}" (${rowCount} option(s) shown, none matched)`
+        `No ${legLabel} flight departs at "${preferredTime}" (${rows.length} option(s) shown, none matched)`
       );
     }
     rowIndex = matchIndex;
-  } else if (rowCount > 1 && !preferredTime) {
+  } else if (rows.length > 1 && !preferredTime) {
     await failWithDiagnostic(
       page,
       logTag,
-      `${rowCount} ${legLabel} flights found but no preferred time was given — resolve the ambiguity before booking`
+      `${rows.length} ${legLabel} flights found but no preferred time was given — resolve the ambiguity before booking`
     );
   }
 
-  const row = rows.nth(rowIndex);
+  const row = rows[rowIndex];
   const rowText = await row.textContent().catch(() => "");
   const inventory = parseClassInventory(rowText ?? "");
   const chosenClass = selectClassCode(inventory, cabinClass);
@@ -497,7 +650,7 @@ async function selectFlightAndClass(
 
   console.log(`[${logTag}] ${legLabel}: selected class ${chosenClass} (cabin=${cabinClass})`);
   await row
-    .getByText(new RegExp(`\\b${chosenClass}\\d+\\b`))
+    .getByText(new RegExp(`^${chosenClass}\\d+$`))
     .first()
     .click({ timeout: 10000 })
     .catch(() => failWithDiagnostic(page, logTag, `Found class ${chosenClass} in the ${legLabel} row's text but couldn't click it`));
@@ -537,8 +690,26 @@ async function fillContactInfo(page: import("playwright").Page, logTag: string, 
     });
   await page.waitForTimeout(500);
 
-  // Phone — local number only, per spec (country prefix is a separate,
-  // already-defaulted control).
+  // CORRECTED: "Country Prefix" is its own required (*) field — a
+  // country-search dropdown, not free text — confirmed live (2026-08-08)
+  // to sit right next to "Number". The old comment assumed this was
+  // "already-defaulted"; it isn't, and leaving it empty would very likely
+  // block the Phone section's own Confirm click on a required-field
+  // validation error. Every booking so far is Nigeria-specific (route,
+  // currency, phone format), same assumption VarsBookOnHold.ts's own phone
+  // handling already makes, so this is hardcoded rather than derived from
+  // the number itself.
+  const prefixInput = page.getByLabel(/country prefix/i, { exact: false }).first();
+  await prefixInput.click({ timeout: 5000 }).catch(() => {});
+  await prefixInput.fill("Nigeria").catch(() => {});
+  await page
+    .getByText(/nigeria.*\+234|\+234.*nigeria/i)
+    .first()
+    .click({ timeout: 5000 })
+    .catch(() => failWithDiagnostic(page, logTag, `Couldn't select "Nigeria (+234)" from the Country Prefix dropdown`));
+
+  // Phone number itself — local digits only, the country prefix above
+  // covers the +234.
   const digitsOnly = phoneLocal.replace(/\D/g, "");
   await fillByLabel(page, /^number$|phone number/i, digitsOnly).catch(() =>
     failWithDiagnostic(page, logTag, "Couldn't find the Phone Number field")
@@ -551,12 +722,61 @@ async function fillContactInfo(page: import("playwright").Page, logTag: string, 
       /* see email note above */
     });
   await page.waitForTimeout(500);
+
+  // CORRECTED: confirming email + phone does NOT auto-advance past the
+  // Contact step — a separate "Confirm reservation" button is required to
+  // reach the Confirmation/Save-reservation page, confirmed live
+  // (2026-08-08) to skip "Extra Services" entirely. The old code jumped
+  // straight from here to clicking "Save reservation", which isn't even
+  // rendered yet at this point — this would have failed outright the
+  // first time a real booking got this far.
+  await page
+    .getByRole("button", { name: /^confirm reservation$/i })
+    .first()
+    .click({ timeout: 10000 })
+    .catch(() => failWithDiagnostic(page, logTag, `Couldn't find "Confirm reservation"`));
+  await page.waitForTimeout(500);
 }
 
-// Spec 9.1: the Total Quote row starts collapsed on mobile — expand,
-// read, collapse again, leaving the screen in its pre-save state. Never
-// sums per-passenger fares manually; only trusts what KIU itself displays
-// as the total.
+// Confirmed live (2026-08-08 recording): after "Save reservation"
+// succeeds, KIU navigates to a confirmation page (URL contains "/ipnr")
+// showing a short (5-8 character) uppercase alphanumeric reference code
+// right at the top — e.g. "JLTWRI" — next to print/email icons, and again
+// nearby in "Created at <date> by <agent>" text. No confirmed selector for
+// the exact element (a real DOM inspection was never done, only the
+// recording), so this tries a few plausible containers before falling
+// back to a body-text scan anchored near "Created at". Best-effort only —
+// see the call site for why a capture miss must never be fatal.
+async function capturePnr(page: import("playwright").Page, logTag: string): Promise<string | null> {
+  try {
+    const candidateContainer = page
+      .locator('[class*="tag" i], [class*="locator" i], [class*="reference" i], h1, h2, h3')
+      .filter({ hasText: /^[A-Z0-9]{5,8}$/ });
+    const candidateCount = await candidateContainer.count().catch(() => 0);
+    for (let i = 0; i < candidateCount; i++) {
+      const text = (await candidateContainer.nth(i).textContent().catch(() => null))?.trim();
+      if (text && /^[A-Z0-9]{5,8}$/.test(text)) return text;
+    }
+
+    // Fallback: scan visible body text for a standalone 6-character
+    // uppercase code near "Created at", the nearby text confirmed live.
+    const bodyText = (await page.evaluate(() => document.body.innerText).catch(() => "")) ?? "";
+    const createdAtIndex = bodyText.search(/created at/i);
+    const window = createdAtIndex >= 0 ? bodyText.slice(Math.max(0, createdAtIndex - 80), createdAtIndex) : bodyText.slice(0, 300);
+    const match = window.match(/\b[A-Z0-9]{6}\b/);
+    if (match) return match[0];
+  } catch (err) {
+    console.warn(`[${logTag}] PNR capture threw, continuing without one:`, err);
+  }
+  console.warn(`[${logTag}] couldn't confidently capture a reference code from the confirmation page`);
+  return null;
+}
+
+// Spec 9.1 (confirmed live, still starts collapsed regardless of
+// viewport): the Total Quote row starts collapsed — expand, read,
+// collapse again, leaving the screen in its pre-save state. Never sums
+// per-passenger fares manually; only trusts what KIU itself displays as
+// the total.
 async function captureTotalQuote(page: import("playwright").Page, logTag: string): Promise<number | null> {
   const totalRow = page.getByText(/total quote/i).first();
   const rowVisible = await totalRow.isVisible().catch(() => false);

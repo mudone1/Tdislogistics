@@ -1245,8 +1245,18 @@ function resolveLegFlightChoice(
   if (search.error) {
     console.warn(`[travel-assistant] ${leg} disambiguation search failed, asking to retry: ${search.error}`);
     const legNote = leg === "return" ? " for the return leg" : "";
+    // "Try again in a moment" is actively bad advice for this specific
+    // failure — VarsFlightSearch.ts's date-navigation deadline says so
+    // explicitly (see its "Couldn't finish checking... far enough out"
+    // message) when a date is far enough out that retrying the exact same
+    // request will just hit the exact same wall-clock ceiling again. Give
+    // the honest, actionable version instead of the generic one for that
+    // one case; every other failure keeps the original friendly retry ask.
+    const tooFarOut = /far enough out that this one lookup ran out of time/i.test(search.error);
     return {
-      reply: `I'm having trouble checking available times${legNote} right now — mind trying again in a moment?`,
+      reply: tooFarOut
+        ? `That date${legNote} is far enough out that I couldn't finish checking it in one go. Could you give me a date a bit closer to today, or try again and I'll take another pass?`
+        : `I'm having trouble checking available times${legNote} right now — mind trying again in a moment?`,
       pendingOptions: null,
       time: null,
       retryable: true,
