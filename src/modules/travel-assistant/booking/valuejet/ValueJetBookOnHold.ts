@@ -218,9 +218,21 @@ export async function bookValueJetOnHold(
     // dashboard). Matched against the same broad element set the
     // diagnostic itself uses (and clickByText below already relies on),
     // instead of a strict ARIA role that doesn't hold for this page.
+    //
+    // STILL failed live after that fix, with the identical diagnostic —
+    // "Reservations" present in visibleButtons, wait still timed out. The
+    // anchored exact-text filter (^reservations$) is the likely remaining
+    // culprit: Playwright's hasText/text matching normalizes an element's
+    // RENDERED text (innerText-like — excludes hidden children, includes
+    // icon/badge text, whitespace from nested spans, etc.), which doesn't
+    // necessarily equal the diagnostic's own raw textContent.trim() dump
+    // exactly. Dropped the strict element-type + anchor combo entirely in
+    // favor of the SAME mechanism clickByText already uses two lines
+    // below (page.getByText, unanchored, not scoped to specific tags) —
+    // whatever that click ends up finding, this wait now looks for the
+    // identical thing, so the two can't disagree with each other again.
     await page
-      .locator('button, a, [role="button"], input[type="submit"], input[type="button"]')
-      .filter({ hasText: /^reservations$/i })
+      .getByText(/reservations/i)
       .first()
       .waitFor({ state: "visible", timeout: 40000 })
       .catch(() => failWithDiagnostic(page, logTag, "Dashboard never appeared after login"));
