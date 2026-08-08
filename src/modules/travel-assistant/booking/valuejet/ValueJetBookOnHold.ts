@@ -210,8 +210,17 @@ export async function bookValueJetOnHold(
     // and target the specific button role rather than any text match
     // (removes any risk of the survey widget's own text colliding, the
     // same class of bug the login-button fix above addressed).
+    // Confirmed live (again) via the diagnostic dump from THIS exact
+    // timeout: "Reservations" WAS present in visibleButtons — which scans
+    // button/a/input broadly — while getByRole("button", ...) still timed
+    // out. That only happens if the real element isn't an actual
+    // role="button" (e.g. an <a> styled to look like one, common on this
+    // dashboard). Matched against the same broad element set the
+    // diagnostic itself uses (and clickByText below already relies on),
+    // instead of a strict ARIA role that doesn't hold for this page.
     await page
-      .getByRole("button", { name: /^reservations$/i })
+      .locator('button, a, [role="button"], input[type="submit"], input[type="button"]')
+      .filter({ hasText: /^reservations$/i })
       .first()
       .waitFor({ state: "visible", timeout: 40000 })
       .catch(() => failWithDiagnostic(page, logTag, "Dashboard never appeared after login"));
