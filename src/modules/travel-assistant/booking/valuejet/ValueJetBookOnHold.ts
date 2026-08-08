@@ -241,50 +241,75 @@ export async function bookValueJetOnHold(
       .catch(() => {});
     await page.waitForTimeout(500);
 
-    await page
-      .getByText(/reservations/i)
-      .first()
-      .waitFor({ state: "visible", timeout: 40000 })
-      .catch(async () => {
-        const reservationsDiagnostic = await page
-          .evaluate(() => {
-            const candidates = Array.from(document.querySelectorAll<HTMLElement>("*")).filter(
-              (el) => el.children.length === 0 && (el.textContent ?? "").trim().toLowerCase() === "reservations"
-            );
-            return candidates.slice(0, 5).map((el) => {
-              const rect = el.getBoundingClientRect();
-              const style = window.getComputedStyle(el);
-              const centerX = rect.left + rect.width / 2;
-              const centerY = rect.top + rect.height / 2;
-              const topElementAtCenter = document.elementFromPoint(centerX, centerY);
-              return {
-                tag: el.tagName,
-                className: el.className,
-                rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-                display: style.display,
-                visibility: style.visibility,
-                opacity: style.opacity,
-                // If this DOESN'T match the element itself (by tag+class),
-                // something else is genuinely on top of it at its own
-                // center point — the actual blocker, not a guess.
-                elementCoveringItsCenter: topElementAtCenter
-                  ? { tag: topElementAtCenter.tagName, className: (topElementAtCenter as HTMLElement).className }
-                  : null,
-              };
-            });
-          })
-          .catch(() => "<evaluate failed>");
-        console.error(`[${logTag}] "Reservations" element diagnostic: ${JSON.stringify(reservationsDiagnostic)}`);
-        return failWithDiagnostic(
-          page,
-          logTag,
-          `Dashboard never appeared after login. Reservations element state: ${JSON.stringify(reservationsDiagnostic).slice(0, 800)}`
-        );
+    // Root cause found live via the diagnostic added for the 4th attempt:
+    // ".first()" DID resolve — to the WRONG element. The dashboard has
+    // multiple leaf elements whose text is exactly "Reservations": a
+    // zero-size ({x:0,y:0,width:0,height:0}) <span> that sorts first in DOM
+    // order (looks like hidden nav-badge/tooltip text, nothing to do with
+    // any overlay), and the real, fully visible dashboard card
+    // (applicationCard__title, non-zero rect) further down. getByText(...)
+    // .first() always grabbed the zero-size one, so waitFor({state:
+    // "visible"}) was correctly timing out on THAT element forever — not a
+    // selector-matching problem, not an overlay, just the wrong match. Walk
+    // every "Reservations" match and use the first one with an actual
+    // non-zero box instead of blindly trusting DOM order.
+    const reservationsCandidates = page.getByText(/reservations/i);
+    const candidateCount = await reservationsCandidates.count().catch(() => 0);
+    let reservationsTarget: ReturnType<typeof page.getByText> | null = null;
+    for (let i = 0; i < candidateCount; i++) {
+      const candidate = reservationsCandidates.nth(i);
+      const box = await candidate.boundingBox().catch(() => null);
+      if (box && box.width > 0 && box.height > 0) {
+        reservationsTarget = candidate;
+        break;
+      }
+    }
+    if (reservationsTarget) {
+      await reservationsTarget.waitFor({ state: "visible", timeout: 40000 }).catch(() => {
+        reservationsTarget = null;
       });
+    }
+    if (!reservationsTarget) {
+      const reservationsDiagnostic = await page
+        .evaluate(() => {
+          const candidates = Array.from(document.querySelectorAll<HTMLElement>("*")).filter(
+            (el) => el.children.length === 0 && (el.textContent ?? "").trim().toLowerCase() === "reservations"
+          );
+          return candidates.slice(0, 5).map((el) => {
+            const rect = el.getBoundingClientRect();
+            const style = window.getComputedStyle(el);
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const topElementAtCenter = document.elementFromPoint(centerX, centerY);
+            return {
+              tag: el.tagName,
+              className: el.className,
+              rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+              display: style.display,
+              visibility: style.visibility,
+              opacity: style.opacity,
+              elementCoveringItsCenter: topElementAtCenter
+                ? { tag: topElementAtCenter.tagName, className: (topElementAtCenter as HTMLElement).className }
+                : null,
+            };
+          });
+        })
+        .catch(() => "<evaluate failed>");
+      console.error(`[${logTag}] "Reservations" element diagnostic: ${JSON.stringify(reservationsDiagnostic)}`);
+      return failWithDiagnostic(
+        page,
+        logTag,
+        `Dashboard never appeared after login (no visible "Reservations" element found). State: ${JSON.stringify(reservationsDiagnostic).slice(0, 800)}`
+      );
+    }
 
     // --- 2. Open Reservation Module ---
+    // Click the SAME element the wait just confirmed is visible — reusing
+    // the generic clickByText(/reservations?/i) helper here would hit the
+    // exact ".first()-picks-the-wrong-one" bug just fixed above all over
+    // again.
     console.log(`[${logTag}] opening reservation module`);
-    await clickByText(page, /reservations?/i).catch(() => failWithDiagnostic(page, logTag, `Couldn't find "Reservations" on the dashboard`));
+    await reservationsTarget.click({ timeout: 10000 }).catch(() => failWithDiagnostic(page, logTag, `Couldn't click "Reservations" on the dashboard`));
     await clickByText(page, /new reservation/i).catch(() => failWithDiagnostic(page, logTag, `Couldn't find "New Reservation"`));
 
     // --- 3/4. Search flights ---
