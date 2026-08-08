@@ -219,23 +219,68 @@ export async function bookValueJetOnHold(
     // diagnostic itself uses (and clickByText below already relies on),
     // instead of a strict ARIA role that doesn't hold for this page.
     //
-    // STILL failed live after that fix, with the identical diagnostic —
-    // "Reservations" present in visibleButtons, wait still timed out. The
-    // anchored exact-text filter (^reservations$) is the likely remaining
-    // culprit: Playwright's hasText/text matching normalizes an element's
-    // RENDERED text (innerText-like — excludes hidden children, includes
-    // icon/badge text, whitespace from nested spans, etc.), which doesn't
-    // necessarily equal the diagnostic's own raw textContent.trim() dump
-    // exactly. Dropped the strict element-type + anchor combo entirely in
-    // favor of the SAME mechanism clickByText already uses two lines
-    // below (page.getByText, unanchored, not scoped to specific tags) —
-    // whatever that click ends up finding, this wait now looks for the
-    // identical thing, so the two can't disagree with each other again.
+    // STILL failed live after THAT fix too, with the IDENTICAL diagnostic —
+    // "Reservations" present in visibleButtons, wait still timed out, three
+    // attempts running now. That repetition across genuinely different
+    // matching mechanisms (role, broad element+anchor, unanchored getByText)
+    // means the problem was never the selector — something is actually
+    // covering the element so it never satisfies Playwright's "visible"
+    // check (non-zero box, not display:none/visibility:hidden/opacity:0),
+    // even though its text is present in the DOM either way. The survey
+    // widget ("Help us improve...") mentioned in every single diagnostic is
+    // the prime suspect — dismiss it first (best-effort: Escape, then any
+    // close/dismiss control near that text), and if the wait still fails,
+    // the diagnostic now inspects the "Reservations" element directly
+    // (computed visibility + whatever's actually at its center point) so a
+    // fourth attempt isn't another blind guess.
+    await page.keyboard.press("Escape").catch(() => {});
+    await page
+      .locator('button[aria-label="Close" i], button[aria-label="Dismiss" i], [class*="close" i][role="button"]')
+      .first()
+      .click({ timeout: 2000 })
+      .catch(() => {});
+    await page.waitForTimeout(500);
+
     await page
       .getByText(/reservations/i)
       .first()
       .waitFor({ state: "visible", timeout: 40000 })
-      .catch(() => failWithDiagnostic(page, logTag, "Dashboard never appeared after login"));
+      .catch(async () => {
+        const reservationsDiagnostic = await page
+          .evaluate(() => {
+            const candidates = Array.from(document.querySelectorAll<HTMLElement>("*")).filter(
+              (el) => el.children.length === 0 && (el.textContent ?? "").trim().toLowerCase() === "reservations"
+            );
+            return candidates.slice(0, 5).map((el) => {
+              const rect = el.getBoundingClientRect();
+              const style = window.getComputedStyle(el);
+              const centerX = rect.left + rect.width / 2;
+              const centerY = rect.top + rect.height / 2;
+              const topElementAtCenter = document.elementFromPoint(centerX, centerY);
+              return {
+                tag: el.tagName,
+                className: el.className,
+                rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+                display: style.display,
+                visibility: style.visibility,
+                opacity: style.opacity,
+                // If this DOESN'T match the element itself (by tag+class),
+                // something else is genuinely on top of it at its own
+                // center point — the actual blocker, not a guess.
+                elementCoveringItsCenter: topElementAtCenter
+                  ? { tag: topElementAtCenter.tagName, className: (topElementAtCenter as HTMLElement).className }
+                  : null,
+              };
+            });
+          })
+          .catch(() => "<evaluate failed>");
+        console.error(`[${logTag}] "Reservations" element diagnostic: ${JSON.stringify(reservationsDiagnostic)}`);
+        return failWithDiagnostic(
+          page,
+          logTag,
+          `Dashboard never appeared after login. Reservations element state: ${JSON.stringify(reservationsDiagnostic).slice(0, 800)}`
+        );
+      });
 
     // --- 2. Open Reservation Module ---
     console.log(`[${logTag}] opening reservation module`);
