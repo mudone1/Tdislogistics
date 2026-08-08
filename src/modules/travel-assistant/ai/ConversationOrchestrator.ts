@@ -596,9 +596,37 @@ function extractLeadingTitle(fullName: string): { title: string | null; rest: st
 
 function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, rawMessage: string): void {
   const e = turn.entities;
+  // Captured BEFORE the overwrites below, purely to detect "this message
+  // describes a different flight than whatever was already in slots" —
+  // see the cabinClass reset this drives further down.
+  const priorOrigin = slots.origin;
+  const priorDestination = slots.destination;
+  const priorDate = slots.date;
   if (e.origin) slots.origin = e.origin.toUpperCase();
   if (e.destination) slots.destination = e.destination.toUpperCase();
   if (e.date) slots.date = e.date;
+  // A message that restates origin/destination/date and any of them
+  // actually DIFFER from what was already stored reads as a fresh, distinct
+  // booking spec, not a single-field answer to a still-pending gap
+  // question (those never restate the full route). Used below to decide
+  // whether a leftover cabinClass from an abandoned earlier attempt should
+  // still apply to THIS one.
+  const describesADifferentFlight =
+    Boolean(e.origin) &&
+    Boolean(e.destination) &&
+    Boolean(e.date) &&
+    (e.origin!.toUpperCase() !== priorOrigin || e.destination!.toUpperCase() !== priorDestination || e.date !== priorDate);
+  if (describesADifferentFlight) {
+    // A leftover flight-time selection (or the options list it was chosen
+    // from) is scoped to whichever route/date it was picked for — carrying
+    // it into a different flight would silently skip asking which departure
+    // time to use on THIS route, or worse, apply a choice that was never
+    // actually offered for it.
+    slots.selectedDepartureTime = null;
+    slots.selectedReturnTime = null;
+    slots.pendingDepartureTimeOptions = null;
+    slots.pendingReturnTimeOptions = null;
+  }
   // Trip-type is decided by what's actually IN this message, never by
   // field order or the LLM's own returnDate claim on faith — see
   // countDateExpressions/ROUND_TRIP_KEYWORD_PATTERN above. Rules (product
@@ -661,6 +689,20 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   // Flex fare and books the cheapest available one).
   if (e.cabinClass && /premium|business/i.test(e.cabinClass) && messageActuallyRequestsPremiumCabin(rawMessage)) {
     slots.cabinClass = "PREMIUM";
+  } else if (describesADifferentFlight && !messageActuallyRequestsPremiumCabin(rawMessage)) {
+    // Reproduced live: a booking that asked for Business class hit a
+    // transient "trouble checking available times" error, which is
+    // deliberately left retryable — every slot untouched — so a plain
+    // "try again" doesn't force re-supplying the whole request (see the
+    // retryable branch in handleAssistantMessage). Instead of retrying,
+    // the user sent an entirely different booking (different airline/route)
+    // that never mentioned cabin class at all, and the stale Business-class
+    // preference silently carried into it, rejecting every Economy fare on
+    // the new flight. cabinClass must default back to Economy whenever the
+    // route it was set for is no longer the route being booked, same as
+    // every other "don't trust carried-over state for a field that decides
+    // WHICH FARE gets booked" guard in this function.
+    slots.cabinClass = null;
   }
   // Passenger details (only ever populated on a Book-on-Hold turn). Trimmed;
   // blanks are ignored so a later turn can fill a gap without clobbering.
