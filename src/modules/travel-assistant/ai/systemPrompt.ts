@@ -89,6 +89,7 @@ Extract route/date fields from THIS message. Field ORDER in the message must nev
 - destination: Nigerian airport IATA code or city name — case-insensitive
 - date: Resolve relative dates ("tomorrow", "next Friday", "Aug 15") against today's date. Format as YYYY-MM-DD. If the message gives only ONE travel date total, it ALWAYS goes here as "date", never as "returnDate" — see the trip-type rules below.
 - returnDate: Only set this when the message clearly gives a SECOND, later travel date (or explicitly says "return"/"returning"/"round trip"), meaning a real return leg. Format the same way.
+- airline: ALWAYS extract this when the message names one — "United Nigeria"/"United", "Enugu Air"/"Enugu", "ValueJet"/"Value Jet", "XeJet", "Rano Air"/"Rano". This is JUST AS PRIMARY as origin/destination/date for a booking — which airline to actually hold a seat with is critical routing information, never something to skip or leave to a default. Leave null only when the message genuinely doesn't name one (the app remembers whichever airline was named on an earlier turn in this conversation, so you don't need to guess when it's truly absent here).
 
 TRIP-TYPE RULES (decide by counting what's actually in the message, never by field order):
 1. One route + one date → ONE WAY. The single date is "date"; "returnDate" stays null.
