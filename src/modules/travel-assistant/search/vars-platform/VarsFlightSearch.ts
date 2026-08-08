@@ -23,13 +23,24 @@ const MAX_DAY_FORWARD_CLICKS = 60;
 // out resolved in one ~5-12s forward-page attempt) while guaranteeing this
 // function fails fast, well inside the 60s budget, for a date genuinely
 // beyond an airline's published schedule.
+// Raised from 15000 (2026-08-08, live failure): United LOS-ABV 31 Aug —
+// 23 days out — hit the OLD deadline after exactly 6 forward-page attempts,
+// genuinely still mid-navigation (not overshot — the overshoot check above
+// this never triggered), not stuck. A date 3+ weeks out is an entirely
+// normal advance booking, not an edge case; the old 15s budget was
+// calibrated against a same-week example and never accounted for it.
 // Left as headroom below 60s: the forward-paging phase this deadline bounds
 // is followed by up to 3 target-tab click attempts (12s + 6s + 6s = 24s
 // worst case — see navigateToDate), plus ~11-13s of surrounding
-// form-fill/submit/extraction overhead (measured live) — 15s + 24s + 13s ≈
-// 52s, leaving real margin under the 60s ceiling for network jitter and
-// connector-service cold starts.
-const DATE_NAVIGATION_DEADLINE_MS = 15000;
+// form-fill/submit/extraction overhead (measured live) — 20s + 24s + 13s ≈
+// 57s, keeping real (if now slimmer) margin under the 60s ceiling for
+// network jitter and connector-service cold starts. Reliably reaching
+// dates a month+ out would need a structural change (async/job-based
+// search rather than one synchronous HTTP call under a hard wall-clock
+// ceiling) — this bump narrows the gap without pretending to close it
+// entirely; see the honest give-up message below for what happens if a
+// request still doesn't fit.
+const DATE_NAVIGATION_DEADLINE_MS = 20000;
 
 // Rano Air's single-day-step widget (see hasDayTabs check in
 // navigateToDate) has no separate target-click retry phase afterward — the
@@ -266,8 +277,22 @@ async function navigateToDate(page: Page, targetDateISO: string, logTag: string)
         })
         .catch((err) => ({ evaluateError: String(err) }));
       console.error(`DIAGNOSTIC [${logTag}] date-navigation deadline hit — state: ${JSON.stringify(diagnostic)}`);
+      // Distinguish "genuinely still making progress toward a far-out date,
+      // just ran out of wall-clock budget" from "actually stuck" (a real
+      // code/portal bug) — the former is a normal advance-booking request
+      // that this single synchronous call structurally can't always finish
+      // in time, and deserves an honest, actionable message rather than
+      // one that reads like a bug report to the person waiting on it.
+      const lastVisible = (diagnostic as { visibleDayTabs?: (string | null)[] }).visibleDayTabs
+        ?.map((d) => (d ? parseDayTabLabel(d) : null))
+        .filter((d): d is Date => d !== null)
+        .reduce((max, d) => (d > max ? d : max), new Date(0));
+      const targetDateForMessage = parseDayTabLabel(targetLabel);
+      const stillProgressing = lastVisible && targetDateForMessage && lastVisible.getTime() < targetDateForMessage.getTime() && lastVisible.getTime() > 0;
       throw new Error(
-        `Gave up navigating to date tab "${targetLabel}" after ${DATE_NAVIGATION_DEADLINE_MS}ms (${i} forward-page attempts) — bailing out early to stay inside the caller's function timeout`
+        stillProgressing
+          ? `Couldn't finish checking "${targetLabel}" in time — that's far enough out that this one lookup ran out of time before reaching it (got as far as ${diagnostic && (diagnostic as { visibleDayTabs?: (string | null)[] }).visibleDayTabs?.slice(-1)[0]}). Try again, or ask for a date a bit closer to today.`
+          : `Gave up navigating to date tab "${targetLabel}" after ${DATE_NAVIGATION_DEADLINE_MS}ms (${i} forward-page attempts) — bailing out early to stay inside the caller's function timeout`
       );
     }
     const tab = page.locator(`a.dayTab[data-newday="${targetLabel}"]`);
