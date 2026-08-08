@@ -632,6 +632,18 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   // entity extraction on faith.
   if (e.airline && messageActuallyNamesAirline(rawMessage, e.airline)) {
     slots.airline = e.airline;
+  } else {
+    // Reproduced bug, opposite direction from the one above: the LLM's
+    // BOOK_ON_HOLD-specific extraction checklist never explicitly called
+    // out "airline" (only route/date/passenger fields were), so it
+    // sometimes just skipped extracting it even when the message plainly
+    // named one — confirmed live: "United Nigeria ABV-LOS tomorrow for
+    // John Doe..." booked Enugu Air instead. Same "don't trust the LLM
+    // alone for a field that decides WHICH AIRLINE gets booked" caution,
+    // just checked directly against the raw text as a fallback rather
+    // than only as a guard on the LLM's own claim.
+    const namedInRawText = resolveNamedAirline(rawMessage);
+    if (namedInRawText) slots.airline = namedInRawText;
   }
   // Normalized to a controlled value — never stores the LLM's raw free
   // text verbatim. "Premium Class"/"Premium"/"Business Class"/"Business"
