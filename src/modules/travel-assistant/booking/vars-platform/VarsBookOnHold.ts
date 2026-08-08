@@ -454,7 +454,15 @@ export async function bookVarsPlatformOnHold(
     let fareAmountFallback = 0;
     const PREMIUM_BUSINESS_FALLBACK: FareSelection = {
       mode: "category",
-      keywords: ["premium", "business"],
+      // Live-verified bug (2026-08-08, XeJet): a request for Premium/
+      // Business failed outright on a flight whose only non-Economy
+      // classband was named "FIRST CLASS" — neither "premium" nor
+      // "business" appears in that string. Same root cause, and same
+      // widened keyword set, as shortCabinClass's fix in
+      // formatFlightResults.ts (first-class folds into "Business" here
+      // too, and there's no separate "executive"/"first" booking tier to
+      // choose between).
+      keywords: ["premium", "business", "first", "executive"],
       categoryLabel: "Premium/Business",
     };
     const fareSelection: FareSelection =
