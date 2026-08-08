@@ -194,6 +194,14 @@ const BOOK_ON_HOLD_HANDLERS: Record<string, typeof bookEnuguAirOnHold> = {
 const FARE_CLASS_PREFERENCE: Partial<Record<string, [string, string]>> = {
   ENUGU: ["Economy Promo", "Economy Saver"],
   UNITED: ["Economy Promo", "Economy Saver"],
+  // Not independently confirmed for XeJet's own deployment specifically —
+  // reusing the pair verified live for Enugu/United since all three share
+  // the exact same white-label VARS platform and, so far, identical
+  // standard fare-tier naming. If XeJet's real classband names differ,
+  // selectCheapestFare's own diagnostic (dumps every classband actually on
+  // the page) will surface that from the next live attempt rather than
+  // silently booking the wrong fare.
+  XEJET: ["Economy Promo", "Economy Saver"],
   // Rano Air only offers a single "Economy" classband per flight (confirmed
   // via live search across every ABV destination) — no Promo/Saver split.
   RANO: ["Economy", "Economy"],
