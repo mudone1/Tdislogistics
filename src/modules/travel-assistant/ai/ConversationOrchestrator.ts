@@ -91,25 +91,27 @@ const AIRLINE_NAME_MATCHERS: Record<string, string> = {
   rano: "RANO",
   valuejet: "VALUEJET",
   "value jet": "VALUEJET",
+  vk: "VALUEJET", // ValueJet's actual IATA code — flight numbers read "VK201" etc.
 };
 
 // Airlines the Book-on-Hold flow can actually place a hold with — kept in
-// sync with BOOKABLE_AIRLINES in startBookOnHold.ts. UNITED opened up for
-// live testing at explicit product request — its booking-flow selectors
-// (fare classband names, passenger form field ids, payment options) share
-// Enugu's exact mechanism but aren't independently verified end-to-end yet,
-// so expect the same iterate-from-real-errors cycle Enugu went through.
-// RANO/XEJET stay out of this CHAT-facing set for now (still untested).
-const BOOKABLE_AIRLINE_KEYS = new Set(["ENUGU", "VALUEJET", "UNITED"]);
+// sync with BOOKABLE_AIRLINES in startBookOnHold.ts. UNITED/XEJET opened up
+// for live testing at explicit product request — their booking-flow
+// selectors (fare classband names, passenger form field ids, payment
+// options) share Enugu's exact mechanism but aren't independently verified
+// end-to-end yet, so expect the same iterate-from-real-errors cycle Enugu
+// went through. RANO stays out of this CHAT-facing set for now (still untested).
+const BOOKABLE_AIRLINE_KEYS = new Set(["ENUGU", "VALUEJET", "UNITED", "XEJET"]);
 
 // Display names matching each search module's FlightOption.airline field
-// (EnuguAirSearch/ValueJetSearch/UnitedNigeriaSearch's own AIRLINE_LABEL
-// constants) — used to match a "book that flight" reference against a
-// shown search result.
+// (EnuguAirSearch/ValueJetSearch/UnitedNigeriaSearch/XeJetSearch's own
+// AIRLINE_LABEL constants) — used to match a "book that flight" reference
+// against a shown search result.
 const AIRLINE_KEY_TO_DISPLAY_NAME: Record<string, string> = {
   ENUGU: "Enugu Air",
   VALUEJET: "ValueJet",
   UNITED: "United Nigeria",
+  XEJET: "XeJet",
 };
 
 // These 5 are real airlines the assistant knows about (their balances sync,
@@ -1252,15 +1254,15 @@ async function handleBookOnHold(
 
   const named = resolveNamedAirline(slots.airline);
   if (named && !BOOKABLE_AIRLINE_KEYS.has(named)) {
-    const reply = `Right now I can only place a Book-on-Hold with Enugu Air, United Nigeria, or ValueJet — ${named} isn't wired up for holds yet. Want me to hold one of those instead?`;
+    const reply = `Right now I can only place a Book-on-Hold with Enugu Air, United Nigeria, XeJet, or ValueJet — ${named} isn't wired up for holds yet. Want me to hold one of those instead?`;
     await ChatMemoryRepository.updateSlots(sessionId, slots);
     await ChatMemoryRepository.appendMessage(sessionId, "ASSISTANT", reply);
     return { reply };
   }
   // Safe cast — BOOKABLE_AIRLINE_KEYS.has(named) was already checked above
   // (anything else returned early), so named can only be "ENUGU",
-  // "VALUEJET", or "UNITED" by this point.
-  const bookingAirline = (named ?? "ENUGU") as "ENUGU" | "VALUEJET" | "UNITED";
+  // "VALUEJET", "UNITED", or "XEJET" by this point.
+  const bookingAirline = (named ?? "ENUGU") as "ENUGU" | "VALUEJET" | "UNITED" | "XEJET";
   const bookingAirlineLabel = AIRLINE_KEY_TO_DISPLAY_NAME[bookingAirline] ?? bookingAirline;
 
   // Passenger title/gender resolution — must happen (and block progress,

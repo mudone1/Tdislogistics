@@ -773,6 +773,18 @@ export async function bookVarsPlatformOnHold(
     // the mmbUrl comment above for exactly why that page alone isn't
     // trustworthy (confirmed for Enugu Air: it can show booking-management
     // nav chrome with no actual booking behind it).
+    // Switched to a mobile viewport for the confirmation screenshot only —
+    // per explicit product preference (the WhatsApp-shared image reads
+    // better in the portal's mobile-responsive layout than the desktop one
+    // the automation actually runs in). Done here, AFTER every real
+    // interaction is finished (search/fare/passenger/payment are all
+    // behind us — this is just reading the already-confirmed page), so it
+    // can't affect any of the desktop-viewport selectors the rest of the
+    // flow depends on. verifyBookingReference below opens its own page in
+    // this same context for the MMB lookup, unaffected by resizing this one.
+    await page.setViewportSize({ width: 390, height: 844 }).catch(() => {});
+    await page.waitForTimeout(300); // let the responsive layout settle before capturing
+
     console.log(`[${logTag}] verifying PNR "${pnr}" via public Manage My Booking lookup (in parallel with screenshot capture)`);
     const [screenshot, verified] = await Promise.all([
       // Best-effort — a screenshot failure must never turn a real
