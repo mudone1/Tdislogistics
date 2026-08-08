@@ -153,18 +153,54 @@ export async function bookValueJetOnHold(
     // --- 1. Login ---
     console.log(`[${logTag}] logging in`);
     await page.goto(LOGIN_URL, { waitUntil: "domcontentloaded" });
-    await fillByLabel(page, /user|email|agent/i, credentials.username).catch(async () => {
-      // Fallback for a plain unlabeled input pair, common on simple login forms.
-      await page.locator('input[type="text"], input[type="email"]').first().fill(credentials.username);
+    // Live-verified (2026-08-07) real login form: input[name="username"]
+    // (type=email) / input[name="password"], both bare of visible <label>
+    // text (placeholder-only) — fillByLabel's getByLabel() never matches
+    // either, so this goes straight to the confirmed selectors rather than
+    // paying for a doomed first attempt.
+    await page.locator('input[name="username"]').fill(credentials.username).catch(async () => {
+      await fillByLabel(page, /user|email|agent/i, credentials.username).catch(async () => {
+        await page.locator('input[type="text"], input[type="email"]').first().fill(credentials.username);
+      });
     });
-    await fillByLabel(page, /password/i, credentials.password).catch(async () => {
-      await page.locator('input[type="password"]').first().fill(credentials.password);
+    await page.locator('input[name="password"]').fill(credentials.password).catch(async () => {
+      await fillByLabel(page, /password/i, credentials.password).catch(async () => {
+        await page.locator('input[type="password"]').first().fill(credentials.password);
+      });
     });
-    await page
-      .getByRole("button", { name: /log ?in|sign ?in/i })
-      .first()
-      .click()
-      .catch(() => clickByText(page, /log ?in|sign ?in/i));
+
+    // The earlier generic getByRole/getByText(/log ?in/i) approach matched
+    // the WRONG control live: this page also has an unrelated "Log in with
+    // Office" SSO checkbox, whose <label> text contains "Log in" and can
+    // sort before the real submit button in DOM order — confirmed live via
+    // a real failure where getByText(/log ?in/i).first() clicked that
+    // label instead of submitting the form, then hung retrying against an
+    // unrelated toast/mask overlay it had no business interacting with.
+    // Scope strictly to a real <button type="submit"> with EXACT text "Log
+    // in" (never "...with Office") to make that mismatch impossible.
+    const loginButton = page.locator('button[type="submit"]').filter({ hasText: /^Log in$/ }).first();
+    // React disables this button until both fields pass validation — give
+    // it a moment to flip enabled after the fills above land.
+    await loginButton
+      .evaluate((el) => !(el as HTMLButtonElement).disabled, { timeout: 5000 })
+      .catch(() => {});
+    await loginButton.click({ timeout: 10000 }).catch(async (err) => {
+      // A transient toast (observed live: "To ensure the security of your
+      // session...") can sit over the button and intercept the click even
+      // once it's correctly targeted — dismiss anything with a close
+      // control, then retry once with force as a last resort rather than
+      // burning the full retry budget on a toast that was always going to
+      // auto-dismiss.
+      await page
+        .locator('[data-pc-section="mask"] button, [data-pc-section="mask"] [aria-label="Close"]')
+        .first()
+        .click({ timeout: 2000 })
+        .catch(() => {});
+      await page.waitForTimeout(1000);
+      await loginButton.click({ timeout: 8000, force: true }).catch(() => {
+        throw err;
+      });
+    });
     await page
       .getByText(DASHBOARD_MARKER)
       .first()
