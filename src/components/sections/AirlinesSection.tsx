@@ -6,6 +6,8 @@ import { AIRLINES, AIRLINE_LOGO_MAP } from "@/lib/constants";
 import { useApp } from "@/lib/store";
 import { formatNaira } from "@/lib/utils";
 import AirlineSyncPanel from "./AirlineSyncPanel";
+import { useAirlineSessions } from "./useAirlineSessions";
+import Modal from "../ui/Modal";
 
 // Bridges each airline's short code (constants.ts -> AIRLINES) to the
 // connector framework's AirlineKey (src/modules/airline-connectors/core/
@@ -40,6 +42,8 @@ export default function AirlinesSection() {
   const { settings } = useApp();
   const [connectors, setConnectors] = useState<ConnectorBalance[]>([]);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
+  const { sessions, activeCode, openOrFocus, closeSession, minimizeAll } = useAirlineSessions();
+  const [closeConfirmCode, setCloseConfirmCode] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,6 +104,37 @@ export default function AirlinesSection() {
         fully manual record and never affects what&apos;s shown on these tiles.
       </p>
 
+      {sessions.length > 0 && (
+        <div className="airline-sessions-bar">
+          <div className="airline-sessions-header">
+            <span className="airline-sessions-title">Open Sessions</span>
+            <button type="button" className="airline-sessions-minimize-all" onClick={minimizeAll}>
+              Minimize All
+            </button>
+          </div>
+          <div className="airline-sessions-pills">
+            {sessions.map((s) => (
+              <div key={s.code} className={`airline-session-pill ${activeCode === s.code ? "active" : ""}`}>
+                <button type="button" className="airline-session-pill-main" onClick={() => openOrFocus(s)}>
+                  {s.name}
+                </button>
+                <button
+                  type="button"
+                  className="airline-session-pill-close"
+                  aria-label={`Close ${s.name} session`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCloseConfirmCode(s.code);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Sync Panel */}
       <AirlineSyncPanel onSyncComplete={handleSyncComplete} />
 
@@ -119,10 +154,20 @@ export default function AirlinesSection() {
           return (
             <a
               key={a.code}
-              className="airline-tile"
+              className={`airline-tile ${activeCode === a.code ? "session-active" : ""}`}
               href={a.url}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(e) => {
+                // A plain left-click opens/focuses the tracked session tab
+                // instead of the browser's default new-tab-every-time
+                // behavior — see useAirlineSessions.ts. Middle-click,
+                // Ctrl/Cmd-click, and right-click "open in new tab" all
+                // still work normally since the real href is left intact.
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                e.preventDefault();
+                openOrFocus({ code: a.code, name: a.name, url: a.url });
+              }}
               style={{
                 opacity: entry?.isInAuthCooldown ? 0.6 : 1,
                 position: "relative",
@@ -179,6 +224,33 @@ export default function AirlinesSection() {
           );
         })}
       </div>
+
+      <Modal
+        open={!!closeConfirmCode}
+        onClose={() => setCloseConfirmCode(null)}
+        title="Close airline session?"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setCloseConfirmCode(null)}>
+              Cancel
+            </button>
+            <button
+              className="btn-primary"
+              onClick={() => {
+                if (closeConfirmCode) closeSession(closeConfirmCode);
+                setCloseConfirmCode(null);
+              }}
+            >
+              Close
+            </button>
+          </>
+        }
+      >
+        <p>
+          Close {sessions.find((s) => s.code === closeConfirmCode)?.name ?? "this"} session? Your current session
+          will be removed.
+        </p>
+      </Modal>
     </motion.div>
   );
 }
