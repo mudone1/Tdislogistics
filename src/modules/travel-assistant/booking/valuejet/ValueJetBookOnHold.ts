@@ -721,8 +721,21 @@ async function selectFlightAndClass(
 
   let rowIndex = 0;
   if (preferredTime && rows.length > 1) {
+    // CORRECTED (2026-08-09, live): a real search returned 4 options and a
+    // requested "06:45" matched none of them — confirmed live (video,
+    // 2026-08-08) that KIU renders departure times WITHOUT a colon
+    // ("0645"), while preferredTime arrives here formatted "HH:MM". A
+    // plain substring check can never match across that formatting gap
+    // regardless of how many real options exist. Compare digits-only on
+    // both sides (falling back to the raw substring check too, in case a
+    // different KIU deployment does include the colon).
+    const digitsOnly = (s: string) => s.replace(/\D/g, "");
+    const normalizedPreferred = digitsOnly(preferredTime);
     const texts = await Promise.all(rows.map((r) => r.textContent().catch(() => "")));
-    const matchIndex = texts.findIndex((t) => (t ?? "").includes(preferredTime));
+    const matchIndex = texts.findIndex((t) => {
+      const text = t ?? "";
+      return text.includes(preferredTime) || digitsOnly(text).includes(normalizedPreferred);
+    });
     if (matchIndex === -1) {
       await failWithDiagnostic(
         page,
