@@ -186,6 +186,12 @@ const BALANCE_UPDATE_PATTERN = /\bbal(?:ance)?\s*update\b/i;
 // had this same optional-suffix shape; "reset" now matches it.
 const CLOSE_SESSION_PATTERN = /\b(?:close\s+session|cancel(?:\s+booking)?|start\s+over|reset(?:\s+booking)?)\b/i;
 
+// Mirrors whatsapp-service/src/messageHandler.ts's looksLikeBookingRequest
+// exactly (same trigger-verb list) — that copy runs client-side purely to
+// fire an early "Copy" ack before the real assistant call even starts;
+// this one is the deterministic override actually deciding routing below.
+const BOOKING_VERB_PATTERN = /\b(book|hold|reserve)\b/i;
+
 export async function handleAssistantMessage(input: OrchestratorInput): Promise<OrchestratorOutput> {
   const session = await ChatMemoryRepository.getOrCreateSession(
     input.sessionKey,
@@ -245,7 +251,25 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
 
   await ChatMemoryRepository.appendMessage(session.id, "USER", input.message, turn.intent, turn.entities);
 
-  if (turn.intent === "BOOK_ON_HOLD") {
+  // CORRECTED (2026-08-09, live): reproduced twice in a row — a message
+  // that unambiguously satisfies systemPrompt.ts's own explicit BOOK_ON_HOLD
+  // "CRITICAL RULE" (an explicit trigger verb like "book"/"hold"/"reserve"
+  // PLUS passenger contact details) still came back classified as a plain
+  // flight search, so the user got a fare quote instead of an actual hold
+  // — "Book Lagos to Abuja on Thursday 07:00 on Enugu / Mr othniel meyimi
+  // shafa / ... / shehuyusuf391@gmail.com / 08055188211" produced a quote,
+  // not a booking. Whatsapp-service's messageHandler.ts already runs this
+  // exact same check client-side (looksLikeBookingRequest) purely to fire
+  // an early "Copy" ack — mirrored here server-side as a deterministic
+  // override so the ACTUAL routing decision doesn't rest on the LLM's
+  // classification alone, same "never trust the LLM alone for a field
+  // this consequential" caution already applied to airline/cabinClass/
+  // isRoundTrip. Only overrides away from a SEARCH-shaped intent (never
+  // e.g. SALES_REPORT_QUERY) — a message can't accidentally get force-
+  // routed into booking from an intent that was never in the running.
+  const looksLikeBookingRequest =
+    BOOKING_VERB_PATTERN.test(input.message) && (EMAIL_SEARCH_RE.test(input.message) || findPhoneInText(input.message) !== null);
+  if (turn.intent === "BOOK_ON_HOLD" || (looksLikeBookingRequest && (SEARCH_INTENTS.has(turn.intent) || turn.intent === "UNKNOWN"))) {
     return handleBookOnHold(session.id, input.sessionKey, slots, turn, input.message);
   }
 
