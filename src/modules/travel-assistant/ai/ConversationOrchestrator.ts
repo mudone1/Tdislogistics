@@ -841,13 +841,24 @@ function findPhoneInText(text: string): string | null {
 function messageActuallyNamesAirline(rawMessage: string, airline: string): boolean {
   const m = rawMessage.toLowerCase();
   // Direct substring match covers the common case (LLM echoes back
-  // roughly what the user typed, e.g. "xejet" -> "xejet"). If that
-  // doesn't match (LLM normalized/renamed it), fall back to checking
-  // whether the message mentions ANY known airline alias at all — if it
-  // mentions none, whatever the LLM put in entities.airline can only have
-  // come from conversation history, not this message, so it's rejected.
+  // roughly what the user typed, e.g. "xejet" -> "xejet").
   if (m.includes(airline.toLowerCase())) return true;
-  return Object.keys(AIRLINE_NAME_MATCHERS).some((alias) => m.includes(alias));
+  // CORRECTED (2026-08-09, live): the old fallback checked whether the
+  // message mentions ANY known airline alias at all, not specifically one
+  // that maps to the AIRLINE ARGUMENT being validated — reproduced live: a
+  // message that plainly said "ValueJet" got booked/quoted against Enugu
+  // Air instead, because the LLM's own extraction (wrongly) came back
+  // "Enugu Air", the direct match correctly failed ("enugu" isn't in the
+  // message), but the old "any alias present" fallback still passed since
+  // the message DOES mention a known alias — just "valuejet", not
+  // "enugu". That's backwards: a message naming a DIFFERENT airline than
+  // the LLM's own claim should REJECT the claim, not validate it. Only
+  // treat the LLM's claim as message-derived (rather than bled in from
+  // conversation history) when the message mentions an alias for THIS
+  // SPECIFIC airline — normalized through resolveNamedAirline so
+  // "Enugu Air" and "enugu" both resolve to the same "ENUGU" key.
+  const claimedKey = resolveNamedAirline(airline) ?? airline.toUpperCase();
+  return Object.entries(AIRLINE_NAME_MATCHERS).some(([alias, key]) => key === claimedKey && m.includes(alias));
 }
 
 // Same reproduced-bug shape as messageActuallyNamesAirline above: the LLM
