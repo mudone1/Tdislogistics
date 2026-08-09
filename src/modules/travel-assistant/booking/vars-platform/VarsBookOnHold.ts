@@ -646,7 +646,35 @@ export async function bookVarsPlatformOnHold(
       if (!headingClicked) {
         throw new Error('Found the "BuyNowPayLater" radio but not its enclosing panel-heading to click');
       }
-      await passwordField.waitFor({ state: "visible", timeout: 10000 });
+      // Live-verified failure (2026-08-09, XeJet): the field never became
+      // visible within the old 10s wait — plausibly the same postback lag
+      // documented elsewhere in this file for this exact accordion/panel
+      // UI ("confirmed live to be genuinely slow here (12s+ in one
+      // observed run)"), widened here for the same reason. If it's still
+      // not that, a real diagnostic dump beats a second blind guess.
+      await passwordField.waitFor({ state: "visible", timeout: 15000 }).catch(async () => {
+        const diagnostic = await page
+          .evaluate((selector) => {
+            const radio = document.querySelector<HTMLInputElement>(selector);
+            const panel = radio?.closest(".panel");
+            return {
+              panelFound: !!panel,
+              panelClasses: panel?.className ?? null,
+              panelVisible: panel ? (panel as HTMLElement).offsetParent !== null : null,
+              passwordFieldExists: !!document.getElementById("txtAgentPassword"),
+              passwordFieldVisible: (() => {
+                const el = document.getElementById("txtAgentPassword");
+                return el ? (el as HTMLElement).offsetParent !== null : null;
+              })(),
+              panelHtml: panel ? (panel as HTMLElement).outerHTML.slice(0, 2000) : null,
+            };
+          }, holdRadioSelector)
+          .catch((err) => ({ evaluateError: String(err) }));
+        console.error(`[${logTag}] password field never appeared after heading click. DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
+        throw new Error(
+          `Clicked the "BuyNowPayLater" panel heading but #txtAgentPassword never became visible. Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`
+        );
+      });
     }
     await passwordField.fill(credentials.password);
 
