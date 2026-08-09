@@ -125,29 +125,49 @@ async function fillByLabel(page: import("playwright").Page, labelPattern: RegExp
   await page.getByLabel(labelPattern, { exact: false }).nth(index).fill(value);
 }
 
-// Live-verified (2026-08-09): BOTH the recording-confirmed "Date" label
-// AND the spec's original "Departure/Travel Date" wording failed to match
-// on a real booking attempt — two guesses in a row, meaning a third guess
-// isn't worth the risk of being wrong again too. Tries a placeholder-based
-// match as a genuinely different signal (not just another label-text
-// guess) before giving up with a full dump of every labeled field and
-// every input's placeholder actually on the page, so the real wording is
-// captured as evidence instead of requiring a fourth blind attempt.
-async function fillDateField(page: import("playwright").Page, logTag: string, value: string, index = 0): Promise<void> {
+// request.departureDate/returnDate arrive as ISO "YYYY-MM-DD" throughout
+// this codebase — live-verified (2026-08-09) the real field expects
+// "MM-DD-YYYY" (its own placeholder text, confirmed via diagnostic dump),
+// so filling the raw ISO string in would have landed a wrong or rejected
+// value even once the field itself was correctly found.
+function toMDYFormat(isoDate: string): string {
+  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return isoDate; // unexpected shape — pass through rather than guess
+  const [, yyyy, mm, dd] = match;
+  return `${mm}-${dd}-${yyyy}`;
+}
+
+// Live-verified (2026-08-09): the "Date" label AND "Departure/Travel Date"
+// wording both failed on a real booking attempt, and so did a generic
+// placeholder*="date" match — the real placeholder is "MM-DD-YYYY", which
+// doesn't contain the substring "date" at all. Confirmed via the resulting
+// diagnostic dump (inputPlaceholders: ["MM-DD-YYYY", "Date", "0", "0"]).
+// Tries the confirmed-real MM-DD-YYYY placeholder pattern FIRST now, kept
+// behind the older guesses as fallbacks in case a different KIU deployment
+// phrases it differently, before giving up with the same full-page dump
+// that made this fix possible.
+async function fillDateField(page: import("playwright").Page, logTag: string, isoValue: string, index = 0): Promise<void> {
+  const mdyValue = toMDYFormat(isoValue);
   try {
-    await page.getByLabel(/^date$/i, { exact: false }).nth(index).fill(value, { timeout: 8000 });
+    await page.locator('input[placeholder="MM-DD-YYYY"]').nth(index).fill(mdyValue, { timeout: 8000 });
     return;
   } catch {
     /* try next */
   }
   try {
-    await page.getByLabel(/(departure|travel) date/i, { exact: false }).nth(index).fill(value, { timeout: 8000 });
+    await page.getByLabel(/^date$/i, { exact: false }).nth(index).fill(mdyValue, { timeout: 8000 });
     return;
   } catch {
     /* try next */
   }
   try {
-    await page.locator('input[placeholder*="date" i]').nth(index).fill(value, { timeout: 8000 });
+    await page.getByLabel(/(departure|travel) date/i, { exact: false }).nth(index).fill(mdyValue, { timeout: 8000 });
+    return;
+  } catch {
+    /* try next */
+  }
+  try {
+    await page.locator('input[placeholder*="date" i]').nth(index).fill(mdyValue, { timeout: 8000 });
     return;
   } catch {
     /* fall through to diagnostic */
@@ -160,7 +180,7 @@ async function fillDateField(page: import("playwright").Page, logTag: string, va
       url: window.location.href,
     }))
     .catch((err) => ({ evaluateError: String(err) }));
-  console.error(`[${logTag}] no date field matched (label "Date", label "Departure/Travel Date", or placeholder containing "date"). DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
+  console.error(`[${logTag}] no date field matched (placeholder "MM-DD-YYYY", label "Date", label "Departure/Travel Date", or placeholder containing "date"). DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
   throw new Error(`Couldn't find a date field to fill (index ${index}). Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`);
 }
 

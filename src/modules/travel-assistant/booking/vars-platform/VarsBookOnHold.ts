@@ -646,37 +646,53 @@ export async function bookVarsPlatformOnHold(
       if (!headingClicked) {
         throw new Error('Found the "BuyNowPayLater" radio but not its enclosing panel-heading to click');
       }
-      // Live-verified failure (2026-08-09, XeJet): the field never became
-      // visible within the old 10s wait — plausibly the same postback lag
-      // documented elsewhere in this file for this exact accordion/panel
-      // UI ("confirmed live to be genuinely slow here (12s+ in one
-      // observed run)"), widened here for the same reason. If it's still
-      // not that, a real diagnostic dump beats a second blind guess.
-      await passwordField.waitFor({ state: "visible", timeout: 15000 }).catch(async () => {
-        const diagnostic = await page
-          .evaluate((selector) => {
-            const radio = document.querySelector<HTMLInputElement>(selector);
-            const panel = radio?.closest(".panel");
-            return {
-              panelFound: !!panel,
-              panelClasses: panel?.className ?? null,
-              panelVisible: panel ? (panel as HTMLElement).offsetParent !== null : null,
-              passwordFieldExists: !!document.getElementById("txtAgentPassword"),
-              passwordFieldVisible: (() => {
-                const el = document.getElementById("txtAgentPassword");
-                return el ? (el as HTMLElement).offsetParent !== null : null;
-              })(),
-              panelHtml: panel ? (panel as HTMLElement).outerHTML.slice(0, 2000) : null,
-            };
-          }, holdRadioSelector)
-          .catch((err) => ({ evaluateError: String(err) }));
-        console.error(`[${logTag}] password field never appeared after heading click. DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
-        throw new Error(
-          `Clicked the "BuyNowPayLater" panel heading but #txtAgentPassword never became visible. Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`
-        );
-      });
+      // Live-verified (2026-08-09, XeJet): #txtAgentPassword doesn't exist
+      // in the DOM AT ALL for this airline (diagnostic: panelFound=true,
+      // panelVisible=true, panel already "panel-active" i.e. expanded by
+      // default — but passwordFieldExists=false). Not a timing issue like
+      // the earlier 10s->15s widening assumed — XeJet's flow simply
+      // doesn't ask the agent to re-enter their password to select
+      // BuyNowPayLater the way Enugu's does. Give the element a short
+      // window to appear (covers a genuinely slow-but-present case, e.g.
+      // Enugu/United/Rano), then treat continued non-existence as "this
+      // airline doesn't have this step" rather than an error — only a
+      // field that EXISTS but stays stubbornly invisible is worth failing
+      // loudly over, since that would actually indicate something broken.
+      const passwordFieldAppeared = await passwordField
+        .waitFor({ state: "attached", timeout: 8000 })
+        .then(() => true)
+        .catch(() => false);
+      if (passwordFieldAppeared) {
+        await passwordField.waitFor({ state: "visible", timeout: 7000 }).catch(async () => {
+          const diagnostic = await page
+            .evaluate((selector) => {
+              const radio = document.querySelector<HTMLInputElement>(selector);
+              const panel = radio?.closest(".panel");
+              return {
+                panelFound: !!panel,
+                panelClasses: panel?.className ?? null,
+                panelVisible: panel ? (panel as HTMLElement).offsetParent !== null : null,
+                passwordFieldExists: !!document.getElementById("txtAgentPassword"),
+                passwordFieldVisible: (() => {
+                  const el = document.getElementById("txtAgentPassword");
+                  return el ? (el as HTMLElement).offsetParent !== null : null;
+                })(),
+                panelHtml: panel ? (panel as HTMLElement).outerHTML.slice(0, 2000) : null,
+              };
+            }, holdRadioSelector)
+            .catch((err) => ({ evaluateError: String(err) }));
+          console.error(`[${logTag}] password field exists but never became visible. DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
+          throw new Error(
+            `Clicked the "BuyNowPayLater" panel heading — #txtAgentPassword exists but never became visible. Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`
+          );
+        });
+      } else {
+        console.log(`[${logTag}] #txtAgentPassword never appeared — this airline's BuyNowPayLater flow apparently doesn't require it, proceeding without filling it`);
+      }
     }
-    await passwordField.fill(credentials.password);
+    if (await passwordField.count().catch(() => 0)) {
+      await passwordField.fill(credentials.password);
+    }
 
     // The heading click above only expands/collapses the accordion panel —
     // confirmed live it does NOT also select the underlying radio (the
