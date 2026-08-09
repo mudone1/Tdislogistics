@@ -404,22 +404,32 @@ export async function bookValueJetOnHold(
     // a "You have an active booking" prompt with two actions: "New
     // Reservation" (discard, start fresh) and "Edit Booking" (resume the
     // stale one). Always choose "New Reservation" — a fresh search must
-    // never silently resume an unrelated stale booking. Scoped to the
-    // prompt's own container (found by walking up until "Edit Booking" is
-    // also present) so this can't collide with the sidebar's identically
-    // worded "New Reservation" nav link.
+    // never silently resume an unrelated stale booking.
     const activeBookingAnchor = page.getByText(/you have an active booking/i).first();
     const hasStalePrompt = await activeBookingAnchor.isVisible({ timeout: 3000 }).catch(() => false);
     if (hasStalePrompt) {
       console.warn(`[${logTag}] discarding a stale/incomplete reservation left on this agent account`);
-      const modal = await walkUpUntil(activeBookingAnchor, (text) => /edit booking/i.test(text));
-      const scope = modal ?? page.locator("body");
-      await scope
-        .getByText(/^new reservation$/i)
-        .first()
-        .click({ timeout: 5000 })
-        .catch(() => failWithDiagnostic(page, logTag, `Found a stale "active booking" prompt but couldn't dismiss it`));
-      await page.waitForTimeout(800);
+      // CORRECTED AGAIN (2026-08-09, live): scoping via walkUpUntil still
+      // failed — the container satisfying "also contains Edit Booking"
+      // apparently spans wide enough to include the SIDEBAR's identically
+      // worded "New Reservation" nav link too, and that link sits behind
+      // the prompt's own backdrop overlay, so clicking it (picked by
+      // .first()) correctly times out as obstructed. Same fix as the
+      // dashboard "Reservations" bug: don't scope by container at all —
+      // pick whichever match is actually unobstructed.
+      const target = await findUnobstructedMatch(page, /^new reservation$/i);
+      if (!target) {
+        await failWithDiagnostic(
+          page,
+          logTag,
+          `Found a stale "active booking" prompt but no unobstructed "New Reservation" button to dismiss it with`
+        );
+      } else {
+        await target
+          .click({ timeout: 5000 })
+          .catch(() => failWithDiagnostic(page, logTag, `Found a stale "active booking" prompt but couldn't dismiss it`));
+        await page.waitForTimeout(800);
+      }
     }
 
     // --- 3/4. Search flights ---
@@ -664,6 +674,39 @@ async function walkUpUntil(
     const ancestor = anchor.locator(`xpath=ancestor::*[${up}]`);
     const text = (await ancestor.textContent().catch(() => "")) ?? "";
     if (predicate(text)) return ancestor;
+  }
+  return null;
+}
+
+// The SAME failure mode as the dashboard "Reservations" bug this session
+// already root-caused (walk every match, pick the one with a real
+// bounding box) — extended one step further: a candidate can have a
+// perfectly real non-zero box and STILL be unclickable because a modal's
+// own backdrop overlay sits visually on top of it (confirmed live,
+// 2026-08-09: the sidebar's "New Reservation" nav link — same exact text
+// as the "active booking" prompt's own dismiss button — sits behind the
+// prompt's backdrop, so Playwright correctly refuses to click through it
+// and times out). Checks document.elementFromPoint at each candidate's
+// own center — if something ELSE is on top there, that candidate is
+// blocked, keep looking.
+async function findUnobstructedMatch(
+  page: import("playwright").Page,
+  pattern: RegExp
+): Promise<ReturnType<typeof page.getByText> | null> {
+  const candidates = page.getByText(pattern);
+  const count = await candidates.count().catch(() => 0);
+  for (let i = 0; i < count; i++) {
+    const candidate = candidates.nth(i);
+    const box = await candidate.boundingBox().catch(() => null);
+    if (!box || box.width === 0 || box.height === 0) continue;
+    const unobstructed = await candidate
+      .evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        const topEl = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        return !!topEl && (topEl === el || el.contains(topEl) || topEl.contains(el));
+      })
+      .catch(() => false);
+    if (unobstructed) return candidate;
   }
   return null;
 }
