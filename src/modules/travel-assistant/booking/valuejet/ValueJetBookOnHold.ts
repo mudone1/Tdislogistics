@@ -386,7 +386,41 @@ export async function bookValueJetOnHold(
     // again.
     console.log(`[${logTag}] opening reservation module`);
     await reservationsTarget.click({ timeout: 10000 }).catch(() => failWithDiagnostic(page, logTag, `Couldn't click "Reservations" on the dashboard`));
-    await clickByText(page, /new reservation/i).catch(() => failWithDiagnostic(page, logTag, `Couldn't find "New Reservation"`));
+    // CORRECTED (2026-08-09, live): this click can throw even when the
+    // navigation it triggers actually succeeds — a diagnostic captured
+    // right at this exact failure showed the URL had already moved to
+    // /new-reservation despite the thrown error (a detached-element/
+    // navigation race, not a real click failure). Only treat this as
+    // fatal if we're NOT already on that page.
+    await clickByText(page, /new reservation/i).catch(async () => {
+      if (!/new-reservation/i.test(page.url())) {
+        await failWithDiagnostic(page, logTag, `Couldn't find "New Reservation"`);
+      }
+    });
+
+    // CORRECTED (2026-08-09, live): a leftover unsaved reservation on this
+    // agent account — from an earlier interrupted run, or genuinely
+    // abandoned by a human agent — blocks the New Reservation flow behind
+    // a "You have an active booking" prompt with two actions: "New
+    // Reservation" (discard, start fresh) and "Edit Booking" (resume the
+    // stale one). Always choose "New Reservation" — a fresh search must
+    // never silently resume an unrelated stale booking. Scoped to the
+    // prompt's own container (found by walking up until "Edit Booking" is
+    // also present) so this can't collide with the sidebar's identically
+    // worded "New Reservation" nav link.
+    const activeBookingAnchor = page.getByText(/you have an active booking/i).first();
+    const hasStalePrompt = await activeBookingAnchor.isVisible({ timeout: 3000 }).catch(() => false);
+    if (hasStalePrompt) {
+      console.warn(`[${logTag}] discarding a stale/incomplete reservation left on this agent account`);
+      const modal = await walkUpUntil(activeBookingAnchor, (text) => /edit booking/i.test(text));
+      const scope = modal ?? page.locator("body");
+      await scope
+        .getByText(/^new reservation$/i)
+        .first()
+        .click({ timeout: 5000 })
+        .catch(() => failWithDiagnostic(page, logTag, `Found a stale "active booking" prompt but couldn't dismiss it`));
+      await page.waitForTimeout(800);
+    }
 
     // --- 3/4. Search flights ---
     reportStage("SEARCHING");
@@ -613,6 +647,27 @@ async function clickNextUntilFlightsShown(page: import("playwright").Page, logTa
   if (!flightsVisible) await failWithDiagnostic(page, logTag, "Flight results never appeared after clicking Next");
 }
 
+// Generic "walk up from a text anchor until an ancestor's own text
+// satisfies some predicate" helper — used whenever a real container class
+// name isn't known (never independently confirmed against a live DOM
+// inspection, only a screen recording), so scoping a click/read to "the
+// right container" has to be derived structurally instead of guessed.
+// Stops at the SMALLEST satisfying ancestor rather than overshooting, so
+// a scoped search inside it doesn't accidentally span multiple unrelated
+// sections of the page.
+async function walkUpUntil(
+  anchor: ReturnType<import("playwright").Page["getByText"]>,
+  predicate: (text: string) => boolean,
+  maxLevels = 8
+): Promise<ReturnType<import("playwright").Page["getByText"]> | null> {
+  for (let up = 1; up <= maxLevels; up++) {
+    const ancestor = anchor.locator(`xpath=ancestor::*[${up}]`);
+    const text = (await ancestor.textContent().catch(() => "")) ?? "";
+    if (predicate(text)) return ancestor;
+  }
+  return null;
+}
+
 // Confirmed live (2026-08-08 recording): each flight row's class
 // inventory really is rendered as individually clickable buttons whose
 // own text is the exact code (e.g. "T3", "H9", "JC") — clicking one
@@ -620,24 +675,17 @@ async function clickNextUntilFlightsShown(page: import("playwright").Page, logTa
 // design (read raw inventory text, apply the priority algorithm, click
 // the chosen code) holds up. What's unconfirmed is the exact row
 // container — walks up from each flight-number badge to find one, since
-// no real class name was ever observed to guess from.
+// no real class name was ever observed to guess from. A real row's text
+// contains the flight-number badge itself plus several class-code tokens
+// (e.g. "T3 D6 S9 B9 H9 K9..." per spec 5.3/5.4) — stop at the smallest
+// ancestor with at least 3, rather than overshooting into a container
+// spanning multiple flights (which would make the later
+// getByText(chosenClass) click ambiguous between rows).
 async function walkUpToRowContainer(
   page: import("playwright").Page,
   badge: ReturnType<typeof page.getByText>
 ): Promise<ReturnType<typeof page.getByText> | null> {
-  for (let up = 1; up <= 8; up++) {
-    const ancestor = badge.locator(`xpath=ancestor::*[${up}]`);
-    const text = (await ancestor.textContent().catch(() => "")) ?? "";
-    // A real row's text contains the flight-number badge itself plus
-    // several class-code tokens (e.g. "T3 D6 S9 B9 H9 K9..." per spec
-    // 5.3/5.4) — stop at the SMALLEST ancestor that already has at least
-    // 3, rather than overshooting into a container spanning multiple
-    // flights (which would make the later getByText(chosenClass) click
-    // ambiguous between rows).
-    const classCodeMatches = text.match(/\b[A-Z]{1,2}(?:C|\d{1,2})\b/g) ?? [];
-    if (classCodeMatches.length >= 3) return ancestor;
-  }
-  return null;
+  return walkUpUntil(badge, (text) => (text.match(/\b[A-Z]{1,2}(?:C|\d{1,2})\b/g) ?? []).length >= 3);
 }
 
 // Finds the flight row matching preferredTime (if given — otherwise the
