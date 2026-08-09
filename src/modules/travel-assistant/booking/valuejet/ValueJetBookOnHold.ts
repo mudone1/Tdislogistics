@@ -125,6 +125,45 @@ async function fillByLabel(page: import("playwright").Page, labelPattern: RegExp
   await page.getByLabel(labelPattern, { exact: false }).nth(index).fill(value);
 }
 
+// Live-verified (2026-08-09): BOTH the recording-confirmed "Date" label
+// AND the spec's original "Departure/Travel Date" wording failed to match
+// on a real booking attempt — two guesses in a row, meaning a third guess
+// isn't worth the risk of being wrong again too. Tries a placeholder-based
+// match as a genuinely different signal (not just another label-text
+// guess) before giving up with a full dump of every labeled field and
+// every input's placeholder actually on the page, so the real wording is
+// captured as evidence instead of requiring a fourth blind attempt.
+async function fillDateField(page: import("playwright").Page, logTag: string, value: string, index = 0): Promise<void> {
+  try {
+    await page.getByLabel(/^date$/i, { exact: false }).nth(index).fill(value, { timeout: 8000 });
+    return;
+  } catch {
+    /* try next */
+  }
+  try {
+    await page.getByLabel(/(departure|travel) date/i, { exact: false }).nth(index).fill(value, { timeout: 8000 });
+    return;
+  } catch {
+    /* try next */
+  }
+  try {
+    await page.locator('input[placeholder*="date" i]').nth(index).fill(value, { timeout: 8000 });
+    return;
+  } catch {
+    /* fall through to diagnostic */
+  }
+
+  const diagnostic = await page
+    .evaluate(() => ({
+      labels: Array.from(document.querySelectorAll("label")).map((l) => l.textContent?.trim()).filter(Boolean),
+      inputPlaceholders: Array.from(document.querySelectorAll("input")).map((i) => (i as HTMLInputElement).placeholder).filter(Boolean),
+      url: window.location.href,
+    }))
+    .catch((err) => ({ evaluateError: String(err) }));
+  console.error(`[${logTag}] no date field matched (label "Date", label "Departure/Travel Date", or placeholder containing "date"). DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
+  throw new Error(`Couldn't find a date field to fill (index ${index}). Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`);
+}
+
 export async function bookValueJetOnHold(
   credentials: BookOnHoldCredentials,
   request: BookOnHoldRequest,
@@ -354,9 +393,7 @@ export async function bookValueJetOnHold(
     // (not "Departure Date"/"Travel Date" as the spec assumed) — matched
     // first here since it's confirmed live; the old wording kept as a
     // fallback in case a different KIU deployment phrases it that way.
-    await fillByLabel(page, /^date$/i, request.departureDate).catch(() =>
-      fillByLabel(page, /(departure|travel) date/i, request.departureDate)
-    );
+    await fillDateField(page, logTag, request.departureDate);
 
     if (isRoundTrip) {
       // CORRECTED: Availability mode has no single "Date Of Return" field
@@ -389,9 +426,7 @@ export async function bookValueJetOnHold(
       // way when driven programmatically.
       await fillByLabel(page, /^origin/i, request.destination, 1);
       await fillByLabel(page, /^destination/i, request.origin, 1);
-      await fillByLabel(page, /^date$/i, request.returnDate!, 1).catch(() =>
-        fillByLabel(page, /(departure|travel) date/i, request.returnDate!, 1)
-      );
+      await fillDateField(page, logTag, request.returnDate!, 1);
     }
 
     // CORRECTED: passenger-count fields are labeled "ADT"/"CHD"/"INF"
