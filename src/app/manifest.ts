@@ -7,7 +7,17 @@ export default function manifest(): MetadataRoute.Manifest {
     description:
       "TDIS Logistics agent operations dashboard — manage airline balances, client bookings, staff performance and payments.",
     start_url: "/",
-    display: "standalone",
+    // "browser" (not "standalone") is deliberate — see layout.tsx's
+    // appleWebApp comment. A standalone-mode installed PWA hands off any
+    // link to a different origin (every airline portal) to a full-screen
+    // system overlay (Android Custom Tab / iOS Safari View) with no way
+    // for this app's own JS to track or switch between them. "browser"
+    // mode means the home-screen icon opens TDIS in a normal browser tab
+    // instead, so airline links open as genuine, switchable browser tabs —
+    // trading the "no browser chrome" native-app look for real multi-tab
+    // switching on mobile (same mechanism useAirlineSessions.ts already
+    // relies on for desktop).
+    display: "browser",
     background_color: "#ffffff",
     theme_color: "#123B58",
     icons: [

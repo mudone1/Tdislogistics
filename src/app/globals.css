@@ -506,6 +506,22 @@ input:focus, select:focus { border-color: var(--navy); background: white; box-sh
 .airline-logo-fallback { width: 70px; height: 50px; border-radius: 8px; margin: 0 auto 10px; display: flex; align-items: center; justify-content: center; color: white; font-size: 12px; font-weight: 800; letter-spacing: 0.5px; }
 .airline-tile-name { font-family: var(--font-inter-tight), 'Inter Tight', sans-serif; font-size: 13px; font-weight: 700; color: var(--navy-dark); margin-bottom: 4px; }
 .airline-tile-code { font-size: 11px; color: var(--gray-400); font-weight: 500; }
+.airline-tile.session-active { border-color: var(--navy); box-shadow: 0 0 0 2px rgba(30,36,99,0.12); }
+
+/* Open Sessions bar — tracks real browser tabs opened per-airline (see
+   useAirlineSessions.ts); not an embedded workspace, see that file's
+   header comment for why. */
+.airline-sessions-bar { background: white; border: 1.5px solid var(--gray-200); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
+.airline-sessions-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.airline-sessions-title { font-family: var(--font-inter-tight), 'Inter Tight', sans-serif; font-size: 12.5px; font-weight: 700; color: var(--navy-dark); text-transform: uppercase; letter-spacing: 0.4px; }
+.airline-sessions-minimize-all { background: none; border: 1.5px solid var(--gray-200); border-radius: 6px; padding: 4px 10px; font-size: 11.5px; font-weight: 600; color: var(--gray-400); cursor: pointer; transition: all 0.2s; }
+.airline-sessions-minimize-all:hover { border-color: var(--navy); color: var(--navy); }
+.airline-sessions-pills { display: flex; flex-wrap: wrap; gap: 8px; }
+.airline-session-pill { display: flex; align-items: stretch; border: 1.5px solid var(--gray-200); border-radius: 8px; overflow: hidden; transition: all 0.2s; }
+.airline-session-pill.active { border-color: var(--navy); background: rgba(30,36,99,0.05); }
+.airline-session-pill-main { background: none; border: none; padding: 7px 10px; font-size: 12px; font-weight: 600; color: var(--navy-dark); cursor: pointer; white-space: nowrap; }
+.airline-session-pill-close { background: none; border: none; border-left: 1px solid var(--gray-200); padding: 7px 9px; font-size: 11px; color: var(--gray-400); cursor: pointer; transition: all 0.2s; }
+.airline-session-pill-close:hover { background: var(--red-500); color: white; }
 .airline-status { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 10px; }
 .status-active { background: var(--green-light); color: var(--green); }
 .status-low { background: var(--amber-light); color: var(--amber); }

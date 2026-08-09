@@ -31,18 +31,15 @@ export const metadata: Metadata = {
     icon: "/icons/icon-192.png",
     apple: "/icons/apple-touch-icon.png",
   },
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "TDIS",
-  },
-  other: {
-    // Next's appleWebApp.capable only emits the newer unprefixed
-    // mobile-web-app-capable tag — iOS Safari has relied on this exact
-    // legacy prefixed tag for standalone/"Add to Home Screen" mode across
-    // far more iOS versions, so it needs to be set explicitly alongside it.
-    "apple-mobile-web-app-capable": "yes",
-  },
+  // No appleWebApp.capable / apple-mobile-web-app-capable here, deliberately
+  // — that pair is what makes an iOS home-screen launch open in standalone
+  // mode (no Safari chrome), which is exactly the mode that hands off any
+  // link to a different origin (every airline portal) to a full-screen
+  // Safari View overlay with no way for this app's own JS to track or
+  // switch between them. Leaving both unset means an iOS "Add to Home
+  // Screen" icon opens TDIS in a normal Safari tab instead, matching the
+  // manifest's display:"browser" (see manifest.ts) so airline links open as
+  // genuine, switchable tabs there too.
 };
 
 export const viewport: Viewport = {
