@@ -737,10 +737,27 @@ async function selectFlightAndClass(
       return text.includes(preferredTime) || digitsOnly(text).includes(normalizedPreferred);
     });
     if (matchIndex === -1) {
+      // The digits-only fix above didn't clear this live (still failing
+      // after deploy) — rather than guess a third time blind, dump exactly
+      // what each candidate "row" actually contains: every time-shaped
+      // token found (HH:MM or a bare 3-4 digit run) AND a length-capped
+      // raw snippet. This either confirms the times genuinely don't
+      // include what was requested (a real data/upstream-formatting
+      // mismatch, not a matching bug) or reveals the row-detection itself
+      // is grabbing the wrong elements entirely (e.g. stale leftover
+      // "itinerary" DOM content from a previously-discarded reservation
+      // matching the guessed `[class*="itinerary" i]` selector).
+      const rowSnapshots = texts.map((t) => {
+        const text = t ?? "";
+        return {
+          timeTokens: text.match(/\b\d{1,2}:\d{2}\b|\b\d{3,4}\b/g)?.slice(0, 8) ?? [],
+          snippet: text.replace(/\s+/g, " ").trim().slice(0, 150),
+        };
+      });
       await failWithDiagnostic(
         page,
         logTag,
-        `No ${legLabel} flight departs at "${preferredTime}" (${rows.length} option(s) shown, none matched)`
+        `No ${legLabel} flight departs at "${preferredTime}" (normalized "${normalizedPreferred}"). Rows found: ${JSON.stringify(rowSnapshots)}`
       );
     }
     rowIndex = matchIndex;
