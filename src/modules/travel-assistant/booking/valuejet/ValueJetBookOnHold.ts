@@ -513,10 +513,49 @@ export async function bookValueJetOnHold(
         .catch(() => {});
       await page.waitForTimeout(500);
       if (await stillOnShoppingTab()) {
+        // CORRECTED (2026-08-10, live): a forced retry click ALSO failed to
+        // switch tabs — two independent attempts against the same element
+        // both did nothing, which rules out an ordinary timing/animation
+        // fluke. Rather than guess a third click variant blind, inspect
+        // every "Availability" text match directly: its tag/class, whether
+        // it's genuinely visible/non-zero-size, and — mirroring the
+        // diagnostic that cracked the dashboard "Reservations" bug earlier
+        // this session — what element document.elementFromPoint actually
+        // finds at its own center. That distinguishes "wrong/hidden
+        // element being clicked" from "something is covering the real one"
+        // from "the click lands correctly but the app's own state didn't
+        // update", instead of another blind guess.
+        const availabilityDiagnostic = await page
+          .evaluate(() => {
+            const candidates = Array.from(document.querySelectorAll<HTMLElement>("*")).filter(
+              (el) => el.children.length === 0 && (el.textContent ?? "").trim().toLowerCase() === "availability"
+            );
+            return candidates.slice(0, 5).map((el) => {
+              const rect = el.getBoundingClientRect();
+              const style = window.getComputedStyle(el);
+              const centerX = rect.left + rect.width / 2;
+              const centerY = rect.top + rect.height / 2;
+              const topElementAtCenter = document.elementFromPoint(centerX, centerY);
+              return {
+                tag: el.tagName,
+                className: el.className,
+                parentTag: el.parentElement?.tagName ?? null,
+                parentClassName: el.parentElement?.className ?? null,
+                rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+                display: style.display,
+                pointerEvents: style.pointerEvents,
+                elementAtItsOwnCenter: topElementAtCenter
+                  ? { tag: topElementAtCenter.tagName, className: (topElementAtCenter as HTMLElement).className }
+                  : null,
+              };
+            });
+          })
+          .catch(() => "<evaluate failed>");
+        console.error(`[${logTag}] "Availability" element diagnostic: ${JSON.stringify(availabilityDiagnostic)}`);
         await failWithDiagnostic(
           page,
           logTag,
-          `Clicked "Availability" but the page still shows the Shopping tab's fields (Round Trip/One Way/Airline) — the tab never actually switched`
+          `Clicked "Availability" (twice) but the page still shows the Shopping tab's fields — the tab never actually switched. Availability element state: ${JSON.stringify(availabilityDiagnostic).slice(0, 800)}`
         );
       }
     }
