@@ -28,11 +28,18 @@ export async function POST(req: Request) {
     return NextResponse.json({ reply: 'Send me a route and a date, e.g. "Enugu ABV-LOS today".' });
   }
 
-  // LLM-backed conversational path — used whenever OPENAI_API_KEY is
+  // LLM-backed conversational path — used whenever GROQ_API_KEY is
   // configured and the caller identifies its session. Falls through to the
   // original deterministic parser below otherwise, so nothing breaks for
-  // callers that predate this or when the key isn't set.
-  if (process.env.OPENAI_API_KEY && body.sessionKey) {
+  // callers that predate this or when the key isn't set. RESTORED
+  // (2026-08-10): reverted from OPENAI_API_KEY back to GROQ_API_KEY — the
+  // OpenAI account's $5 credit ran out, and EVERY request was silently
+  // falling into the catch block below, permanently losing Book-on-Hold
+  // for every airline (the legacy parser this falls back to can only ever
+  // run a plain search). Groq's free tier has its own known caveat (a
+  // per-model daily token cap — see groqClient.ts), but it resets every
+  // day automatically rather than requiring a manual top-up.
+  if (process.env.GROQ_API_KEY && body.sessionKey) {
     try {
       const result = await handleAssistantMessage({
         sessionKey: body.sessionKey,

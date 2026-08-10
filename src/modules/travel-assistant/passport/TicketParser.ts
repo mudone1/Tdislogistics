@@ -1,4 +1,4 @@
-import { openaiVisionJsonCompletion } from "../ai/openaiClient";
+import { groqVisionJsonCompletion } from "../ai/groqClient";
 
 export interface TicketParseResult {
   isTicket: boolean;
@@ -112,7 +112,7 @@ export async function parseTicketImage(buffer: Buffer, mimeType: string): Promis
 
   let raw: string;
   try {
-    raw = await openaiVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
+    raw = await groqVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
   } catch {
     return NOT_A_TICKET;
   }

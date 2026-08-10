@@ -284,7 +284,7 @@ enum ChatRole {
 
 // Append-only turn log. `intent`/`entities` are populated only when the
 // LLM path ran (see ConversationOrchestrator) — null on the deterministic
-// fallback path used when OPENAI_API_KEY isn't configured.
+// fallback path used when GROQ_API_KEY isn't configured.
 model ChatMessage {
   id        String   @id @default(cuid())
   sessionId String

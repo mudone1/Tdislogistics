@@ -1,4 +1,4 @@
-import { openaiVisionJsonCompletion } from "../ai/openaiClient";
+import { groqVisionJsonCompletion } from "../ai/groqClient";
 
 export interface IdDocumentParseResult {
   isIdDocument: boolean;
@@ -90,7 +90,7 @@ export async function parseIdDocumentImage(buffer: Buffer, mimeType: string): Pr
 
   let raw: string;
   try {
-    raw = await openaiVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
+    raw = await groqVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
   } catch {
     // A parse/API failure says nothing about whether this was actually an
     // ID document — fail closed to isIdDocument:false rather than telling
