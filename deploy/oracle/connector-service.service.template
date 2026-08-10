@@ -1,0 +1,15 @@
+[Unit]
+Description=TDIS connector-service (Playwright booking automation)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory={{REPO_DIR}}/connector-service
+EnvironmentFile={{REPO_DIR}}/connector-service/.env
+ExecStart=/usr/bin/node dist/connector-service/src/server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
