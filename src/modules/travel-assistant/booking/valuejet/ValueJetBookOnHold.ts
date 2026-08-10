@@ -448,6 +448,39 @@ export async function bookValueJetOnHold(
     );
     await page.waitForTimeout(300);
 
+    // CORRECTED (2026-08-10, live): a real search filled fields and then
+    // "Next" never produced flight results — the diagnostic captured at
+    // that failure still showed "Round Trip"/"One Way"/"Airline *" as
+    // VISIBLE text (pageDiagnostic uses innerText, which excludes hidden
+    // content — this can only mean those Shopping-tab fields were
+    // genuinely rendered). The "Availability" click above never actually
+    // switched tabs, so every field below was filled into the wrong
+    // (Shopping) form the whole time. Verify the switch actually took
+    // hold before filling anything; retry once with a forced click if it
+    // didn't, then fail loudly with a fresh diagnostic if it still hasn't.
+    const stillOnShoppingTab = async () =>
+      page
+        .getByText(/round trip/i)
+        .first()
+        .isVisible()
+        .catch(() => false);
+    if (await stillOnShoppingTab()) {
+      console.warn(`[${logTag}] "Availability" tab click didn't take — retrying with a forced click`);
+      await page
+        .getByText(/^availability$/i)
+        .first()
+        .click({ force: true, timeout: 5000 })
+        .catch(() => {});
+      await page.waitForTimeout(500);
+      if (await stillOnShoppingTab()) {
+        await failWithDiagnostic(
+          page,
+          logTag,
+          `Clicked "Availability" but the page still shows the Shopping tab's fields (Round Trip/One Way/Airline) — the tab never actually switched`
+        );
+      }
+    }
+
     // Leg 1 (outbound) — Origin/Destination/Date are the first instance of
     // each of these labels on the page even in round-trip mode (leg 2, if
     // added below, duplicates the same labels further down).
