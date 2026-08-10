@@ -125,6 +125,46 @@ async function fillByLabel(page: import("playwright").Page, labelPattern: RegExp
   await page.getByLabel(labelPattern, { exact: false }).nth(index).fill(value);
 }
 
+// CORRECTED (2026-08-10, live): filling Origin/Destination with plain
+// fillByLabel's .fill() leaves an autocomplete dropdown open with several
+// fuzzy-matched suggestions — confirmed live via a diagnostic showing
+// "Paso de los Libres"/"Athens"/"Barcelos"/etc. still visible after "LOS"
+// was typed into Origin. The real underlying selection never commits, so
+// the search silently never runs even though the field visually shows
+// text. Type the code, wait for the dropdown, then click the option whose
+// text actually STARTS WITH the requested code to commit a real
+// selection — matching the real human flow seen in the recording, where
+// typing "los" resolved into the confirmed value "LOS - Lagos...".
+async function fillAirportField(
+  page: import("playwright").Page,
+  labelPattern: RegExp,
+  code: string,
+  index = 0
+): Promise<void> {
+  const input = page.getByLabel(labelPattern, { exact: false }).nth(index);
+  await input.fill(code);
+  const option = page.getByText(new RegExp(`^${code}\\b`, "i")).first();
+  const appeared = await option
+    .waitFor({ state: "visible", timeout: 6000 })
+    .then(() => true)
+    .catch(() => false);
+  if (appeared) {
+    await option.click({ timeout: 5000 }).catch(async () => {
+      // Couldn't click the matched option directly (maybe covered) — fall
+      // back to keyboard selection of the highlighted/first suggestion.
+      await input.press("ArrowDown").catch(() => {});
+      await input.press("Enter").catch(() => {});
+    });
+  } else {
+    // Dropdown never showed a clearly-matching option — still better to
+    // keyboard-select whatever the first suggestion is than leave the
+    // field on raw unconfirmed text.
+    await input.press("ArrowDown").catch(() => {});
+    await input.press("Enter").catch(() => {});
+  }
+  await page.waitForTimeout(200);
+}
+
 // request.departureDate/returnDate arrive as ISO "YYYY-MM-DD" throughout
 // this codebase — live-verified (2026-08-09) the real field expects
 // "MM-DD-YYYY" (its own placeholder text, confirmed via diagnostic dump),
@@ -484,8 +524,8 @@ export async function bookValueJetOnHold(
     // Leg 1 (outbound) — Origin/Destination/Date are the first instance of
     // each of these labels on the page even in round-trip mode (leg 2, if
     // added below, duplicates the same labels further down).
-    await fillByLabel(page, /^origin/i, request.origin);
-    await fillByLabel(page, /^destination/i, request.destination);
+    await fillAirportField(page, /^origin/i, request.origin);
+    await fillAirportField(page, /^destination/i, request.destination);
     // CORRECTED: Availability mode's date field is labeled plainly "Date"
     // (not "Departure Date"/"Travel Date" as the spec assumed) — matched
     // first here since it's confirmed live; the old wording kept as a
@@ -521,8 +561,8 @@ export async function bookValueJetOnHold(
       // route, since that auto-fill is a UI convenience tied to the real
       // autocomplete interaction and isn't guaranteed to fire the same
       // way when driven programmatically.
-      await fillByLabel(page, /^origin/i, request.destination, 1);
-      await fillByLabel(page, /^destination/i, request.origin, 1);
+      await fillAirportField(page, /^origin/i, request.destination, 1);
+      await fillAirportField(page, /^destination/i, request.origin, 1);
       await fillDateField(page, logTag, request.returnDate!, 1);
     }
 
