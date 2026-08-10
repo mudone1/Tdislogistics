@@ -10,8 +10,10 @@ import { ENUGU_SUPPORTED_TITLES } from "../booking/vars-platform/VarsBookOnHold"
 import { handleQuery as handleSalesReportQuery } from "../orchestration/SalesReportAssistant";
 import { triggerBalanceUpdate } from "../../../lib/balanceUpdateService";
 import { toSurnameCase, toTitleCase } from "../nameFormat";
+import { parseFlightQuery } from "../parser/parseFlightQuery";
 import type {
   AssistantTurn,
+  ChatEntities,
   ConversationSlots,
   FlightSearchResult,
   FlightOption,
@@ -247,7 +249,11 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
   const priorMessages = await ChatMemoryRepository.getRecentMessages(session.id, 10);
   const slots: ConversationSlots = loadSlots(session);
 
-  const turn = await runIntentDetection(input.message, slots, priorMessages);
+  // Try the zero-LLM deterministic path first (booking/search only — see
+  // its own doc comment for why). Falls through to the LLM for anything
+  // it can't confidently classify: small talk, staff questions, sales
+  // questions, and short contextual follow-ups mid-conversation.
+  const turn = tryDeterministicIntentDetection(input.message) ?? (await runIntentDetection(input.message, slots, priorMessages));
 
   await ChatMemoryRepository.appendMessage(session.id, "USER", input.message, turn.intent, turn.entities);
 
@@ -506,6 +512,260 @@ function logSearchTiming(
   console.log(
     `[travel-assistant] TIMING kind=${kind} airlines=[${airlines.join(",")}] totalMs=${totalMs} options=${totalOptions} failed=[${failed.join(",")}]`
   );
+}
+
+// ─── Deterministic booking/search intent (no LLM) ──────────────────────
+//
+// Confirmed live (2026-08-10): Groq's free-tier model (llama-3.3-70b-
+// versatile) needed the SAME booking message repeated several times
+// before it reliably classified/extracted it — a genuine quality gap
+// versus what OpenAI's gpt-4o-mini did before it, not just occasional
+// flakiness. But almost every field this path actually needs — route,
+// date, passenger name/phone/email, airline, cabin class, round-trip —
+// was ALREADY being cross-checked against the raw message via
+// deterministic regex elsewhere in this file (messageActuallyNamesAirline,
+// messageActuallyRequestsPremiumCabin, the ROUND_TRIP_* guards in
+// mergeEntitiesIntoSlots, the email/phone raw-text fallbacks) precisely
+// because the LLM kept getting them wrong on its own. The booking/search
+// path never really needed an LLM's fuzzy understanding to begin with —
+// this tries to classify AND extract the entire turn with zero LLM
+// involvement. Returning null falls through to the LLM exactly as before,
+// so small talk, staff questions, sales questions, and anything genuinely
+// open-ended (including short contextual follow-ups like "3" or a bare
+// date answering "what date would you like to return?") are untouched.
+//
+// Bias throughout is toward "extract nothing" over "extract something
+// wrong" — a missing field just becomes a follow-up question the app
+// already knows how to ask (collectBookingGaps/buildClarifyingQuestion),
+// exactly the same as a genuinely partial human message across turns. A
+// WRONG field (misclassified intent, wrong airline, wrong route) is the
+// only real risk, so every extractor here returns null/skips rather than
+// guesses whenever it isn't confident.
+
+const NAME_LINE_PATTERN = /^[A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*){0,3}$/;
+
+// Short, specific denylist of lines that structurally match NAME_LINE_PATTERN
+// but are clearly not a passenger name — kept small deliberately; anything
+// not on this list gets treated as a name candidate rather than guessing
+// at every possible non-name word.
+const NAME_LINE_STOPWORDS = new Set([
+  "book", "hold", "reserve", "flight", "flights", "economy", "business",
+  "premium", "today", "tomorrow", "thanks", "thank you", "please", "copy",
+]);
+
+function looksLikeNameLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || !NAME_LINE_PATTERN.test(trimmed)) return false;
+  const lower = trimmed.toLowerCase();
+  if (NAME_LINE_STOPWORDS.has(lower)) return false;
+  if (Object.prototype.hasOwnProperty.call(AIRLINE_NAME_MATCHERS, lower)) return false;
+  if (EMAIL_SEARCH_RE.test(trimmed) || findPhoneInText(trimmed)) return false;
+  return true;
+}
+
+interface DeterministicPassenger {
+  title: string | null;
+  fullName: string;
+}
+
+// Strategy A: one passenger name per line — the WhatsApp format seen in
+// essentially every real booking screenshot this session (route on one
+// line, then each passenger on its own line, then email, then phone).
+function extractPassengerLines(rawMessage: string): DeterministicPassenger[] {
+  const lines = rawMessage
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const passengers: DeterministicPassenger[] = [];
+  for (const line of lines) {
+    if (!looksLikeNameLine(line)) continue;
+    const extracted = extractLeadingTitle(line);
+    passengers.push({ title: extracted.title, fullName: extracted.rest });
+  }
+  return passengers;
+}
+
+// Strategy B: "for NAME[, NAME2][ and NAME3]" — the single-line style used
+// throughout systemPrompt.ts's own extraction examples (e.g. "book abuja
+// to lagos tomorrow for muhammed abdulwahab ..."). Only tried when
+// Strategy A found nothing, since a multi-line message is the more
+// reliable/less ambiguous signal.
+function extractPassengersAfterFor(rawMessage: string): DeterministicPassenger[] {
+  const forMatch = rawMessage.match(/\bfor\s+/i);
+  if (!forMatch || forMatch.index === undefined) return [];
+  const afterFor = rawMessage.slice(forMatch.index + forMatch[0].length);
+
+  // Cut the name span off at the first email, phone-shaped digit run, or
+  // newline — whichever comes first — so a trailing contact-detail
+  // sentence never gets swallowed into "the name".
+  const emailMatch = afterFor.match(EMAIL_SEARCH_RE);
+  const phoneMatch = afterFor.match(/\+?[\d][\d\s-]{8,17}\d/);
+  const newlineIdx = afterFor.indexOf("\n");
+  const cutPoints = [emailMatch?.index, phoneMatch?.index, newlineIdx === -1 ? undefined : newlineIdx].filter(
+    (n): n is number => n !== undefined
+  );
+  const cutAt = cutPoints.length > 0 ? Math.min(...cutPoints) : afterFor.length;
+  const nameSpan = afterFor.slice(0, cutAt).trim().replace(/[.,]+$/, "");
+  if (!nameSpan) return [];
+
+  // Multiple passengers separated the same way systemPrompt.ts's own rules
+  // describe to the LLM: commas, "and", or "plus".
+  const pieces = nameSpan
+    .split(/\s*,\s*|\s+and\s+|\s+plus\s+/i)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const passengers: DeterministicPassenger[] = [];
+  for (const piece of pieces) {
+    if (!NAME_LINE_PATTERN.test(piece)) continue;
+    if (NAME_LINE_STOPWORDS.has(piece.toLowerCase())) continue;
+    const extracted = extractLeadingTitle(piece);
+    passengers.push({ title: extracted.title, fullName: extracted.rest });
+  }
+  return passengers;
+}
+
+function extractPassengers(rawMessage: string): DeterministicPassenger[] {
+  const fromLines = extractPassengerLines(rawMessage);
+  if (fromLines.length > 0) return fromLines;
+  return extractPassengersAfterFor(rawMessage);
+}
+
+// Small, high-confidence common-name lists for a deterministic gender
+// guess — deliberately NOT exhaustive. Anything not on either list falls
+// through to "unsure", which resolvePendingPassengerTitle already handles
+// safely (it asks the user rather than guessing) — the same "never force
+// a guess" discipline already established for this exact field. "Precious"
+// is intentionally on neither list — already documented elsewhere in this
+// file as genuinely unisex in Nigerian usage.
+const COMMON_MALE_FIRST_NAMES = new Set([
+  "muhammed", "muhammad", "mohammed", "mohammad", "john", "michael", "david",
+  "daniel", "emmanuel", "emeka", "musa", "ibrahim", "peter", "paul", "james",
+  "joseph", "samuel", "joshua", "benjamin", "francis", "anthony", "victor",
+  "kelvin", "chidi", "chinedu", "obi", "tunde", "segun", "femi", "yusuf",
+  "abdullahi", "aliyu", "usman", "suleiman", "othniel", "raheem",
+  "raheemiel", "godfrey", "stephen", "mark", "matthew", "andrew", "richard",
+  "robert", "william", "charles", "abdulwahab", "wahab", "akeeb",
+]);
+const COMMON_FEMALE_FIRST_NAMES = new Set([
+  "mary", "jennifer", "sarah", "grace", "aisha", "fatima", "chidinma",
+  "blessing", "favour", "joy", "peace", "gift", "esther", "ruth",
+  "comfort", "patience", "mercy", "joyce", "florence", "helen", "mariam",
+  "zainab", "hauwa", "amaka", "ngozi", "adaeze", "elizabeth", "victoria",
+  "princess",
+]);
+
+function guessGenderFromFirstName(firstName: string): "male" | "female" | "unsure" {
+  const first = firstName.trim().split(/\s+/)[0]?.toLowerCase();
+  if (!first) return "unsure";
+  if (COMMON_MALE_FIRST_NAMES.has(first)) return "male";
+  if (COMMON_FEMALE_FIRST_NAMES.has(first)) return "female";
+  return "unsure";
+}
+
+function emptyChatEntities(): ChatEntities {
+  return {
+    origin: null,
+    destination: null,
+    date: null,
+    returnDate: null,
+    adults: null,
+    children: null,
+    infants: null,
+    airline: null,
+    cabinClass: null,
+    passengerTitle: null,
+    passengerFullName: null,
+    passengerPhone: null,
+    passengerEmail: null,
+    passengerGenderGuess: null,
+    additionalPassengers: null,
+  };
+}
+
+// Entry point — tries to classify AND fully extract this turn with zero
+// LLM calls; returns null (fall through to the LLM) whenever it can't
+// confidently do so.
+function tryDeterministicIntentDetection(rawMessage: string): AssistantTurn | null {
+  const parsed = parseFlightQuery(rawMessage);
+  // Same signal already proven live in production (PR #59's deterministic
+  // BOOK_ON_HOLD override) — a trigger verb plus real contact details is
+  // an unambiguous booking, never a plain search.
+  const looksLikeBooking =
+    BOOKING_VERB_PATTERN.test(rawMessage) && (EMAIL_SEARCH_RE.test(rawMessage) || findPhoneInText(rawMessage) !== null);
+
+  const airline = resolveNamedAirline(rawMessage);
+  const cabinClass = messageActuallyRequestsPremiumCabin(rawMessage) ? "PREMIUM" : null;
+
+  if (looksLikeBooking) {
+    const passengers = extractPassengers(rawMessage);
+    const emailMatch = rawMessage.match(EMAIL_SEARCH_RE);
+    const phone = findPhoneInText(rawMessage);
+
+    const entities = emptyChatEntities();
+    if (parsed.origin) entities.origin = parsed.origin;
+    if (parsed.destination) entities.destination = parsed.destination;
+    if (parsed.date) entities.date = parsed.date;
+    if (parsed.isRoundTrip && parsed.returnDate) entities.returnDate = parsed.returnDate;
+    entities.airline = airline;
+    entities.cabinClass = cabinClass;
+    entities.passengerEmail = emailMatch ? emailMatch[0] : null;
+    entities.passengerPhone = phone;
+
+    if (passengers.length > 0) {
+      const lead = passengers[0];
+      entities.passengerTitle = lead.title;
+      entities.passengerFullName = lead.fullName;
+      entities.passengerGenderGuess = lead.title ? null : guessGenderFromFirstName(lead.fullName);
+      if (passengers.length > 1) {
+        entities.additionalPassengers = passengers.slice(1).map((p) => ({
+          fullName: p.fullName,
+          title: p.title,
+          genderGuess: p.title ? null : guessGenderFromFirstName(p.fullName),
+          // Deterministic path doesn't attempt child/infant/age detection
+          // from free text (genuinely hard without an LLM) — defaults to
+          // ADULT, the same safe default the app already falls back to
+          // when genuinely unclear; a wrong default here just means the
+          // portal's own passenger-type dropdown gets corrected manually,
+          // not a booking placed for the wrong person.
+          type: "ADULT" as const,
+          dateOfBirth: null,
+        }));
+      }
+    }
+
+    return {
+      intent: "BOOK_ON_HOLD",
+      entities,
+      missingRequiredSlots: [],
+      reply: "Got it — let me get that hold started.",
+    };
+  }
+
+  // FLIGHT_SEARCH — only when the route was confidently parsed (an
+  // explicit "from X to Y", "X-Y"/"X/Y", or clearly-bounded airport-name
+  // match — see parseFlightQuery's own "high" vs "low" confidence logic).
+  // A low-confidence match is NOT trusted here, since it comes from a
+  // looser scan that can false-positive on ordinary text — that falls
+  // through to the LLM rather than risk searching the wrong airports.
+  if (parsed.confidence === "high" && parsed.origin && parsed.destination) {
+    const entities = emptyChatEntities();
+    entities.origin = parsed.origin;
+    entities.destination = parsed.destination;
+    entities.date = parsed.date;
+    entities.airline = airline;
+    entities.cabinClass = cabinClass;
+    if (parsed.isRoundTrip && parsed.returnDate) entities.returnDate = parsed.returnDate;
+
+    return {
+      intent: parsed.isRoundTrip ? "FLIGHT_SEARCH_ROUND_TRIP" : "FLIGHT_SEARCH_ONE_WAY",
+      entities,
+      missingRequiredSlots: [],
+      reply: "Let me check that for you.",
+    };
+  }
+
+  return null;
 }
 
 async function runIntentDetection(
