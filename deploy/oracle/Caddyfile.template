@@ -1,0 +1,11 @@
+# Automatic HTTPS reverse proxy — sslip.io resolves any subdomain of an
+# IP-address-shaped hostname back to that literal IP, so Caddy can get a
+# real, trusted Let's Encrypt certificate for both services without ever
+# needing a purchased domain name.
+connector.{{IP_DASHED}}.sslip.io {
+	reverse_proxy localhost:4100
+}
+
+whatsapp.{{IP_DASHED}}.sslip.io {
+	reverse_proxy localhost:4101
+}

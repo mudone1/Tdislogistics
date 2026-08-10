@@ -1,0 +1,15 @@
+[Unit]
+Description=TDIS whatsapp-service (Baileys WhatsApp bot)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory={{REPO_DIR}}/whatsapp-service
+EnvironmentFile={{REPO_DIR}}/whatsapp-service/.env
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
