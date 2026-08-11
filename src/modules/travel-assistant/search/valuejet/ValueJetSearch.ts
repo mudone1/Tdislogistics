@@ -100,6 +100,19 @@ async function fetchJourneys(query: FlightSearchQuery, logTag: string): Promise<
     // next failure (if this really is just an unsupported route, not a
     // bug) reads as informatively as the other four airlines' answers.
     const body = await res.text().catch(() => "");
+
+    // CORRECTED (2026-08-11, live, QOW-ABV): this endpoint tries to price
+    // an itinerary as part of "search", and returns this specific
+    // "CreatedItineraryException" / "Can not create an itinerary" body
+    // when it simply has nothing to offer for the route/date — not a
+    // bug on our side. Phrase it like the other four airlines'
+    // "doesn't fly this route" answers (same "doesn't fly" wording, so
+    // it also qualifies for the grouped all-airlines-don't-fly-it reply)
+    // instead of dumping ValueJet's raw internal exception JSON.
+    if (/can ?not create an itinerary/i.test(body)) {
+      throw new Error(`ValueJet doesn't fly ${query.origin} to ${query.destination} (no fares available for this route)`);
+    }
+
     throw new Error(`ValueJet search request failed: ${res.status} ${res.statusText}${body ? ` — ${body.slice(0, 300)}` : ""}`);
   }
   const body = (await res.json()) as { data?: { _?: ValueJetJourney[] } };
