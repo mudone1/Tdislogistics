@@ -273,8 +273,15 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
   // isRoundTrip. Only overrides away from a SEARCH-shaped intent (never
   // e.g. SALES_REPORT_QUERY) — a message can't accidentally get force-
   // routed into booking from an intent that was never in the running.
+  // Widened (2026-08-10, live) the same way as tryDeterministicIntentDetection's
+  // own gate — a message with BOTH an email AND a phone number is an
+  // unambiguous booking even with no trigger verb at all (a plain search
+  // never includes passenger contact details), kept here too as a
+  // defense-in-depth fallback for whatever the deterministic path above
+  // didn't already catch.
   const looksLikeBookingRequest =
-    BOOKING_VERB_PATTERN.test(input.message) && (EMAIL_SEARCH_RE.test(input.message) || findPhoneInText(input.message) !== null);
+    (BOOKING_VERB_PATTERN.test(input.message) && (EMAIL_SEARCH_RE.test(input.message) || findPhoneInText(input.message) !== null)) ||
+    (EMAIL_SEARCH_RE.test(input.message) && findPhoneInText(input.message) !== null);
   if (turn.intent === "BOOK_ON_HOLD" || (looksLikeBookingRequest && (SEARCH_INTENTS.has(turn.intent) || turn.intent === "UNKNOWN"))) {
     return handleBookOnHold(session.id, input.sessionKey, slots, turn, input.message);
   }
@@ -553,11 +560,24 @@ const NAME_LINE_STOPWORDS = new Set([
   "premium", "today", "tomorrow", "thanks", "thank you", "please", "copy",
 ]);
 
+// CORRECTED (2026-08-10, live): "Abv los tomorrow" (a route+date on its own
+// line, no explicit trigger verb, no dash/slash between the two airports)
+// still structurally matches NAME_LINE_PATTERN and wasn't equal to any
+// whole-line entry in NAME_LINE_STOPWORDS ("tomorrow" is a stopword, but
+// only as an exact whole-line match — "Abv los tomorrow" as a full line
+// never equals it), so it was wrongly treated as an additional-passenger
+// name. Reject a candidate line outright if it contains a route
+// connector or any date-ish word, wherever the stopwords-as-whole-line
+// check doesn't already cover it.
+const ROUTE_OR_DATE_WORD_PATTERN =
+  /\b(?:to|today|tomorrow|tonight|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+
 function looksLikeNameLine(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed || !NAME_LINE_PATTERN.test(trimmed)) return false;
   const lower = trimmed.toLowerCase();
   if (NAME_LINE_STOPWORDS.has(lower)) return false;
+  if (ROUTE_OR_DATE_WORD_PATTERN.test(trimmed)) return false;
   if (Object.prototype.hasOwnProperty.call(AIRLINE_NAME_MATCHERS, lower)) return false;
   if (EMAIL_SEARCH_RE.test(trimmed) || findPhoneInText(trimmed)) return false;
   return true;
@@ -691,8 +711,18 @@ function tryDeterministicIntentDetection(rawMessage: string): AssistantTurn | nu
   // Same signal already proven live in production (PR #59's deterministic
   // BOOK_ON_HOLD override) — a trigger verb plus real contact details is
   // an unambiguous booking, never a plain search.
-  const looksLikeBooking =
-    BOOKING_VERB_PATTERN.test(rawMessage) && (EMAIL_SEARCH_RE.test(rawMessage) || findPhoneInText(rawMessage) !== null);
+  const hasContactDetail = EMAIL_SEARCH_RE.test(rawMessage) || findPhoneInText(rawMessage) !== null;
+  // CORRECTED (2026-08-10, live): "ValueJet / Johnson Anya / Abv los
+  // tomorrow / 21:15 / <phone> / <email>" — a complete booking spec with
+  // full passenger contact details — fell through to a plain search
+  // because it never says "book"/"hold"/"reserve" anywhere, and the LLM
+  // then substituted the wrong airline on top of that. A message
+  // containing BOTH an email AND a phone number can only be a booking —
+  // a plain fare-comparison search never includes passenger contact
+  // details at all — so that combination alone is just as unambiguous a
+  // signal as an explicit trigger verb, verb or no verb.
+  const hasBothContactDetails = EMAIL_SEARCH_RE.test(rawMessage) && findPhoneInText(rawMessage) !== null;
+  const looksLikeBooking = (BOOKING_VERB_PATTERN.test(rawMessage) && hasContactDetail) || hasBothContactDetails;
 
   const airline = resolveNamedAirline(rawMessage);
   const cabinClass = messageActuallyRequestsPremiumCabin(rawMessage) ? "PREMIUM" : null;
