@@ -136,14 +136,27 @@ function buildFlightOption(
       name: tier.label,
       fare: cheapest.amount.total,
       currency: CURRENCY,
-      soldOut: false,
+      // CORRECTED (2026-08-11, live): this was hardcoded to `false` for any
+      // matching RBD/fare-tier combo, even when its seat count was 0 — KIU
+      // still returns a priced combo for a fully sold-out class, it just
+      // has `count: 0`. That produced "— 0 seats left" fare rows instead
+      // of the class being excluded like every other airline's sold-out
+      // classes are.
+      soldOut: cheapest.count <= 0,
       seatsLeft: cheapest.count,
       refundPolicy: describeRefundPolicy(tier.rules),
       baggage: describeBaggage(tier.default_ancillaries),
     };
   });
 
-  const cheapestOverall = combos.reduce((min, c) => (c.amount.total < min.amount.total ? c : min));
+  // Same availability bug applies to the overall "cheapest" figure used for
+  // sorting/display elsewhere — prefer the cheapest combo that actually has
+  // seats, only falling back to a sold-out one if literally nothing on this
+  // flight is available (so `fare` is never left without a number).
+  const available = combos.filter((c) => c.count > 0);
+  const cheapestOverall = (available.length > 0 ? available : combos).reduce((min, c) =>
+    c.amount.total < min.amount.total ? c : min
+  );
 
   return {
     airline: AIRLINE_LABEL,

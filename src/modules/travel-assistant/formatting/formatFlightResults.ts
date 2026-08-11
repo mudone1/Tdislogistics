@@ -20,18 +20,21 @@ export function formatLeg(result: FlightSearchResult): string {
   }
 
   // Cheapest airline first — the group most likely to be the best deal
-  // leads, rather than an arbitrary/API-response order.
+  // leads, rather than an arbitrary/API-response order. Sorting only
+  // counts genuinely available fares (see cheapestOf), so an airline whose
+  // only options are sold out never outranks one with real availability.
   const groups = Array.from(byAirline.entries()).sort((a, b) => cheapestOf(a[1]) - cheapestOf(b[1]));
 
   return groups
     .map(([airline, opts]) => {
       const sorted = [...opts].sort((a, b) => a.departureTime.localeCompare(b.departureTime));
-      const cheapest = cheapestOf(sorted);
-      const header = cheapest === Infinity ? airline : `${airline}\nFrom ${formatNaira(cheapest)}`;
-
+      // A departure with every fare class sold out contributes no line at
+      // all (see formatCabinLines) — if that leaves the whole airline with
+      // nothing to show, say so explicitly instead of an empty section.
       const lines = sorted.flatMap((o) => formatCabinLines(o));
+      const body = lines.length > 0 ? lines.join("\n") : "No flights available for this route.";
 
-      return `${header}\n\n${lines.join("\n")}`;
+      return `${airline}\n\n${body}`;
     })
     .join(`\n\n${SEPARATOR}\n\n`);
 }
@@ -52,8 +55,12 @@ export function formatSingleFlight(option: FlightOption, origin: string, destina
   return `${option.airline}\n${priceLine}\n${origin} → ${destination}, ${date}`;
 }
 
+// Uses only genuinely bookable fares (same availability rule as
+// cabinBucketsForFlight), not FlightOption.fare — a search module's
+// top-level "cheapest overall" figure can still reflect a sold-out class,
+// which must not win an airline-vs-airline sort or a "cheapest" display.
 export function cheapestOf(options: FlightOption[]): number {
-  const fares = options.filter((o) => o.fare != null).map((o) => o.fare as number);
+  const fares = options.flatMap((o) => cabinBucketsForFlight(o).map(({ fareClass }) => fareClass.fare as number));
   return fares.length > 0 ? Math.min(...fares) : Infinity;
 }
 
@@ -139,7 +146,9 @@ function formatCabinLines(option: FlightOption): string[] {
   const time = formatTime12h(option.departureTime);
   const buckets = cabinBucketsForFlight(option);
   if (buckets.length === 0) {
-    return [`${time} @ ${option.seatStatus ?? "unavailable"}`];
+    // Silent per spec — a departure with every fare class sold out just
+    // doesn't appear, rather than showing an "unavailable" line.
+    return [];
   }
   return buckets.map(({ bucket, fareClass }) => {
     const seatsSuffix =
