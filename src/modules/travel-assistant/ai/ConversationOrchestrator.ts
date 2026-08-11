@@ -1137,7 +1137,15 @@ const EMAIL_SEARCH_RE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 // or "2026-07-30" never produces a long enough contiguous digit run to
 // false-positive here.
 function findPhoneInText(text: string): string | null {
-  const candidates = text.match(/\+?[\d][\d\s-]{8,17}\d/g);
+  // CORRECTED (2026-08-11, live): the middle character class used to be
+  // [\d\s-], and \s matches a newline — on a multi-line message where a
+  // time field ("21:15") sits on the line right above the phone number,
+  // this greedily matched ACROSS the line break ("15\n08140962303"),
+  // silently corrupting the extracted phone number with the time's
+  // trailing digits while still passing normalizePhone's loose length
+  // check. Real phone numbers are only ever separated by spaces or
+  // hyphens, never a line break, so the class no longer includes \s.
+  const candidates = text.match(/\+?[\d][\d -]{8,17}\d/g);
   if (!candidates) return null;
   for (const candidate of candidates) {
     const digits = candidate.replace(/\D/g, "");
