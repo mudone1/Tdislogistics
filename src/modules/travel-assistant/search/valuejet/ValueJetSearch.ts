@@ -92,7 +92,15 @@ async function fetchJourneys(query: FlightSearchQuery, logTag: string): Promise<
   console.log(`[${logTag}] GET ${url}`);
   const res = await fetchWithTimeout(url);
   if (!res.ok) {
-    throw new Error(`ValueJet search request failed: ${res.status} ${res.statusText}`);
+    // CORRECTED (2026-08-11, live): a bare "400 Bad Request" gave zero
+    // indication of WHY, unlike every other airline's own graceful
+    // "doesn't fly from X" message for the same unsupported-origin
+    // scenario (e.g. BNI-ABV) — confirmed live via a real 400 on that
+    // exact route. Capture and surface the real response body so the
+    // next failure (if this really is just an unsupported route, not a
+    // bug) reads as informatively as the other four airlines' answers.
+    const body = await res.text().catch(() => "");
+    throw new Error(`ValueJet search request failed: ${res.status} ${res.statusText}${body ? ` — ${body.slice(0, 300)}` : ""}`);
   }
   const body = (await res.json()) as { data?: { _?: ValueJetJourney[] } };
   return body.data?._ ?? [];
