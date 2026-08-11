@@ -49,7 +49,24 @@ export async function POST(req: Request) {
       });
       return NextResponse.json(result);
     } catch (err) {
-      console.error("[assistant] orchestrator failed, falling back to legacy parser:", err);
+      // CORRECTED (2026-08-11, live): silently falling through to the
+      // legacy parser below on ANY exception here has now caused two
+      // separate production incidents — that parser has zero concept of
+      // booking (it can only ever run a plain search), so a genuine
+      // mid-request failure (this session's earlier OpenAI-credit
+      // exhaustion; a real bug/DB error live-confirmed on this run) turned
+      // a booking request into a plain single-airline search with no
+      // warning at all — a user asking to book got a fare quote instead,
+      // silently. Surface the real failure instead, same "never silently
+      // substitute wrong behavior for a real error" policy already applied
+      // everywhere else in this codebase. The fallback below still exists
+      // for its original purpose — GROQ_API_KEY not configured, or no
+      // sessionKey — genuine config gaps, not mid-request exceptions.
+      console.error("[assistant] orchestrator failed:", err);
+      const reason = err instanceof Error ? err.message : String(err);
+      return NextResponse.json({
+        reply: `I couldn't process that just now — mind trying again in a moment? Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`,
+      });
     }
   }
 

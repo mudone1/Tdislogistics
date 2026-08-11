@@ -54,10 +54,25 @@ export function mentionsBot(text: string): boolean {
 // just means an extra "Copy" ahead of what turns out to be a flight search.
 const BOOKING_VERB_PATTERN = /\b(book|hold|reserve)\b/i;
 const EMAIL_PATTERN = /[^\s@]+@[^\s@]+\.[^\s@]+/;
-const PHONE_PATTERN = /\+?[\d][\d\s-]{8,17}\d/;
+// \s (not just literal space) in the middle class used to also match a
+// newline, letting this cross a line break on a multi-line booking message
+// — kept in sync with ConversationOrchestrator.ts's findPhoneInText fix
+// (2026-08-11) even though this copy only gates the early "Copy" ack, not
+// real routing.
+const PHONE_PATTERN = /\+?[\d][\d -]{8,17}\d/;
 
+// Mirrors ConversationOrchestrator.ts's server-side deterministic gate —
+// a message with BOTH an email AND a phone number is an unambiguous
+// booking even with no trigger verb at all, same as that copy. Kept in
+// sync so the early "Copy" ack fires for the same messages the real
+// routing decision treats as a booking (confirmed live: a verb-less
+// booking message like "ValueJet / Johnson Anya / Abv los tomorrow /
+// 21:15 / <phone> / <email>" got no ack here even though the server
+// correctly booked it).
 function looksLikeBookingRequest(text: string): boolean {
-  return BOOKING_VERB_PATTERN.test(text) && (EMAIL_PATTERN.test(text) || PHONE_PATTERN.test(text));
+  const hasEmail = EMAIL_PATTERN.test(text);
+  const hasPhone = PHONE_PATTERN.test(text);
+  return (BOOKING_VERB_PATTERN.test(text) && (hasEmail || hasPhone)) || (hasEmail && hasPhone);
 }
 
 // Decides whether to respond at all, and if so, forwards the (trigger-
