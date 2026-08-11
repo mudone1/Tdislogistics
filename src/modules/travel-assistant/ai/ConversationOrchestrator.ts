@@ -249,11 +249,34 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
   const priorMessages = await ChatMemoryRepository.getRecentMessages(session.id, 10);
   const slots: ConversationSlots = loadSlots(session);
 
+  // CORRECTED (2026-08-11, live): a booking already mid-flow and waiting
+  // on one specific narrow answer (which departure time, which title,
+  // a date of birth) used to still route through intent detection first —
+  // meaning even a bare "1" in reply to "which departure time?" triggered
+  // a full LLM call (the deterministic path can't classify a bare number
+  // with no context of its own, and has no access to slots to know one's
+  // even expected). Confirmed live: that call's accumulated system
+  // prompt + staff knowledge + history + slots JSON hit Groq's per-model
+  // token-per-minute cap on BOTH fallback models in a row, turning a
+  // one-word reply into a hard failure. Since handleBookOnHold already
+  // knows exactly what each of these pending states expects and asks
+  // again if the reply doesn't resolve it, skip intent detection (and the
+  // LLM) entirely whenever one is outstanding — this is unambiguously
+  // still the same booking conversation, never a new intent.
+  const awaitingBookingFollowUp =
+    !!slots.pendingTitleConfirmation ||
+    !!(slots.pendingAdditionalTitleConfirmations && slots.pendingAdditionalTitleConfirmations.length > 0) ||
+    !!(slots.pendingAdditionalDateOfBirthConfirmations && slots.pendingAdditionalDateOfBirthConfirmations.length > 0) ||
+    !!(slots.pendingDepartureTimeOptions && !slots.selectedDepartureTime) ||
+    !!(slots.isRoundTrip && slots.pendingReturnTimeOptions && !slots.selectedReturnTime);
+
   // Try the zero-LLM deterministic path first (booking/search only — see
   // its own doc comment for why). Falls through to the LLM for anything
   // it can't confidently classify: small talk, staff questions, sales
   // questions, and short contextual follow-ups mid-conversation.
-  const turn = tryDeterministicIntentDetection(input.message) ?? (await runIntentDetection(input.message, slots, priorMessages));
+  const turn = awaitingBookingFollowUp
+    ? { intent: "BOOK_ON_HOLD" as const, entities: emptyChatEntities(), missingRequiredSlots: [], reply: "" }
+    : tryDeterministicIntentDetection(input.message) ?? (await runIntentDetection(input.message, slots, priorMessages));
 
   await ChatMemoryRepository.appendMessage(session.id, "USER", input.message, turn.intent, turn.entities);
 
