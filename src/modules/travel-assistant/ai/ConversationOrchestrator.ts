@@ -595,6 +595,17 @@ function looksLikeNameLine(line: string): boolean {
   const lower = trimmed.toLowerCase();
   if (NAME_LINE_STOPWORDS.has(lower)) return false;
   if (ROUTE_OR_DATE_WORD_PATTERN.test(trimmed)) return false;
+  // CORRECTED (2026-08-11, live): same gap as ROUTE_OR_DATE_WORD_PATTERN
+  // above, different word category — "Book United for" (the message's own
+  // airline-selection line) structurally matches NAME_LINE_PATTERN and
+  // isn't an exact whole-line NAME_LINE_STOPWORDS entry, so it was taken
+  // as a genuine passenger name and actually booked as an extra passenger
+  // alongside the real one (confirmed live: PNR AB9YHI ended up with a
+  // "BOOKUNITED FOR" passenger next to "ANJOLAOLUWAPRAISE"). Reject
+  // outright whenever the line contains a booking trigger verb anywhere
+  // in it, not just as the whole line — a real name is never going to
+  // contain "book"/"hold"/"reserve" as a standalone word.
+  if (BOOKING_VERB_PATTERN.test(trimmed)) return false;
   if (Object.prototype.hasOwnProperty.call(AIRLINE_NAME_MATCHERS, lower)) return false;
   if (EMAIL_SEARCH_RE.test(trimmed) || findPhoneInText(trimmed)) return false;
   return true;
@@ -656,6 +667,9 @@ function extractPassengersAfterFor(rawMessage: string): DeterministicPassenger[]
   for (const piece of pieces) {
     if (!NAME_LINE_PATTERN.test(piece)) continue;
     if (NAME_LINE_STOPWORDS.has(piece.toLowerCase())) continue;
+    // Same fix as looksLikeNameLine above, kept in sync — a piece
+    // containing a booking trigger verb is never a real passenger name.
+    if (BOOKING_VERB_PATTERN.test(piece)) continue;
     const extracted = extractLeadingTitle(piece);
     passengers.push({ title: extracted.title, fullName: extracted.rest });
   }
