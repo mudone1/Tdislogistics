@@ -29,6 +29,12 @@ export function getQRState(): { qr: string | null; status: typeof connectionStat
   return { qr: latestQR, status: connectionStatus };
 }
 
+// See the messages.upsert dedup check below — bounded so this never grows
+// unbounded over a long-running process; a redelivery only ever needs to
+// be caught within a recent window, not remembered forever.
+const recentMessageIds = new Set<string>();
+const RECENT_MESSAGE_IDS_MAX = 500;
+
 // Wraps Baileys (an unofficial WhatsApp Web protocol client — see the
 // service README for why this is used instead of Meta's official Cloud
 // API, which doesn't support a bot participating in group chats).
@@ -79,6 +85,23 @@ export async function connectWhatsApp(): Promise<void> {
       if (!m.message || m.key.fromMe) continue; // ignore the bot's own messages, avoids reply loops
       const chatId = m.key.remoteJid;
       if (!chatId) continue;
+
+      // Baileys can redeliver the same message on reconnect (confirmed
+      // live: a real "Copy" acknowledgement went out twice for one message,
+      // captured mid-flaky-signal in a user's screenshot) — messages.upsert
+      // has no built-in dedup of its own. A bounded FIFO of recently-seen
+      // message IDs is enough; a genuine redelivery arrives within the same
+      // reconnect window, never after hundreds of other messages have
+      // passed. No id at all (shouldn't normally happen) fails open —
+      // processed rather than silently dropped.
+      if (m.key.id) {
+        if (recentMessageIds.has(m.key.id)) continue;
+        recentMessageIds.add(m.key.id);
+        if (recentMessageIds.size > RECENT_MESSAGE_IDS_MAX) {
+          const oldest = recentMessageIds.values().next().value;
+          if (oldest !== undefined) recentMessageIds.delete(oldest);
+        }
+      }
 
       const sender = {
         sendText: async (targetChatId: string, text: string) => {
