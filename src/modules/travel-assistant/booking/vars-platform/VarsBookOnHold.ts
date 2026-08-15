@@ -795,24 +795,12 @@ export async function bookVarsPlatformOnHold(
           bodyText: document.body.innerText.replace(/\s+/g, " ").trim().slice(0, 1500),
         }));
         console.error(`[${logTag}] confirmation page never appeared. DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
-        // TEMPORARY DIAGNOSTIC (2026-08-15) — investigating a real multi-
-        // passenger RANO failure at this exact spot ("Empty basket" on
-        // PassengerPaymentDetails.aspx). connector-service runs on a
-        // separate deployed process with no other way to pull a file back
-        // from it, so a small compressed screenshot is embedded directly in
-        // the thrown message (readable via the BookingJob's errorMessage
-        // column) instead. Remove once diagnosed.
-        const diagShot = await page
-          .screenshot({ type: "jpeg", quality: 40 })
-          .then((buf) => buf.toString("base64"))
-          .catch(() => null);
         // Diagnostic goes INTO the thrown message (not just console.error)
         // so it surfaces all the way to the chat error text — no server-log
         // access needed to see what was actually on the page when this
         // gave up, same reasoning as the issue-ticket diagnostics.
         throw new Error(
-          `Confirmation page never appeared after ${confirmationTimeoutMs}ms (party size ${totalPassengers}). Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}` +
-            (diagShot ? ` DIAGSHOT_BASE64_JPEG:${diagShot}` : "")
+          `Confirmation page never appeared after ${confirmationTimeoutMs}ms (party size ${totalPassengers}). Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`
         );
       });
     page.off("response", validationListener);
@@ -932,37 +920,87 @@ function dateParts(dateISO: string): { y: number; m: number; d: number } {
 // the SAME jQuery UI datepicker widget already used for departuredate/
 // returndate above, just on a different field id (not independently
 // confirmed — every id here is a best-effort guess following the confirmed
-// passengerNfirstname/lastname naming convention). The portal enforces the
-// age band by restricting the picker's own year dropdown (Child: ~2014-2024,
-// Infant: ~2024-2026 relative to "today" in the recording) rather than a
-// validation message — so an out-of-band dateOfBirth would simply fail to
-// set here rather than surface a clean error; the caller is responsible for
-// supplying a plausible date for the passenger's stated type.
+// passengerNfirstname/lastname naming convention).
+//
+// CORRECTED (2026-08-15, live, Rano): the jQuery datepicker("setDate", ...)
+// call was trusted blind — wrapped in try/catch, "ok: true" whenever it
+// didn't throw. Confirmed live via a captured screenshot of the actual
+// stuck page that this is NOT sufficient: calling .datepicker() on an
+// element the plugin was never initialized on (a wrong-but-still-matching
+// selector guess) can silently no-op instead of throwing, so the code
+// believed the date was set while the real field stayed empty and blocked
+// the entire booking behind a "required field" validation error — the
+// booking then proceeded for another 50+ seconds before failing with a
+// completely unrelated-looking "confirmation page never appeared" error,
+// nowhere near this actual root cause. Now verifies the input's real value
+// after every attempt instead of trusting the absence of a thrown error,
+// and falls back to a direct value+event-dispatch (same "direct-state-set
+// beats a plugin method" pattern already used for the hold radio and T&C
+// checkbox elsewhere in this file) before giving up.
 async function fillPassengerDateOfBirth(page: import("playwright").Page, idx: number, dateISO: string, logTag: string): Promise<void> {
   const { y, m, d } = dateParts(dateISO);
   const candidates = [`#passenger${idx}dateofbirth`, `#passenger${idx}dob`, `#Passenger${idx}DateOfBirth`];
+
+  const hasValue = (sel: string) =>
+    page
+      .locator(sel)
+      .inputValue()
+      .then((v) => v.trim().length > 0)
+      .catch(() => false);
+
   for (const sel of candidates) {
-    if (await page.locator(sel).count().catch(() => 0)) {
-      const ok = await page.evaluate(
-        ({ selector, y, m, d }) => {
-          const w = window as unknown as { $: (sel: string) => { datepicker: (op: string, d: Date) => void } };
-          try {
-            w.$(selector).datepicker("setDate", new Date(y, m, d));
-            return true;
-          } catch {
-            return false;
-          }
-        },
-        { selector: sel, y, m, d }
-      );
-      if (ok) {
-        console.log(`[${logTag}] set passenger ${idx} date of birth (${dateISO}) via "${sel}"`);
-        return;
-      }
+    if (!(await page.locator(sel).count().catch(() => 0))) continue;
+
+    await page.evaluate(
+      ({ selector, y, m, d }) => {
+        const w = window as unknown as { $?: (sel: string) => { datepicker: (op: string, d: Date) => void } };
+        try {
+          w.$?.(selector).datepicker("setDate", new Date(y, m, d));
+        } catch {
+          /* fall through to the verification check below either way */
+        }
+      },
+      { selector: sel, y, m, d }
+    );
+
+    if (await hasValue(sel)) {
+      console.log(`[${logTag}] set passenger ${idx} date of birth (${dateISO}) via "${sel}" (datepicker API)`);
+      return;
+    }
+
+    // Datepicker API didn't stick — set the raw value directly and fire
+    // the events a real text-entry would, bypassing the plugin entirely.
+    const formatted = `${String(d).padStart(2, "0")}/${String(m + 1).padStart(2, "0")}/${y}`;
+    await page.evaluate(
+      ({ selector, formatted }) => {
+        const el = document.querySelector<HTMLInputElement>(selector);
+        if (!el) return;
+        el.value = formatted;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      },
+      { selector: sel, formatted }
+    );
+
+    if (await hasValue(sel)) {
+      console.log(`[${logTag}] set passenger ${idx} date of birth (${dateISO}) via "${sel}" (direct value fallback)`);
+      return;
     }
   }
+
+  // Total failure — dump every input on the page whose id/name/placeholder
+  // even mentions birth/dob, so the NEXT occurrence (if the real field id
+  // differs from all three guesses above) is fixable from this diagnostic
+  // alone instead of needing another live round-trip to discover it.
+  const diagnostic = await page
+    .evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLInputElement>("input"))
+        .filter((el) => /birth|dob/i.test(`${el.id} ${el.name} ${el.placeholder}`))
+        .map((el) => ({ id: el.id, name: el.name, placeholder: el.placeholder, value: el.value }))
+    )
+    .catch(() => []);
   throw new Error(
-    `Could not find/set a Date of Birth control for passenger ${idx} (tried ${candidates.join(", ")}) — this needs a one-time live check of the real field id before Child/Infant bookings can work on this airline.`
+    `Could not find/set a Date of Birth control for passenger ${idx} (tried ${candidates.join(", ")}). Birth/DOB-like inputs actually on the page: ${JSON.stringify(diagnostic)}`
   );
 }
 
