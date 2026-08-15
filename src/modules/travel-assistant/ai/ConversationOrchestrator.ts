@@ -16,6 +16,7 @@ import {
 } from "../nameFormat";
 import { EMAIL_RE, EMAIL_SEARCH_RE, findPhoneInText, normalizePhone } from "../contactFields";
 import { parseFlightQuery } from "../parser/parseFlightQuery";
+import { buildCraneQuoteLink, matchCraneQuoteAirline } from "../search/craneQuoteLink";
 import {
   ALL_AIRLINES,
   AIRLINE_NAME_MATCHERS,
@@ -103,23 +104,32 @@ const REQUIRED_SEARCH_SLOTS = ["origin", "destination", "date"] as const;
 
 const SEARCH_INTENTS = new Set(["FLIGHT_SEARCH_ONE_WAY", "FLIGHT_SEARCH_ROUND_TRIP", "TICKET_AVAILABILITY"]);
 
-// These 5 are real airlines the assistant knows about (their balances sync,
-// and 4 of them have sales-report data) but have NO flight-search automation
+// These are real airlines the assistant knows about (their balances sync,
+// and most have sales-report data) but have NO flight-search automation
 // built — a completely different platform (Crane) from the VARS-platform
 // carriers above, and confirmed Cloudflare-blocked on the results step even
-// via their own public sites (live-verified 2026-08-07, Arik). Live-confirmed
-// bug this fixes: asking for one of these by name (e.g. "quote AirPeace
+// via their own public sites (live-verified 2026-08-07 and re-confirmed
+// 2026-08-14 for both Aero and Arik specifically — an automated browser
+// clicking each site's own real search widget, not a cold deep-link, still
+// landed on a Cloudflare "Just a moment..." challenge). Live-confirmed bug
+// this fixes: asking for one of these by name (e.g. "quote AirPeace
 // ABV-LOS") silently searched all other carriers instead and said nothing
 // about AirPeace — confusing, since the user gets a real-looking answer to a
 // question they didn't ask. Checked against the raw message text (not
 // slots.airline) so it fires regardless of whether the LLM happened to
 // populate that entity for a name outside its known searchable set.
+//
+// Aero and Arik are deliberately NOT in this list — see
+// matchCraneQuoteAirline/buildCraneQuoteLink (craneQuoteLink.ts) and its
+// call site below: same underlying block, but instead of a flat "can't
+// search this" reply, those two get a pre-filled deep link to the real
+// results page for the agent's own browser to open (which hits no
+// Cloudflare wall — that challenge specifically targets automation
+// signals, not this URL shape, confirmed by the reference videos showing a
+// human completing the same flow cleanly).
 const UNSUPPORTED_SEARCH_AIRLINES: Record<string, string> = {
   airpeace: "Air Peace",
   "air peace": "Air Peace",
-  aero: "Aero",
-  arik: "Arik Air",
-  "arik air": "Arik Air",
   ibom: "Ibom Air",
   "ibom air": "Ibom Air",
   ngeagle: "NG Eagle",
@@ -414,6 +424,14 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     return { reply };
   }
 
+  // Checked against both this turn's raw text and whatever preference
+  // already persisted in slots.airline from an earlier turn — same pattern
+  // as unsupportedAirline above, but Aero/Arik still go through the normal
+  // missing-slot collection below (unlike a flatly-unsupported airline,
+  // there IS something useful to do once the route/date are known — see
+  // the crane-quote-link branch right after that check).
+  const craneQuoteAirline = matchCraneQuoteAirline(input.message) ?? matchCraneQuoteAirline(slots.airline);
+
   const required = [...REQUIRED_SEARCH_SLOTS, ...(slots.isRoundTrip ? (["returnDate"] as const) : [])];
   const missing = required.filter((key) => !slots[key as keyof ConversationSlots]);
 
@@ -426,6 +444,30 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     // claim rather than a clarifying question, replace it with a
     // deterministic one built from the actual missing slots.
     const reply = looksLikeFalseFailureClaim(turn.reply) ? buildClarifyingQuestion(missing) : turn.reply;
+    await ChatMemoryRepository.updateSlots(session.id, slots);
+    await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+    return { reply };
+  }
+
+  // Route/date are complete and the user asked for Aero or Arik — neither
+  // can be searched (see UNSUPPORTED_SEARCH_AIRLINES comment above), but a
+  // pre-filled deep link to the real results page works fine in the
+  // agent's OWN browser, since Cloudflare's challenge only triggers for
+  // automation. Hand that back instead of running a search.
+  if (craneQuoteAirline) {
+    const displayName = craneQuoteAirline === "AERO" ? "Aero Contractors" : "Arik Air";
+    const link = buildCraneQuoteLink(
+      craneQuoteAirline,
+      slots.origin!,
+      slots.destination!,
+      slots.date!,
+      slots.isRoundTrip,
+      slots.returnDate
+    );
+    const reply =
+      `${displayName} blocks automated searches, so I can't pull live fares directly — but here's a ` +
+      `ready-made quote link with your route and date already filled in. Open it in your own browser for instant fares:\n${link}`;
+    resetRouteSlots(slots);
     await ChatMemoryRepository.updateSlots(session.id, slots);
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
     return { reply };
