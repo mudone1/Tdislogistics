@@ -1,5 +1,12 @@
 import { prisma } from "../../airline-connectors/storage/prismaClient";
-import type { AirlineKey, BookingErrorCategory, BookingStage, CabinClass } from "@prisma/client";
+import type { AirlineKey, BookingErrorCategory, BookingJobStatus, BookingStage, CabinClass } from "@prisma/client";
+
+// Jobs a best-effort CANCEL/RESET/ABORT/STOP still has a chance to affect —
+// QUEUED is represented as status PENDING with stage "QUEUED" (see
+// markQueued below), so PENDING covers both "not yet picked up at all" and
+// "waiting in a worker-pool queue"; RUNNING covers the automation actually
+// in flight. SUCCESS/FAILED/CANCELLED are all terminal — nothing left to cancel.
+const OPEN_STATUSES: BookingJobStatus[] = ["PENDING", "RUNNING"];
 
 // Coordination row for a Book-on-Hold run (see the BookingJob model in
 // prisma/schema.prisma for the why). Next.js creates it PENDING and hands
@@ -145,6 +152,53 @@ export const BookingJobRepository = {
         // errorCategory to a friendly line and can show this on request.
         errorMessage: message,
         durationMs,
+        finishedAt: new Date(),
+      },
+    });
+  },
+
+  // Every job still eligible for a best-effort CANCEL for this chat number
+  // — see OPEN_STATUSES above. Used by the CANCEL/RESET/ABORT/STOP handler
+  // in ConversationOrchestrator.ts.
+  findOpenBySessionKey(sessionKey: string) {
+    return prisma.bookingJob.findMany({
+      where: { sessionKey, status: { in: OPEN_STATUSES } },
+    });
+  },
+
+  // User-initiated cancel, noticed before the automation reached a point of
+  // no return (still QUEUED, or RUNNING but not yet past its last stage
+  // checkpoint) — no PNR was ever created. See
+  // recordCancelledButCompleted below for the rarer opposite case.
+  markCancelled(id: string) {
+    return prisma.bookingJob.update({
+      where: { id },
+      data: { status: "CANCELLED", finishedAt: new Date() },
+    });
+  },
+
+  // The narrow edge case "best-effort" cancellation can't actually prevent:
+  // the automation was cancelled, but by the time connector-service's live
+  // status re-check ran (immediately before what would have been
+  // markSuccess), the hold had ALREADY been created on the airline's own
+  // portal. Never silently reported as an ordinary SUCCESS — status stays
+  // CANCELLED — but the real PNR/hold details are still recorded (not
+  // discarded) so TDIS staff can see a possible orphaned hold needing
+  // manual attention rather than losing track of it entirely.
+  recordCancelledButCompleted(id: string, result: BookingSuccess) {
+    return prisma.bookingJob.update({
+      where: { id },
+      data: {
+        status: "CANCELLED",
+        pnr: result.pnr,
+        holdExpiresAt: result.holdExpiresAt,
+        totalPayable: result.totalPayable,
+        currency: result.currency,
+        screenshot: toBytes(result.screenshot),
+        pdf: toBytes(result.pdf),
+        durationMs: result.durationMs,
+        errorMessage:
+          "Cancelled by the user, but the automation had already placed this hold on the airline's own portal before noticing — needs manual review.",
         finishedAt: new Date(),
       },
     });

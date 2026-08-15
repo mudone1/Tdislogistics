@@ -153,6 +153,30 @@ export interface ChatEntities {
     | null;
 }
 
+// Shared starting point for any deterministic turn-builder (the free-text
+// parser in ConversationOrchestrator.ts, and the structured /book command
+// parser) — every field defaults to null so a builder only has to set what
+// it actually extracted.
+export function emptyChatEntities(): ChatEntities {
+  return {
+    origin: null,
+    destination: null,
+    date: null,
+    returnDate: null,
+    adults: null,
+    children: null,
+    infants: null,
+    airline: null,
+    cabinClass: null,
+    passengerTitle: null,
+    passengerFullName: null,
+    passengerPhone: null,
+    passengerEmail: null,
+    passengerGenderGuess: null,
+    additionalPassengers: null,
+  };
+}
+
 export interface AssistantTurn {
   intent: ChatIntent;
   entities: ChatEntities;

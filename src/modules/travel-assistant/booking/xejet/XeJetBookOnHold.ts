@@ -3,6 +3,7 @@ import {
   type BookOnHoldCredentials,
   type BookOnHoldRequest,
   type BookOnHoldResult,
+  type OnBookingStage,
 } from "../vars-platform/VarsBookOnHold";
 
 const LOGIN_URL = "https://booking.xejet.com/VARS/public/CustomerPanels/AgentLoginBS.aspx";
@@ -21,13 +22,23 @@ const MMB_URL = "https://booking.xejet.com/VARS/public/CustomerPanels/MmbLoginBS
 // pass (same kind of check done for Enugu Air) before use.
 export async function bookXeJetOnHold(
   credentials: BookOnHoldCredentials,
-  request: BookOnHoldRequest
+  request: BookOnHoldRequest,
+  onStage?: OnBookingStage,
+  forceFreshLogin?: boolean,
+  isCancelled?: () => Promise<boolean>
 ): Promise<BookOnHoldResult> {
-  return bookVarsPlatformOnHold(credentials, request, {
-    logTag: "xejet-booking",
-    loginUrl: LOGIN_URL,
-    requirementsUrl: REQUIREMENTS_URL,
-    mmbUrl: MMB_URL,
-    airlineLabel: "XeJet",
-  });
+  return bookVarsPlatformOnHold(
+    credentials,
+    request,
+    {
+      logTag: "xejet-booking",
+      loginUrl: LOGIN_URL,
+      requirementsUrl: REQUIREMENTS_URL,
+      mmbUrl: MMB_URL,
+      airlineLabel: "XeJet",
+    },
+    onStage,
+    forceFreshLogin,
+    isCancelled
+  );
 }

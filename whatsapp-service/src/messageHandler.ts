@@ -3,6 +3,7 @@ import { askAssistant } from "./assistantClient";
 import { pollBookingJob } from "./bookingPoll";
 import { pollBalanceUpdate } from "./balanceUpdatePoll";
 import { keepTypingAlive } from "./typingIndicator";
+import { handleHelpCenterMessage } from "./helpCenter";
 
 export interface IncomingMessage {
   chatId: string; // group JID (ends @g.us) or individual JID (ends @s.whatsapp.net)
@@ -92,6 +93,19 @@ export async function handleIncomingMessage(msg: IncomingMessage, sender: Messag
 
   const sessionKey = `whatsapp:${msg.chatId}`;
   const reply = async (text: string) => sender.sendText(msg.chatId, text);
+
+  // Checked FIRST, before anything else touches this message — /inst and
+  // Help Center navigation (0/#/a valid menu digit while a page is
+  // showing) are answered instantly here and never reach the real
+  // assistant call below. Anything else (a genuine bot request arriving
+  // mid-Help-Center-browse) clears the Help Center state as a side effect
+  // and falls through with the ORIGINAL, unmodified `message` — so normal
+  // processing below never even knows Help Center was involved.
+  const help = handleHelpCenterMessage(msg.chatId, message);
+  if (help.handled) {
+    await reply(help.reply!).catch((err) => console.error(`[whatsapp] help-center reply failed for chat ${msg.chatId}:`, err));
+    return;
+  }
 
   // Immediate acknowledgement — sent right away, before any real processing,
   // so a booking request never sits in silence waiting on the assistant
