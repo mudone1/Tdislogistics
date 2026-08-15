@@ -110,12 +110,16 @@ const NOT_A_TICKET: TicketParseResult = {
 export async function parseTicketImage(buffer: Buffer, mimeType: string): Promise<TicketParseResult> {
   const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
 
-  let raw: string;
-  try {
-    raw = await groqVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
-  } catch {
-    return NOT_A_TICKET;
-  }
+  // CORRECTED (2026-08-15, live): same fix as PassportParser.ts's identical
+  // pattern — swallowing a genuine groqVisionJsonCompletion failure (Groq
+  // rate-limited/unreachable) into the same silent "not a ticket" path a
+  // malformed-JSON response gets below made a real service outage
+  // indistinguishable from "this just isn't a ticket," and DocumentParser.ts
+  // runs this concurrently with parseIdDocumentImage — so a vision-API
+  // outage produced a WhatsApp ID/ticket upload with NO reply at all. A
+  // genuine API/network failure now propagates instead, so the caller's own
+  // catch block (imageHandler.ts) sends an honest error instead of silence.
+  const raw = await groqVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
 
   let parsed: VisionResult;
   try {
