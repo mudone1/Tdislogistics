@@ -9,6 +9,7 @@ import P from "pino";
 import { handleIncomingMessage, type IncomingMessage } from "./messageHandler";
 import { handleIncomingImage, isExtractCommand } from "./imageHandler";
 import { getLastImage } from "./lastImageCache";
+import { isPaymentTagReply, handlePaymentTagReply } from "./depositTracking";
 
 // Persisted WhatsApp session credentials — see README for why this must
 // survive restarts. Configurable so a Railway (or similar) deployment can
@@ -115,6 +116,7 @@ export async function connectWhatsApp(): Promise<void> {
             buffer,
             mimeType: m.message.imageMessage.mimetype || "image/jpeg",
             hasExplicitCommand: isExtractCommand(caption),
+            messageId: m.key.id ?? null,
           },
           sender
         ).catch((err) => console.error(`[whatsapp] handling image from ${chatId} failed:`, err));
@@ -123,6 +125,22 @@ export async function connectWhatsApp(): Promise<void> {
 
       const text = m.message.conversation || m.message.extendedTextMessage?.text || "";
       if (!text.trim()) continue; // non-text, non-image message (audio, etc.) — not handled
+
+      // Deposit-tracking's "credited"/"not credited" tag — checked BEFORE
+      // the group @tdisbot mention gate below, same as the extract-command
+      // bypass further down: a natural follow-up reply to a screenshot
+      // just posted shouldn't need re-addressing the bot every time (see
+      // depositTracking.ts's module doc comment for the full reasoning).
+      // Only acts when there's actually a pending screenshot to tag —
+      // otherwise falls through to ordinary message handling unchanged.
+      const depositDecision = isPaymentTagReply(text);
+      if (depositDecision) {
+        const quotedMessageId = m.message.extendedTextMessage?.contextInfo?.stanzaId ?? null;
+        await handlePaymentTagReply(chatId, quotedMessageId, depositDecision, (replyText) => sender.sendText(chatId, replyText)).catch(
+          (err) => console.error(`[whatsapp] deposit tag reply failed for chat ${chatId}:`, err)
+        );
+        continue;
+      }
 
       // Extract/X/"use this name" sent as its OWN message (not a caption)
       // targets a previously-sent ticket screenshot — a real WhatsApp
@@ -159,8 +177,16 @@ export async function connectWhatsApp(): Promise<void> {
         }
 
         if (buffer) {
+          // Extract/X targets a previously-posted image, not this text
+          // message — the quoted image's own stanzaId is its message ID
+          // (deposit-tracking keys pending screenshots off exactly that),
+          // falling back to this message's own ID for the cached-image path
+          // (private chats only, where there is no quoted message to key on).
+          const sourceMessageId = quotedImage
+            ? m.message.extendedTextMessage?.contextInfo?.stanzaId ?? null
+            : m.key.id ?? null;
           await handleIncomingImage(
-            { chatId, isGroup, senderName: m.pushName ?? null, buffer, mimeType, hasExplicitCommand: true },
+            { chatId, isGroup, senderName: m.pushName ?? null, buffer, mimeType, hasExplicitCommand: true, messageId: sourceMessageId },
             sender
           ).catch((err) => console.error(`[whatsapp] handling extract command from ${chatId} failed:`, err));
           continue;

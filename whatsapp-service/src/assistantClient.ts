@@ -1,5 +1,30 @@
 import { MAIN_APP_URL } from "./config";
 
+// CORRECTED (2026-08-15, live): sendPassportImage/sendDocumentImage used to
+// call res.json() directly on a non-ok response — but a genuinely bare
+// "HTTP 500" with no reason survived even after that JSON-error-body fix
+// shipped, meaning the body wasn't valid JSON at all: an image upload's
+// error can come from a platform-level failure (a request-payload-size
+// rejection, a function timeout, or a crash before the route's own
+// try/catch ever ran) that returns an HTML error page or empty body, not
+// the route's own { error: <reason> } shape. Reads the body as TEXT first
+// (never throws), then tries to parse it as that JSON shape; falls back to
+// the raw text itself (truncated) when it isn't JSON, so the next failure
+// always surfaces something real instead of silently producing nothing.
+async function describeErrorBody(res: Response): Promise<string> {
+  const text = await res.text().catch(() => "");
+  if (!text) return "";
+  try {
+    const body = JSON.parse(text) as { error?: unknown };
+    if (body && typeof body === "object" && "error" in body) {
+      return ` — ${String(body.error)}`;
+    }
+  } catch {
+    // Not JSON — fall through to the raw text below.
+  }
+  return ` — ${text.slice(0, 300)}`;
+}
+
 export interface QuoteResponse {
   reply: string;
   bookingJobId?: string;
@@ -57,15 +82,7 @@ export async function sendPassportImage(
 
   const res = await fetch(`${MAIN_APP_URL}/api/assistant/passport`, { method: "POST", body: form });
   if (!res.ok) {
-    // CORRECTED (2026-08-15): a bare "HTTP 500" gave zero indication of
-    // WHY — the route already returns { error: <real reason> } in its body
-    // (e.g. a genuine Groq vision-API failure, now correctly propagated
-    // instead of silently swallowed — see PassportParser.ts), but this
-    // discarded it. Same "surface the real reason" fix already applied to
-    // ValueJetSearch.ts and elsewhere this session.
-    const body = await res.json().catch(() => null);
-    const reason = body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null;
-    throw new Error(`Passport API returned HTTP ${res.status}${reason ? ` — ${reason}` : ""}`);
+    throw new Error(`Passport API returned HTTP ${res.status}${await describeErrorBody(res)}`);
   }
   return (await res.json()) as PassportResponse;
 }
@@ -96,12 +113,7 @@ export async function sendDocumentImage(
 
   const res = await fetch(`${MAIN_APP_URL}/api/assistant/document`, { method: "POST", body: form });
   if (!res.ok) {
-    // Same fix as sendPassportImage above — the route's real reason (e.g.
-    // a genuine Groq vision-API failure) was being discarded, leaving only
-    // an uninformative "Document API returned HTTP 500" for staff to act on.
-    const body = await res.json().catch(() => null);
-    const reason = body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null;
-    throw new Error(`Document API returned HTTP ${res.status}${reason ? ` — ${reason}` : ""}`);
+    throw new Error(`Document API returned HTTP ${res.status}${await describeErrorBody(res)}`);
   }
   return (await res.json()) as DocumentResponse;
 }
@@ -192,4 +204,82 @@ export async function getBalanceUpdateStatus(triggeredAt: string): Promise<Balan
     throw new Error(`Balance update status API returned HTTP ${res.status}`);
   }
   return (await res.json()) as BalanceUpdateStatus;
+}
+
+// --- Airline deposit tracking (manual-testing phase — see depositTracking.ts) ---
+
+export interface PaymentReceiptExtraction {
+  isPaymentReceipt: boolean;
+  readable: boolean;
+  amount: number | null;
+  paymentDate: string | null;
+  paymentTime: string | null;
+  referenceNumber: string | null;
+  narration: string | null;
+  bankChannel: string | null;
+}
+
+// Detection-only, no DB write — see /api/assistant/deposits/screenshot.
+// Same FormData/Blob pattern as sendPassportImage above.
+export async function checkPaymentScreenshot(buffer: Buffer, mimeType: string): Promise<PaymentReceiptExtraction> {
+  const form = new FormData();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see sendPassportImage above
+  form.append("file", new Blob([buffer as any], { type: mimeType }), "receipt.jpg");
+
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/deposits/screenshot`, { method: "POST", body: form });
+  if (!res.ok) {
+    throw new Error(`Deposit screenshot API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as PaymentReceiptExtraction;
+}
+
+export interface DepositAirlineMenuOption {
+  num: number;
+  airline: string;
+  label: string;
+}
+
+export type TagDepositResponse =
+  | { status: "ignored" }
+  | { status: "unreadable"; message: string }
+  | { status: "needs_airline"; menu: DepositAirlineMenuOption[] }
+  | { status: "recorded"; airline: string; amount: number }
+  | { status: "duplicate"; airline: string };
+
+// Server holds no memory of pending payments — the whole extraction is
+// sent back on every call (whatsapp-service is the one holding the
+// pending-payment cache, keyed by WhatsApp message ID). See
+// /api/assistant/deposits/tag.
+export async function tagDeposit(
+  chatId: string,
+  screenshotMessageId: string | null,
+  decision: "CREDITED" | "NOT_CREDITED",
+  extraction: PaymentReceiptExtraction,
+  airlineOverride?: string
+): Promise<TagDepositResponse> {
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/deposits/tag`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chatId, screenshotMessageId, decision, extraction, airlineOverride }),
+  });
+  if (!res.ok) {
+    throw new Error(`Deposit tag API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as TagDepositResponse;
+}
+
+export interface DepositReportResponse {
+  date: string;
+  count: number;
+  report: string;
+}
+
+export async function getDepositReport(chatId: string, date?: string): Promise<DepositReportResponse> {
+  const params = new URLSearchParams({ chatId });
+  if (date) params.set("date", date);
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/deposits/report?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Deposit report API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as DepositReportResponse;
 }

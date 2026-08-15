@@ -4,6 +4,7 @@ import { pollBookingJob } from "./bookingPoll";
 import { pollBalanceUpdate } from "./balanceUpdatePoll";
 import { keepTypingAlive } from "./typingIndicator";
 import { handleHelpCenterMessage } from "./helpCenter";
+import { handleDepositCommand } from "./depositTracking";
 
 export interface IncomingMessage {
   chatId: string; // group JID (ends @g.us) or individual JID (ends @s.whatsapp.net)
@@ -106,6 +107,18 @@ export async function handleIncomingMessage(msg: IncomingMessage, sender: Messag
     await reply(help.reply!).catch((err) => console.error(`[whatsapp] help-center reply failed for chat ${msg.chatId}:`, err));
     return;
   }
+
+  // Deposit-tracking's airline-selection number reply and "credit update"
+  // command (both REQUIRE @tdisbot per spec — already enforced by the
+  // mention gate above having passed to reach this point at all). The
+  // "credited"/"not credited" tag itself is handled earlier, in
+  // whatsapp.ts, before the mention gate — see depositTracking.ts's module
+  // doc comment for why that one's different.
+  const deposit = await handleDepositCommand(msg.chatId, message, reply).catch((err) => {
+    console.error(`[whatsapp] deposit command failed for chat ${msg.chatId}:`, err);
+    return { handled: false };
+  });
+  if (deposit.handled) return;
 
   // Immediate acknowledgement — sent right away, before any real processing,
   // so a booking request never sits in silence waiting on the assistant

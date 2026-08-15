@@ -1,5 +1,6 @@
 import { sendDocumentImage } from "./assistantClient";
 import { setLastImage } from "./lastImageCache";
+import { handleDepositScreenshot } from "./depositTracking";
 import type { MessageSender } from "./messageHandler";
 
 // Matches a whole message/caption that IS the command — not just contains
@@ -26,6 +27,10 @@ export interface IncomingImage {
   // Extract/X/"use this name" attached directly to the image. Combined with
   // isGroup below to decide whether the (extra) ticket vision call runs.
   hasExplicitCommand: boolean;
+  // This image's own WhatsApp message ID — needed by deposit-tracking to
+  // key the pending-screenshot cache, so a later "credited" reply-to can
+  // be matched back to this exact image (see depositTracking.ts).
+  messageId: string | null;
 }
 
 // Unlike text messages, an image gets no mention gate in groups — an ID
@@ -44,6 +49,23 @@ export async function handleIncomingImage(msg: IncomingImage, sender: MessageSen
   setLastImage(msg.chatId, msg.buffer, msg.mimeType);
 
   const checkTicket = !msg.isGroup || msg.hasExplicitCommand;
+
+  // Deposit-tracking's own vision check, independent of the ID/ticket
+  // check below — runs for any GROUP image (private chats never track
+  // deposits; this is inherently a team workflow) with a real message ID
+  // to key its pending-cache entry against. Deliberately not awaited
+  // alongside the ID/ticket call below via Promise.all: a payment-receipt
+  // match and an ID/ticket match are mutually exclusive by the vision
+  // prompts' own design (see PaymentReceiptParser.ts), so there's no
+  // real race to coordinate, and keeping this as its own try/catch means
+  // a failure here can never suppress the ID/ticket reply or vice versa.
+  if (msg.isGroup && msg.messageId) {
+    handleDepositScreenshot(msg.chatId, msg.messageId, msg.buffer, msg.mimeType)
+      .then((reply) => {
+        if (reply) return sender.sendText(msg.chatId, reply);
+      })
+      .catch((err) => console.error(`[whatsapp] deposit screenshot check failed for chat ${msg.chatId}:`, err));
+  }
 
   try {
     const result = await sendDocumentImage(sessionKey, msg.senderName, msg.buffer, msg.mimeType, checkTicket);
