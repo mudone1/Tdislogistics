@@ -20,7 +20,15 @@ const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 // entirely until the cap resets. Unlike the OpenAI $5 exhaustion this
 // module replaces, this cap resets every day automatically — no billing
 // action required, just degraded quality until midnight (UTC) if it's hit.
-const MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+//
+// CORRECTED (2026-08-15): llama-3.1-8b-instant is Groq's own scheduled
+// shutdown for 2026-08-16 (announced 2026-06-17, per
+// console.groq.com/docs/deprecations) — literally the next day at the time
+// of this fix. Swapped for their own recommended replacement,
+// openai/gpt-oss-20b, before it actually goes dark and silently breaks
+// this exact fallback path the same way the vision models just did (see
+// VISION_MODELS below).
+const MODELS = ["llama-3.3-70b-versatile", "openai/gpt-oss-20b"];
 
 export class GroqNotConfiguredError extends Error {
   constructor() {
@@ -34,15 +42,21 @@ export interface GroqMessage {
   content: string;
 }
 
-// Groq's vision-capable models (multimodal Llama 4). Kept separate from
-// MODELS above because the text-only fallback (llama-3.1-8b-instant)
-// can't see images — a vision request that 429s has to fail over to
-// another *vision* model, not a text one. Scout first (cheaper/faster),
-// Maverick as the higher-capacity fallback.
-const VISION_MODELS = [
-  "meta-llama/llama-4-scout-17b-16e-instruct",
-  "meta-llama/llama-4-maverick-17b-128e-instruct",
-];
+// Groq's vision-capable models — kept separate from MODELS above because
+// the text-only models there can't see images; a vision request has to
+// fail over to another *vision* model, not a text one.
+//
+// CORRECTED (2026-08-15, live): both models this array previously held —
+// meta-llama/llama-4-scout-17b-16e-instruct and
+// meta-llama/llama-4-maverick-17b-128e-instruct — are gone from Groq's
+// current lineup (Scout: shut down 2026-07-17 per
+// console.groq.com/docs/deprecations, confirmed live via a real "HTTP 404
+// model_not_found" on a WhatsApp ID-card upload; Maverick: not listed on
+// console.groq.com/docs/vision's current model set either). Every vision
+// call was failing outright. qwen/qwen3.6-27b is the only model
+// console.groq.com/docs/vision currently documents as multimodal — no
+// second vision model exists to list as a fallback right now.
+const VISION_MODELS = ["qwen/qwen3.6-27b"];
 
 // Extracts structured JSON from one or more images. Each image is a data
 // URL (e.g. "data:image/png;base64,...."). Same JSON-mode + per-model
@@ -82,8 +96,15 @@ export async function groqVisionJsonCompletion(prompt: string, imageDataUrls: st
 
     const body = await res.text().catch(() => "");
     lastError = new Error(`Groq vision request failed (${model}): HTTP ${res.status} ${body.slice(0, 300)}`);
-    if (res.status !== 429) throw lastError;
-    console.warn(`[groq] vision model ${model} rate-limited, trying next model`, lastError.message);
+    // Fail over on a rate/quota limit (429) OR a model that's been
+    // deprecated/removed out from under us (404 model_not_found — live-
+    // confirmed 2026-08-15: Groq shut down llama-4-scout with zero warning
+    // to this codebase, and the old "only 429 fails over" logic let that
+    // 404 propagate immediately instead of ever trying the next model).
+    // Any other error (bad request, auth, server error) fails identically
+    // on every model, so retrying would just waste time.
+    if (res.status !== 429 && res.status !== 404) throw lastError;
+    console.warn(`[groq] vision model ${model} unavailable (HTTP ${res.status}), trying next model`, lastError.message);
   }
 
   throw lastError ?? new Error("Groq vision request failed: no models available");
@@ -121,11 +142,14 @@ export async function groqJsonCompletion(messages: GroqMessage[]): Promise<strin
     const body = await res.text().catch(() => "");
     lastError = new Error(`Groq request failed (${model}): HTTP ${res.status} ${body.slice(0, 300)}`);
 
-    // Only a rate/quota limit is worth failing over for — any other error
-    // (bad request, auth, server error) will fail identically on every
-    // model, so retrying would just waste time.
-    if (res.status !== 429) throw lastError;
-    console.warn(`[groq] ${model} rate-limited, trying next model`, lastError.message);
+    // Fail over on a rate/quota limit (429) OR a model that's been
+    // deprecated/removed out from under us (404 model_not_found — same
+    // real failure class hit live on the vision models, see
+    // VISION_MODELS' comment above). Any other error (bad request, auth,
+    // server error) fails identically on every model, so retrying would
+    // just waste time.
+    if (res.status !== 429 && res.status !== 404) throw lastError;
+    console.warn(`[groq] ${model} unavailable (HTTP ${res.status}), trying next model`, lastError.message);
   }
 
   throw lastError ?? new Error("Groq request failed: no models available");
