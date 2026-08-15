@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../airline-connectors/storage/prismaClient";
 import type { ConversationSlots } from "../core/types";
 
@@ -49,6 +50,18 @@ export const ChatMemoryRepository = {
     return prisma.chatSession.update({
       where: { id: sessionId },
       data: { slots: slots as object },
+    });
+  },
+
+  // Small deterministic command state machines OUTSIDE the booking-flow
+  // slots above — currently just an in-progress /settings account
+  // selection (see handleSettingsCommand.ts). Pass null to clear it (the
+  // CANCEL/RESET/ABORT/STOP handler does this alongside resetting slots,
+  // so a mid-selection /settings flow can't linger after a cancel).
+  async updatePendingAction(sessionId: string, pendingAction: object | null) {
+    return prisma.chatSession.update({
+      where: { id: sessionId },
+      data: { pendingAction: pendingAction === null ? Prisma.JsonNull : (pendingAction as Prisma.InputJsonValue) },
     });
   },
 };

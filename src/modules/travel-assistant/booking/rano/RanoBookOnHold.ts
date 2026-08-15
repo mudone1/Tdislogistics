@@ -3,6 +3,7 @@ import {
   type BookOnHoldCredentials,
   type BookOnHoldRequest,
   type BookOnHoldResult,
+  type OnBookingStage,
 } from "../vars-platform/VarsBookOnHold";
 
 // Rano Air's VARS instance is hosted on Videcom's shared multi-tenant
@@ -32,13 +33,23 @@ const MMB_URL = "https://customer3.videcom.com/RanoAir/VARS/Public/CustomerPanel
 // Now Pay Later) are identical to United Nigeria's.
 export async function bookRanoAirOnHold(
   credentials: BookOnHoldCredentials,
-  request: BookOnHoldRequest
+  request: BookOnHoldRequest,
+  onStage?: OnBookingStage,
+  forceFreshLogin?: boolean,
+  isCancelled?: () => Promise<boolean>
 ): Promise<BookOnHoldResult> {
-  return bookVarsPlatformOnHold(credentials, request, {
-    logTag: "rano-booking",
-    loginUrl: LOGIN_URL,
-    requirementsUrl: REQUIREMENTS_URL,
-    mmbUrl: MMB_URL,
-    airlineLabel: "Rano Air",
-  });
+  return bookVarsPlatformOnHold(
+    credentials,
+    request,
+    {
+      logTag: "rano-booking",
+      loginUrl: LOGIN_URL,
+      requirementsUrl: REQUIREMENTS_URL,
+      mmbUrl: MMB_URL,
+      airlineLabel: "Rano Air",
+    },
+    onStage,
+    forceFreshLogin,
+    isCancelled
+  );
 }

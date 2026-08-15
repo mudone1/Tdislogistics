@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { BookingCancelledError } from "../BookingCancelledError";
 import type {
   BookOnHoldCredentials,
   BookOnHoldRequest,
@@ -227,14 +228,27 @@ async function fillDateField(page: import("playwright").Page, logTag: string, is
 export async function bookValueJetOnHold(
   credentials: BookOnHoldCredentials,
   request: BookOnHoldRequest,
-  onStage?: OnBookingStage
+  onStage?: OnBookingStage,
+  // Accepted for signature parity with bookVarsPlatformOnHold (so
+  // executeBookingAutomation in server.ts can call every handler the same
+  // way) but genuinely unused here — this module has no session cache to
+  // bypass (confirmed: every ValueJet booking is already a fresh KIU login,
+  // unlike the VARS platform's establishSession).
+  _forceFreshLogin?: boolean,
+  // Best-effort CANCEL/RESET/ABORT/STOP support — see
+  // bookVarsPlatformOnHold's identical param for the full rationale. Checked
+  // right after every existing stage checkpoint below.
+  isCancelled?: () => Promise<boolean>
 ): Promise<BookOnHoldResult> {
   const logTag = "valuejet-kiu-booking";
-  const reportStage = (stage: BookingStageName) => {
+  const reportStage = async (stage: BookingStageName) => {
     try {
       onStage?.(stage);
     } catch (err) {
       console.warn(`[${logTag}] onStage(${stage}) callback threw, continuing:`, err);
+    }
+    if (await isCancelled?.()) {
+      throw new BookingCancelledError(`ValueJet hold for job cancelled before "${stage}"`);
     }
   };
 
@@ -473,7 +487,7 @@ export async function bookValueJetOnHold(
     }
 
     // --- 3/4. Search flights ---
-    reportStage("SEARCHING");
+    await reportStage("SEARCHING");
     console.log(`[${logTag}] searching ${request.origin}->${request.destination}`);
     // CORRECTED: the spec's single Origin/Destination/Date/"Date Of
     // Return" form is the "Shopping" sale-type tab — but that tab never
@@ -615,7 +629,7 @@ export async function bookValueJetOnHold(
     if (infants > 0) await setPassengerCountAvailability(page, "INF", infants);
 
     await clickNextUntilFlightsShown(page, logTag);
-    reportStage("FLIGHT_FOUND");
+    await reportStage("FLIGHT_FOUND");
 
     // --- 5/6. Select outbound (and return) flight + class ---
     console.log(`[${logTag}] selecting outbound flight/class (cabin=${cabinClass})`);
@@ -629,7 +643,7 @@ export async function bookValueJetOnHold(
     );
 
     // --- 7. Passenger entry ---
-    reportStage("FILLING_PASSENGER_DETAILS");
+    await reportStage("FILLING_PASSENGER_DETAILS");
     console.log(`[${logTag}] filling passenger details`);
     await fillPassenger(page, logTag, {
       lastName: request.passenger.lastName,
@@ -645,12 +659,12 @@ export async function bookValueJetOnHold(
     await fillContactInfo(page, logTag, request.passenger.email, request.passenger.mobileNumber);
 
     // --- 9. Pre-save verification ---
-    reportStage("REVIEWING_ITINERARY");
+    await reportStage("REVIEWING_ITINERARY");
     console.log(`[${logTag}] capturing total quote`);
     const totalPayable = await captureTotalQuote(page, logTag);
 
     // --- 10. Save ---
-    reportStage("CREATING_HOLD");
+    await reportStage("CREATING_HOLD");
     console.log(`[${logTag}] saving reservation`);
     const saveButton = page.getByRole("button", { name: /^save reservation$/i }).first();
     await saveButton.click({ timeout: 15000 }).catch(() => clickByText(page, /save reservation/i));

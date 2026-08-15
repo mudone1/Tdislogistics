@@ -106,6 +106,18 @@ export function pollBookingJob(jobId: string, sender: BookingPollSender): void {
         await sender.sendText(`⚠️ I couldn't complete that hold${stageNote}.${errorContactNote(reason)}`);
         return;
       }
+      if (job.status === "CANCELLED") {
+        stopTyping();
+        // The rare edge case: the automation had already placed a real
+        // hold on the airline's own portal before the cancellation was
+        // noticed — best-effort cancel can't undo that, so say so plainly
+        // instead of implying nothing happened.
+        const text = job.cancelled?.needsManualReview
+          ? `Booking cancelled — but a hold with reference ${job.cancelled.pnr} may have already been placed before the cancel took effect. Please check with an admin.`
+          : "Booking cancelled — no hold was placed.";
+        await sender.sendText(text);
+        return;
+      }
     } catch (err) {
       console.error(`[whatsapp] booking poll failed for job ${jobId}:`, err);
     }

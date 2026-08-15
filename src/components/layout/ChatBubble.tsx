@@ -31,7 +31,7 @@ interface BookingPassenger {
 
 interface BookingState {
   jobId: string;
-  status: "processing" | "success" | "failed";
+  status: "processing" | "success" | "failed" | "cancelled";
   result?: BookingResult;
   airline?: string;
   route?: { origin: string; destination: string; departureDate: string; returnDate: string | null; departureTime: string | null; returnTime: string | null };
@@ -43,6 +43,10 @@ interface BookingState {
   // image sharing below.
   screenshotBlob?: Blob;
   error?: { message: string; detail: string | null };
+  // Best-effort user cancel — pnr is set only in the rare edge case where
+  // the automation had already placed a real hold on the airline's own
+  // portal before the cancellation was noticed.
+  cancelled?: { pnr: string | null; needsManualReview: boolean; detail: string | null };
 }
 
 interface DuplicateMatchInfo {
@@ -402,6 +406,10 @@ export default function ChatBubble() {
           }
           if (data.status === "FAILED") {
             setBooking({ jobId, status: "failed", error: data.error });
+            return;
+          }
+          if (data.status === "CANCELLED") {
+            setBooking({ jobId, status: "cancelled", cancelled: data.cancelled });
             return;
           }
         }
@@ -1145,6 +1153,13 @@ export default function ChatBubble() {
                     <div className="chat-bubble-msg assistant" style={{ borderLeft: "3px solid #e11d48" }}>
                       ⚠️ {m.booking.error.message}
                       {m.booking.error.detail ? errorContactNote(m.booking.error.detail) : ""}
+                    </div>
+                  )}
+                  {m.booking?.status === "cancelled" && (
+                    <div className="chat-bubble-msg assistant" style={{ borderLeft: "3px solid #6b7280" }}>
+                      {m.booking.cancelled?.needsManualReview
+                        ? `Booking cancelled — but a hold with reference ${m.booking.cancelled.pnr} may have already been placed before the cancel took effect. Please check with an admin.`
+                        : "Booking cancelled — no hold was placed."}
                     </div>
                   )}
                 </div>

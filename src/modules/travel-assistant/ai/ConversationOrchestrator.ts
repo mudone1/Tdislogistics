@@ -9,14 +9,34 @@ import { startBookOnHold } from "../booking/startBookOnHold";
 import { ENUGU_SUPPORTED_TITLES } from "../booking/vars-platform/VarsBookOnHold";
 import { handleQuery as handleSalesReportQuery } from "../orchestration/SalesReportAssistant";
 import { triggerBalanceUpdate } from "../../../lib/balanceUpdateService";
-import { toSurnameCase, toTitleCase } from "../nameFormat";
+import {
+  splitPassengerName,
+  extractLeadingTitle,
+  guessGenderFromFirstName,
+} from "../nameFormat";
+import { EMAIL_RE, EMAIL_SEARCH_RE, findPhoneInText, normalizePhone } from "../contactFields";
 import { parseFlightQuery } from "../parser/parseFlightQuery";
-import type {
-  AssistantTurn,
-  ChatEntities,
-  ConversationSlots,
-  FlightSearchResult,
-  FlightOption,
+import {
+  ALL_AIRLINES,
+  AIRLINE_NAME_MATCHERS,
+  BOOKABLE_AIRLINE_KEYS,
+  AIRLINE_KEY_TO_DISPLAY_NAME,
+  resolveNamedAirline,
+} from "../core/airlines";
+import { parseBookCommand, isBookCommand } from "../commands/parseBookCommand";
+import {
+  isSettingsCommand,
+  handleSettingsCommand,
+  tryResolvePendingAccountSelection,
+} from "../commands/handleSettingsCommand";
+import { BookingJobRepository } from "../storage/BookingJobRepository";
+import {
+  emptyChatEntities,
+  type AssistantTurn,
+  type ChatEntities,
+  type ConversationSlots,
+  type FlightSearchResult,
+  type FlightOption,
 } from "../core/types";
 
 const BASE_URL = process.env.CONNECTOR_SERVICE_URL;
@@ -82,40 +102,6 @@ export function loadSlots(session: { slots: unknown }): ConversationSlots {
 const REQUIRED_SEARCH_SLOTS = ["origin", "destination", "date"] as const;
 
 const SEARCH_INTENTS = new Set(["FLIGHT_SEARCH_ONE_WAY", "FLIGHT_SEARCH_ROUND_TRIP", "TICKET_AVAILABILITY"]);
-
-const ALL_AIRLINES = ["ENUGU", "UNITED", "XEJET", "RANO", "VALUEJET"] as const;
-
-const AIRLINE_NAME_MATCHERS: Record<string, string> = {
-  united: "UNITED",
-  enugu: "ENUGU",
-  xejet: "XEJET",
-  "xe jet": "XEJET",
-  rano: "RANO",
-  valuejet: "VALUEJET",
-  "value jet": "VALUEJET",
-  vk: "VALUEJET", // ValueJet's actual IATA code — flight numbers read "VK201" etc.
-};
-
-// Airlines the Book-on-Hold flow can actually place a hold with — kept in
-// sync with BOOKABLE_AIRLINES in startBookOnHold.ts. UNITED/XEJET/RANO opened
-// up for live testing at explicit product request — their booking-flow
-// selectors (fare classband names, passenger form field ids, payment
-// options) share Enugu's exact mechanism but aren't independently verified
-// end-to-end yet, so expect the same iterate-from-real-errors cycle Enugu
-// went through.
-const BOOKABLE_AIRLINE_KEYS = new Set(["ENUGU", "VALUEJET", "UNITED", "XEJET", "RANO"]);
-
-// Display names matching each search module's FlightOption.airline field
-// (EnuguAirSearch/ValueJetSearch/UnitedNigeriaSearch/XeJetSearch/
-// RanoAirSearch's own AIRLINE_LABEL constants) — used to match a "book that
-// flight" reference against a shown search result.
-const AIRLINE_KEY_TO_DISPLAY_NAME: Record<string, string> = {
-  ENUGU: "Enugu Air",
-  VALUEJET: "ValueJet",
-  UNITED: "United Nigeria",
-  XEJET: "XeJet",
-  RANO: "Rano Air",
-};
 
 // These 5 are real airlines the assistant knows about (their balances sync,
 // and 4 of them have sales-report data) but have NO flight-search automation
@@ -186,7 +172,14 @@ const BALANCE_UPDATE_PATTERN = /\bbal(?:ance)?\s*update\b/i;
 // required the "booking" suffix), leaving the actual stale slots untouched
 // and the same error repeating on their very next message. "cancel" already
 // had this same optional-suffix shape; "reset" now matches it.
-const CLOSE_SESSION_PATTERN = /\b(?:close\s+session|cancel(?:\s+booking)?|start\s+over|reset(?:\s+booking)?)\b/i;
+// Widened (2026-08-14) to also match "abort"/"stop" per explicit product
+// direction — cancel/reset/abort/stop are all treated as the same
+// high-priority command. Checked BEFORE awaitingBookingFollowUp (below) so
+// it always overrides an in-progress dialogue rather than being swallowed
+// as "a reply to the pending question" — a user waiting on "which
+// departure time?" who instead types "stop" must actually stop, not have
+// the word matched against the departure-time options.
+const CANCEL_RESET_PATTERN = /\b(?:close\s+session|cancel(?:\s+booking)?|start\s+over|reset(?:\s+booking)?|abort(?:\s+booking)?|stop(?:\s+booking)?)\b/i;
 
 // Mirrors whatsapp-service/src/messageHandler.ts's looksLikeBookingRequest
 // exactly (same trigger-verb list) — that copy runs client-side purely to
@@ -235,15 +228,83 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     }
   }
 
-  const closeSessionMatch = CLOSE_SESSION_PATTERN.test(trimmed);
-  if (closeSessionMatch) {
+  const cancelResetMatch = CANCEL_RESET_PATTERN.test(trimmed);
+  if (cancelResetMatch) {
     await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
     const slots: ConversationSlots = loadSlots(session);
     resetBookingSlots(slots);
     await ChatMemoryRepository.updateSlots(session.id, slots);
-    const reply = "Session closed — cleared, ready for a fresh booking whenever you are.";
+    // Also drops any /settings account-selection in progress — a cancel is
+    // a clean break from whatever the bot was doing, not just the booking
+    // flow specifically.
+    await ChatMemoryRepository.updatePendingAction(session.id, null);
+    // Best-effort: a plain slots-reset alone has zero effect on a booking
+    // already dispatched to connector-service — startBookOnHold fires-and-
+    // forgets and handleBookOnHold clears slots immediately after, well
+    // before a user could physically send a second "cancel" message, so by
+    // then there's nothing left in slots to discard. The only thing left
+    // to affect is the BookingJob row itself, still PENDING (including
+    // merely QUEUED — see BookingJobRepository.findOpenBySessionKey) or
+    // RUNNING in Postgres. Marking it CANCELLED here lets the worker pool
+    // skip a still-queued job for free, and lets the automation notice and
+    // stop at its next stage checkpoint if already running — see
+    // BookingCancelledError. This can't undo a hold already placed on the
+    // airline's own portal by the time that check runs — an inherent limit
+    // of automating a 3rd-party site, not a shortcut — see
+    // BookingJobRepository.recordCancelledButCompleted for that edge case.
+    const openJobs = await BookingJobRepository.findOpenBySessionKey(input.sessionKey);
+    await Promise.all(openJobs.map((j) => BookingJobRepository.markCancelled(j.id)));
+    const reply =
+      openJobs.length > 0
+        ? "Session closed and cancelled — any booking in progress has been stopped. Ready for a fresh booking whenever you are."
+        : "Session closed — cleared, ready for a fresh booking whenever you are.";
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
     return { reply };
+  }
+
+  // Deterministic (zero-LLM) structured booking command — see
+  // parseBookCommand.ts's own doc comment for the grammar. Checked before
+  // any pending-state gate below so it always starts a fresh booking
+  // attempt, never gets swallowed as a reply to something else in progress.
+  if (isBookCommand(trimmed)) {
+    await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
+    const parsed = parseBookCommand(input.message);
+    if (!parsed.ok || !parsed.turn) {
+      const reply = parsed.reply ?? "I couldn't process that /book command.";
+      await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+      return { reply };
+    }
+    const slots: ConversationSlots = loadSlots(session);
+    // A /book command is fully self-describing — clear any stale
+    // pending-state left over from an abandoned earlier flow first, so
+    // nothing from a different, unrelated attempt bleeds into this one
+    // (mirrors what a manual "cancel" immediately before the same message
+    // would produce).
+    resetBookingSlots(slots);
+    return handleBookOnHold(session.id, input.sessionKey, slots, parsed.turn, input.message);
+  }
+
+  // Deterministic (zero-LLM) account-preference command — see
+  // handleSettingsCommand.ts. Also checked here: a plain reply to a
+  // pending /settings selection (a bare number or account label), which
+  // looks like ordinary text and wouldn't otherwise be recognized before
+  // falling through to intent detection.
+  if (isSettingsCommand(trimmed)) {
+    await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
+    const reply = await handleSettingsCommand(session.id, input.sessionKey, input.message);
+    await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
+    return { reply };
+  }
+  const settingsSelectionReply = await tryResolvePendingAccountSelection(
+    session.id,
+    input.sessionKey,
+    session.pendingAction,
+    input.message
+  );
+  if (settingsSelectionReply) {
+    await ChatMemoryRepository.appendMessage(session.id, "USER", input.message);
+    await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", settingsSelectionReply);
+    return { reply: settingsSelectionReply };
   }
 
   const priorMessages = await ChatMemoryRepository.getRecentMessages(session.id, 10);
@@ -682,58 +743,6 @@ function extractPassengers(rawMessage: string): DeterministicPassenger[] {
   return extractPassengersAfterFor(rawMessage);
 }
 
-// Small, high-confidence common-name lists for a deterministic gender
-// guess — deliberately NOT exhaustive. Anything not on either list falls
-// through to "unsure", which resolvePendingPassengerTitle already handles
-// safely (it asks the user rather than guessing) — the same "never force
-// a guess" discipline already established for this exact field. "Precious"
-// is intentionally on neither list — already documented elsewhere in this
-// file as genuinely unisex in Nigerian usage.
-const COMMON_MALE_FIRST_NAMES = new Set([
-  "muhammed", "muhammad", "mohammed", "mohammad", "john", "michael", "david",
-  "daniel", "emmanuel", "emeka", "musa", "ibrahim", "peter", "paul", "james",
-  "joseph", "samuel", "joshua", "benjamin", "francis", "anthony", "victor",
-  "kelvin", "chidi", "chinedu", "obi", "tunde", "segun", "femi", "yusuf",
-  "abdullahi", "aliyu", "usman", "suleiman", "othniel", "raheem",
-  "raheemiel", "godfrey", "stephen", "mark", "matthew", "andrew", "richard",
-  "robert", "william", "charles", "abdulwahab", "wahab", "akeeb",
-]);
-const COMMON_FEMALE_FIRST_NAMES = new Set([
-  "mary", "jennifer", "sarah", "grace", "aisha", "fatima", "chidinma",
-  "blessing", "favour", "joy", "peace", "gift", "esther", "ruth",
-  "comfort", "patience", "mercy", "joyce", "florence", "helen", "mariam",
-  "zainab", "hauwa", "amaka", "ngozi", "adaeze", "elizabeth", "victoria",
-  "princess",
-]);
-
-function guessGenderFromFirstName(firstName: string): "male" | "female" | "unsure" {
-  const first = firstName.trim().split(/\s+/)[0]?.toLowerCase();
-  if (!first) return "unsure";
-  if (COMMON_MALE_FIRST_NAMES.has(first)) return "male";
-  if (COMMON_FEMALE_FIRST_NAMES.has(first)) return "female";
-  return "unsure";
-}
-
-function emptyChatEntities(): ChatEntities {
-  return {
-    origin: null,
-    destination: null,
-    date: null,
-    returnDate: null,
-    adults: null,
-    children: null,
-    infants: null,
-    airline: null,
-    cabinClass: null,
-    passengerTitle: null,
-    passengerFullName: null,
-    passengerPhone: null,
-    passengerEmail: null,
-    passengerGenderGuess: null,
-    additionalPassengers: null,
-  };
-}
-
 // Entry point — tries to classify AND fully extract this turn with zero
 // LLM calls; returns null (fall through to the LLM) whenever it can't
 // confidently do so.
@@ -877,67 +886,6 @@ async function runIntentDetection(
     missingRequiredSlots: parsed.missingRequiredSlots ?? [],
     reply: parsed.reply ?? "Sorry, could you rephrase that?",
   };
-}
-
-// Splits a raw full name into firstName/lastName: the LAST word is always
-// the surname, and every word before it (however many — middle names
-// included) joins the first name. Per explicit product direction (e.g.
-// "aliyu ibrea mohammed" -> firstName "aliyu ibrea", lastName "mohammed") —
-// this reverses an earlier floor(n/2)/ceil(n/2) split that combined middle
-// names into the surname instead; that was the wrong direction for this
-// airline's real passenger data. Never done by the LLM (see
-// systemPrompt.ts) — this needs to apply identically every single time,
-// which only code can guarantee.
-// A word typed/spoken back in ALL CAPS (e.g. "ABDULWAHAB Muhammad") is
-// treated as an explicit surname marker — mirrors how the airline's own ID
-// documents print the surname, and lets a user flag the surname regardless
-// of where it falls in the name. Only fires when exactly one such word
-// exists; two or more is ambiguous, so it falls back to the default rule.
-function findCapsSurnameHint(words: string[]): number | null {
-  const capsIndexes = words
-    .map((w, i) => (/^[A-Z]+$/.test(w) && w.length > 1 ? i : -1))
-    .filter((i) => i !== -1);
-  return capsIndexes.length === 1 ? capsIndexes[0] : null;
-}
-
-function splitPassengerName(fullName: string): { firstName: string; lastName: string } {
-  const words = fullName.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return { firstName: "", lastName: "" };
-  if (words.length === 1) return { firstName: toTitleCase(words[0]), lastName: "" };
-
-  const capsIndex = findCapsSurnameHint(words);
-  const lastName = capsIndex != null ? words[capsIndex] : words[words.length - 1];
-  const firstWords = capsIndex != null ? words.filter((_, i) => i !== capsIndex) : words.slice(0, -1);
-  return {
-    firstName: toTitleCase(firstWords.join(" ")),
-    lastName: toSurnameCase(lastName),
-  };
-}
-
-const TITLE_PREFIX_WORDS = new Set([
-  "mr", "mrs", "ms", "miss", "dr", "prof", "rev", "mstr",
-  "chief", "honourable", "honorable", "barrister", "pastor", "apostle",
-  "elder", "alhaji", "alhaja", "otunba", "engineer", "architect",
-]);
-
-// The LLM is asked to extract a title separately from the name (see
-// systemPrompt.ts), but sometimes folds it into the name field instead —
-// confirmed live: "Dr. Godfrey emomidue Ibrahim" came back with
-// passengerTitle=null and "Dr." stuck inside passengerFullName, so the
-// code's own gender-based title default (resolvePendingPassengerTitle)
-// then added "Mr" on top of it, producing "Mr Dr. Godfrey emomidue
-// Ibrahim". Deterministic safety net, same "don't trust the LLM's
-// extraction on faith" reasoning already applied to email/phone below:
-// only fires when the LLM didn't already give a separate title, so a
-// genuinely single-word first name is never mistaken for one.
-function extractLeadingTitle(fullName: string): { title: string | null; rest: string } {
-  const words = fullName.trim().split(/\s+/).filter(Boolean);
-  if (words.length < 2) return { title: null, rest: fullName };
-  const bare = words[0].replace(/\.$/, "").toLowerCase();
-  if (!TITLE_PREFIX_WORDS.has(bare)) return { title: null, rest: fullName };
-  const supported = (ENUGU_SUPPORTED_TITLES as readonly string[]).find((t) => t.toLowerCase() === bare);
-  const title = supported ?? bare.charAt(0).toUpperCase() + bare.slice(1);
-  return { title, rest: words.slice(1).join(" ") };
 }
 
 function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, rawMessage: string): void {
@@ -1162,35 +1110,6 @@ function mergeEntitiesIntoSlots(slots: ConversationSlots, turn: AssistantTurn, r
   }
 }
 
-// Non-anchored — finds an email ANYWHERE in raw free text, unlike the
-// validate-an-already-extracted-value EMAIL_RE further down this file.
-const EMAIL_SEARCH_RE = /[^\s@]+@[^\s@]+\.[^\s@]+/;
-
-// Finds a plausible Nigerian phone number anywhere in raw free text —
-// a run of digits (allowing spaces/dashes and an optional leading +) that,
-// stripped down, is 10-14 digits long (covers local 11-digit numbers like
-// "08140962303" and +234-prefixed international form). Deliberately not
-// reused for the flight-date portion of a message — a date like "30th jul"
-// or "2026-07-30" never produces a long enough contiguous digit run to
-// false-positive here.
-function findPhoneInText(text: string): string | null {
-  // CORRECTED (2026-08-11, live): the middle character class used to be
-  // [\d\s-], and \s matches a newline — on a multi-line message where a
-  // time field ("21:15") sits on the line right above the phone number,
-  // this greedily matched ACROSS the line break ("15\n08140962303"),
-  // silently corrupting the extracted phone number with the time's
-  // trailing digits while still passing normalizePhone's loose length
-  // check. Real phone numbers are only ever separated by spaces or
-  // hyphens, never a line break, so the class no longer includes \s.
-  const candidates = text.match(/\+?[\d][\d -]{8,17}\d/g);
-  if (!candidates) return null;
-  for (const candidate of candidates) {
-    const digits = candidate.replace(/\D/g, "");
-    if (digits.length >= 10 && digits.length <= 14) return candidate.trim();
-  }
-  return null;
-}
-
 function messageActuallyNamesAirline(rawMessage: string, airline: string): boolean {
   const m = rawMessage.toLowerCase();
   // Direct substring match covers the common case (LLM echoes back
@@ -1266,26 +1185,6 @@ function resetRouteSlots(slots: ConversationSlots): void {
 }
 
 // ─── Book-on-Hold ───────────────────────────────────────────────────────
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// Resolve a named carrier to its key, or null if the user didn't name a known
-// airline. Reuses the same alias table the search path uses.
-function resolveNamedAirline(pref: string | null): string | null {
-  if (!pref) return null;
-  const p = pref.toLowerCase();
-  for (const [name, key] of Object.entries(AIRLINE_NAME_MATCHERS)) {
-    if (p.includes(name)) return key;
-  }
-  return null;
-}
-
-// Local phone -> digits only; the automation strips the leading 0 and the
-// +234 prefix is fixed on the form. Returns null if it isn't plausibly a phone.
-function normalizePhone(phone: string): string | null {
-  const digits = phone.replace(/\D/g, "");
-  return digits.length >= 7 ? digits : null;
-}
 
 interface BookingGap {
   label: string;

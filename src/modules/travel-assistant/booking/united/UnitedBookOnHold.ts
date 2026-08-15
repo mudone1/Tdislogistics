@@ -3,6 +3,7 @@ import {
   type BookOnHoldCredentials,
   type BookOnHoldRequest,
   type BookOnHoldResult,
+  type OnBookingStage,
 } from "../vars-platform/VarsBookOnHold";
 
 const LOGIN_URL = "https://booking.flyunitednigeria.com/VARS/Public/CustomerPanels/AgentLoginBS.aspx";
@@ -28,13 +29,23 @@ const MMB_URL = "https://booking.flyunitednigeria.com/VARS/Public/CustomerPanels
 // done for Enugu Air) before use.
 export async function bookUnitedNigeriaOnHold(
   credentials: BookOnHoldCredentials,
-  request: BookOnHoldRequest
+  request: BookOnHoldRequest,
+  onStage?: OnBookingStage,
+  forceFreshLogin?: boolean,
+  isCancelled?: () => Promise<boolean>
 ): Promise<BookOnHoldResult> {
-  return bookVarsPlatformOnHold(credentials, request, {
-    logTag: "united-booking",
-    loginUrl: LOGIN_URL,
-    requirementsUrl: REQUIREMENTS_URL,
-    mmbUrl: MMB_URL,
-    airlineLabel: "United Nigeria",
-  });
+  return bookVarsPlatformOnHold(
+    credentials,
+    request,
+    {
+      logTag: "united-booking",
+      loginUrl: LOGIN_URL,
+      requirementsUrl: REQUIREMENTS_URL,
+      mmbUrl: MMB_URL,
+      airlineLabel: "United Nigeria",
+    },
+    onStage,
+    forceFreshLogin,
+    isCancelled
+  );
 }

@@ -26,7 +26,8 @@ export async function bookEnuguAirOnHold(
   credentials: BookOnHoldCredentials,
   request: BookOnHoldRequest,
   onStage?: OnBookingStage,
-  forceFreshLogin?: boolean
+  forceFreshLogin?: boolean,
+  isCancelled?: () => Promise<boolean>
 ): Promise<BookOnHoldResult> {
   return bookVarsPlatformOnHold(
     credentials,
@@ -39,6 +40,7 @@ export async function bookEnuguAirOnHold(
       airlineLabel: "Enugu Air",
     },
     onStage,
-    forceFreshLogin
+    forceFreshLogin,
+    isCancelled
   );
 }

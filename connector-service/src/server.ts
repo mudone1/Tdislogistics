@@ -20,9 +20,11 @@ import { BookingJobRepository } from "../../src/modules/travel-assistant/storage
 import { categorizeBookingError } from "../../src/modules/travel-assistant/booking/categorizeBookingError";
 import { decryptSecret } from "../../src/modules/airline-connectors/services/CredentialService";
 import { UserCredentialRepository } from "../../src/modules/airline-connectors/storage/UserCredentialRepository";
+import { UserAirlineAccountPreferenceRepository } from "../../src/modules/travel-assistant/storage/UserAirlineAccountPreferenceRepository";
+import { BookingCancelledError } from "../../src/modules/travel-assistant/booking/BookingCancelledError";
 import type { FlightSearchQuery, FlightSearchResult } from "../../src/modules/travel-assistant/core/types";
-import { EnuguWorkerPool, loadEnuguAccountsFromEnv, type EnuguAccount } from "./EnuguWorkerPool";
-import { EnuguWorkerSlotRepository } from "../../src/modules/travel-assistant/storage/EnuguWorkerSlotRepository";
+import { AirlineWorkerPool, loadAccountsFromEnv } from "./AirlineWorkerPool";
+import { AirlineWorkerSlotRepository } from "../../src/modules/travel-assistant/storage/AirlineWorkerSlotRepository";
 import type { BookingJob, BookingStage } from "@prisma/client";
 
 const TRAVEL_ASSISTANT_SEARCHERS: Record<string, (query: FlightSearchQuery) => Promise<FlightSearchResult>> = {
@@ -169,6 +171,21 @@ app.post("/internal/travel-assistant/search", async (req, res) => {
   }
 });
 
+// Account LABELS only (never usernames/passwords) for one airline's worker
+// pool — the /settings command (handleSettingsCommand.ts, Next.js side)
+// calls this because it has no other way to know what's configured: the
+// <AIRLINE>_BOOKING_ACCOUNTS env vars only exist on this Railway service,
+// by design (never duplicated into Vercel). An airline with no configured
+// env var reports a single implicit "admin" account (whatever the
+// DB-stored admin credential resolves to at booking time) — that's exactly
+// what AirlineWorkerPool falls back to as well, so this stays consistent
+// with what actually gets used.
+app.get("/internal/travel-assistant/accounts/:airline", (req, res) => {
+  const airline = req.params.airline.toUpperCase();
+  const accounts = loadAccountsFromEnv(airline as Parameters<typeof loadAccountsFromEnv>[0]);
+  res.json({ labels: accounts ? accounts.map((a) => a.label) : ["admin"] });
+});
+
 const BOOK_ON_HOLD_HANDLERS: Record<string, typeof bookEnuguAirOnHold> = {
   ENUGU: bookEnuguAirOnHold,
   UNITED: bookUnitedNigeriaOnHold,
@@ -214,26 +231,38 @@ const FARE_CLASS_PREFERENCE: Partial<Record<string, [string, string]>> = {
 };
 
 // Actually runs the automation for one job and records the outcome — shared
-// by the direct (immediate, unqueued) path and the Enugu worker pool's
-// runJob callback, so both go through identical markRunning/markSuccess/
-// markFailed handling. onStage, when given, mirrors each Playwright
-// milestone into the job row (see VarsBookOnHold.ts's reportStage) so the
-// chat pollers can show live progress; omitted entirely for airlines whose
-// handler doesn't accept it (only bookEnuguAirOnHold does today).
+// by the direct (immediate, unqueued) path and every airline pool's runJob
+// callback, so both go through identical markRunning/markSuccess/
+// markFailed/markCancelled handling. onStage, when given, mirrors each
+// Playwright milestone into the job row (see VarsBookOnHold.ts's
+// reportStage) so the chat pollers can show live progress.
 async function executeBookingAutomation(
   job: BookingJob,
   handler: typeof bookEnuguAirOnHold,
   credentials: { username: string; password: string },
   fareClassPreference: [string, string],
   onStage?: (stage: BookingStage) => void,
-  // Only meaningful for bookEnuguAirOnHold (other handlers ignore a 4th
-  // arg they don't accept) — true for every pool-managed job, see
-  // EnuguWorkerPool's runJob callback below.
+  // True for every pool-managed job (see AirlineWorkerPool's runJob
+  // callback below) — a pooled booking never reuses a cached/reused
+  // session. Ignored by handlers that don't accept it (ValueJet has no
+  // session cache to bypass in the first place).
   forceFreshLogin?: boolean
 ): Promise<void> {
   const jobId = job.id;
   await BookingJobRepository.markRunning(jobId);
   const startedAt = Date.now();
+
+  // Best-effort CANCEL/RESET/ABORT/STOP support — a live status re-check,
+  // not a locally-cached flag, since the cancel could come from a
+  // different connector-service process (or Next.js writing straight to
+  // Postgres) than the one running this automation. Threaded into the
+  // handler and checked right after every existing stage checkpoint (see
+  // bookVarsPlatformOnHold/bookValueJetOnHold's own reportStage) — never
+  // mid-Playwright-action, since there's no safe place to interrupt one.
+  const isCancelled = async () => {
+    const live = await BookingJobRepository.findById(jobId).catch(() => null);
+    return live?.status === "CANCELLED";
+  };
 
   try {
     const result = await handler(
@@ -259,9 +288,32 @@ async function executeBookingAutomation(
           : undefined,
       },
       onStage,
-      forceFreshLogin
+      forceFreshLogin,
+      isCancelled
     );
     const durationMs = Date.now() - startedAt;
+
+    // The automation ran all the way to a real result in the narrow window
+    // AFTER its last stage checkpoint's cancellation check but before this
+    // line — meaning a hold may already exist on the airline's own portal
+    // that a cancel can no longer prevent. Never silently report this as
+    // an ordinary SUCCESS: record what actually happened (PNR included, if
+    // any) under the CANCELLED status so staff can see a possible orphaned
+    // hold needing manual review, instead of the job just vanishing from
+    // view or misreporting as successful.
+    if (await isCancelled()) {
+      console.warn(`[book-hold] job=${jobId} completed AFTER being cancelled — recording result under CANCELLED, pnr=${result.pnr ?? "(none)"}`);
+      await BookingJobRepository.recordCancelledButCompleted(jobId, {
+        pnr: result.pnr,
+        holdExpiresAt: result.holdExpiresAt,
+        totalPayable: result.totalPayable,
+        currency: result.currency,
+        screenshot: result.screenshot,
+        durationMs,
+      });
+      return;
+    }
+
     // A confirmation page with no parseable PNR is a soft failure — the
     // hold may not have gone through — so treat a null PNR as FAILED rather
     // than reporting a success the staff can't act on. VALUEJET is a
@@ -287,6 +339,14 @@ async function executeBookingAutomation(
     });
   } catch (err) {
     const durationMs = Date.now() - startedAt;
+    // Expected control flow, not a real failure — the job row is already
+    // CANCELLED (that's what made isCancelled() true and triggered this
+    // throw); must be checked BEFORE markFailed below, or a legitimate
+    // cancel would get silently overwritten back to FAILED.
+    if (err instanceof BookingCancelledError) {
+      console.log(`[book-hold] job=${jobId} stopped after ${durationMs}ms: ${err.message}`);
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[book-hold] job=${jobId} FAILED after ${durationMs}ms:`, message);
     await BookingJobRepository.markFailed(jobId, categorizeBookingError(message), message, durationMs).catch((e) => {
@@ -295,26 +355,27 @@ async function executeBookingAutomation(
   }
 }
 
-// Lazily-initialized singleton — built once per connector-service process,
-// first time an Enugu admin-credential booking is submitted. Prefers the
-// explicitly configured multi-account pool (ENUGU_BOOKING_ACCOUNTS); when
-// that's absent, falls back to a pool of exactly one worker wrapping the
-// single stored admin credential (AirlineWalletRepository) — same
-// credential source as before this feature, just now serialized through a
-// queue instead of running with no concurrency control at all, which is
-// the actual bug multiple accounts are meant to fix. Only ENUGU is pooled —
-// per explicit scope, and the only airline with a shared-account collision
-// risk verified live.
-let enuguPoolPromise: Promise<EnuguWorkerPool> | null = null;
+// Lazily-initialized, one singleton PER AIRLINE — built the first time that
+// airline's admin-credential booking is submitted. Prefers the explicitly
+// configured multi-account pool (<AIRLINE>_BOOKING_ACCOUNTS); when that's
+// absent, falls back to a pool of exactly one worker wrapping the single
+// stored admin credential (AirlineWalletRepository) — same credential
+// source as before this feature, just now serialized through a queue
+// instead of running with no concurrency control at all, which was the
+// actual bug this generalizes Enugu's original fix to close for every
+// bookable airline, not just Enugu.
+const airlinePoolPromises = new Map<string, Promise<AirlineWorkerPool>>();
 
-function getEnuguPool(fareClassPreference: [string, string]): Promise<EnuguWorkerPool> {
-  if (!enuguPoolPromise) {
-    enuguPoolPromise = (async () => {
-      let accounts = loadEnuguAccountsFromEnv();
+function getAirlinePool(airline: AirlineKey, handler: typeof bookEnuguAirOnHold, fareClassPreference: [string, string]): Promise<AirlineWorkerPool> {
+  const logTag = `${airline.toLowerCase()}-pool`;
+  let poolPromise = airlinePoolPromises.get(airline);
+  if (!poolPromise) {
+    poolPromise = (async () => {
+      let accounts = loadAccountsFromEnv(airline);
       if (!accounts) {
-        const settings = await AirlineWalletRepository.getSettings("ENUGU");
+        const settings = await AirlineWalletRepository.getSettings(airline);
         if (!settings?.encryptedUsername || !settings.encryptedPassword) {
-          throw new Error("No credentials configured for ENUGU");
+          throw new Error(`No credentials configured for ${airline}`);
         }
         accounts = [
           {
@@ -324,22 +385,22 @@ function getEnuguPool(fareClassPreference: [string, string]): Promise<EnuguWorke
           },
         ];
       }
-      console.log(`[enugu-pool] initialized with ${accounts.length} account(s): ${accounts.map((a: EnuguAccount) => a.label).join(", ")}`);
+      console.log(`[${logTag}] initialized with ${accounts.length} account(s): ${accounts.map((a) => a.label).join(", ")}`);
       // Creates the Postgres claim row for each account if it doesn't
       // already exist — idempotent, and never touches an already-claimed
-      // row (see EnuguWorkerSlotRepository.ensureSlots), so this is safe
+      // row (see AirlineWorkerSlotRepository.ensureSlots), so this is safe
       // to run on every process start, including mid-deploy overlap with
       // an old process that's still legitimately holding a claim.
-      await EnuguWorkerSlotRepository.ensureSlots(accounts.map((a: EnuguAccount) => a.label));
-      return new EnuguWorkerPool(accounts, (job, account) =>
+      await AirlineWorkerSlotRepository.ensureSlots(airline, accounts.map((a) => a.label));
+      return new AirlineWorkerPool(airline, accounts, (job, account) =>
         executeBookingAutomation(
           job,
-          bookEnuguAirOnHold,
+          handler,
           account,
           fareClassPreference,
           (stage) =>
             BookingJobRepository.updateStage(job.id, stage).catch((err) =>
-              console.error(`[enugu-pool] failed to update stage for job ${job.id}:`, err)
+              console.error(`[${logTag}] failed to update stage for job ${job.id}:`, err)
             ),
           // Every pool-managed booking gets a brand-new login — never a
           // cached/reused session — per explicit product direction after a
@@ -352,11 +413,12 @@ function getEnuguPool(fareClassPreference: [string, string]): Promise<EnuguWorke
       // A failed init must not wedge every future booking behind a
       // permanently-rejected promise — clear it so the next submission
       // retries from scratch (e.g. credentials get fixed in the meantime).
-      enuguPoolPromise = null;
+      airlinePoolPromises.delete(airline);
       throw err;
     });
+    airlinePoolPromises.set(airline, poolPromise);
   }
-  return enuguPoolPromise;
+  return poolPromise;
 }
 
 // Job-based Book-on-Hold. Unlike the old fire-and-forget version, the
@@ -423,25 +485,34 @@ app.post("/internal/travel-assistant/book-hold", async (req, res) => {
     }
   }
 
-  // A personal (per-user) Enugu login is its own dedicated account — it
-  // never contends with the shared admin pool, so it runs immediately,
-  // same as before this feature. Only the admin-credential fallback case
-  // is a genuinely SHARED resource that needs the worker pool/queue.
-  if (airline === "ENUGU" && credentialSource === "admin") {
-    let pool: EnuguWorkerPool;
+  // A personal (per-user) login is its own dedicated account — it never
+  // contends with the shared admin pool, so it runs immediately, same as
+  // before this feature (originally Enugu-only; now every bookable
+  // airline). Only the admin-credential fallback case is a genuinely
+  // SHARED resource that needs the worker pool/queue.
+  if (credentialSource === "admin") {
+    let pool: AirlineWorkerPool;
     try {
-      pool = await getEnuguPool(fareClassPreference);
+      pool = await getAirlinePool(airline, handler, fareClassPreference);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await BookingJobRepository.markFailed(jobId, "LOGIN_FAILED", message, 0);
       res.status(502).json({ error: message });
       return;
     }
-    const position = await pool.submit(job);
+    // The user's saved /settings choice for this airline, if any — absent
+    // for a job with no sessionKey (e.g. triggered outside chat) or one
+    // that never ran /settings, in which case the pool applies its own
+    // default (any free account for ENUGU, the first configured account
+    // for every other airline — see AirlineWorkerPool.submit).
+    const preferredAccountLabel = job.sessionKey
+      ? await UserAirlineAccountPreferenceRepository.get(job.sessionKey, airline)
+      : null;
+    const position = await pool.submit(job, preferredAccountLabel);
     console.log(
-      `[book-hold] job=${jobId} ENUGU ${job.origin}->${job.destination} ${job.departureDate} — ${
+      `[book-hold] job=${jobId} ${airline} ${job.origin}->${job.destination} ${job.departureDate} — ${
         position === 0 ? "started immediately" : `queued at position ${position} (${pool.accountCount} account(s) configured)`
-      }`
+      }${preferredAccountLabel ? ` [preferred account: ${preferredAccountLabel}]` : ""}`
     );
     res.status(202).json({ accepted: true, jobId, airline, queuePosition: position });
     return;

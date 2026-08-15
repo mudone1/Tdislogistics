@@ -32,4 +32,9 @@ export const connectorServiceClient = {
   // 202 immediately; the outcome is written back to the row and polled from there.
   bookHold: (jobId: string) =>
     call(`/internal/travel-assistant/book-hold`, { method: "POST", body: JSON.stringify({ jobId }) }),
+  // Configured account labels (never usernames/passwords) for one airline's
+  // worker pool — connector-service is the only process that can read the
+  // Railway-only <AIRLINE>_BOOKING_ACCOUNTS env vars, so the /settings
+  // command asks it rather than duplicating account config into Vercel.
+  listAccounts: (airline: string) => call(`/internal/travel-assistant/accounts/${airline}`),
 };
