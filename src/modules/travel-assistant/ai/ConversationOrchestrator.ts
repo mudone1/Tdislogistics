@@ -464,9 +464,15 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
       slots.isRoundTrip,
       slots.returnDate
     );
+    // Markdown-style [label](url) — ChatBubble.tsx renders this as a real,
+    // short clickable link on web. WhatsApp can't render custom link text
+    // (no rich-link support there, only bold/italic and bare auto-linked
+    // URLs), so a WhatsApp user sees this literal bracket syntax with the
+    // raw URL still auto-linkified/tappable inside it — not as clean, but
+    // never broken.
     const reply =
-      `${displayName} blocks automated searches, so I can't pull live fares directly — but here's a ` +
-      `ready-made quote link with your route and date already filled in. Open it in your own browser for instant fares:\n${link}`;
+      `${displayName} blocks automated searches, so I can't pull live fares directly — here's a ready-made ` +
+      `quote link with your route and date already filled in: [Click here](${link})`;
     resetRouteSlots(slots);
     await ChatMemoryRepository.updateSlots(session.id, slots);
     await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
