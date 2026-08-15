@@ -795,12 +795,24 @@ export async function bookVarsPlatformOnHold(
           bodyText: document.body.innerText.replace(/\s+/g, " ").trim().slice(0, 1500),
         }));
         console.error(`[${logTag}] confirmation page never appeared. DIAGNOSTIC: ${JSON.stringify(diagnostic)}`);
+        // TEMPORARY DIAGNOSTIC (2026-08-15) — investigating a real multi-
+        // passenger RANO failure at this exact spot ("Empty basket" on
+        // PassengerPaymentDetails.aspx). connector-service runs on a
+        // separate deployed process with no other way to pull a file back
+        // from it, so a small compressed screenshot is embedded directly in
+        // the thrown message (readable via the BookingJob's errorMessage
+        // column) instead. Remove once diagnosed.
+        const diagShot = await page
+          .screenshot({ type: "jpeg", quality: 40 })
+          .then((buf) => buf.toString("base64"))
+          .catch(() => null);
         // Diagnostic goes INTO the thrown message (not just console.error)
         // so it surfaces all the way to the chat error text — no server-log
         // access needed to see what was actually on the page when this
         // gave up, same reasoning as the issue-ticket diagnostics.
         throw new Error(
-          `Confirmation page never appeared after ${confirmationTimeoutMs}ms (party size ${totalPassengers}). Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}`
+          `Confirmation page never appeared after ${confirmationTimeoutMs}ms (party size ${totalPassengers}). Page state: ${JSON.stringify(diagnostic).slice(0, 1200)}` +
+            (diagShot ? ` DIAGSHOT_BASE64_JPEG:${diagShot}` : "")
         );
       });
     page.off("response", validationListener);
