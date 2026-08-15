@@ -57,7 +57,15 @@ export async function sendPassportImage(
 
   const res = await fetch(`${MAIN_APP_URL}/api/assistant/passport`, { method: "POST", body: form });
   if (!res.ok) {
-    throw new Error(`Passport API returned HTTP ${res.status}`);
+    // CORRECTED (2026-08-15): a bare "HTTP 500" gave zero indication of
+    // WHY — the route already returns { error: <real reason> } in its body
+    // (e.g. a genuine Groq vision-API failure, now correctly propagated
+    // instead of silently swallowed — see PassportParser.ts), but this
+    // discarded it. Same "surface the real reason" fix already applied to
+    // ValueJetSearch.ts and elsewhere this session.
+    const body = await res.json().catch(() => null);
+    const reason = body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null;
+    throw new Error(`Passport API returned HTTP ${res.status}${reason ? ` — ${reason}` : ""}`);
   }
   return (await res.json()) as PassportResponse;
 }
@@ -88,7 +96,12 @@ export async function sendDocumentImage(
 
   const res = await fetch(`${MAIN_APP_URL}/api/assistant/document`, { method: "POST", body: form });
   if (!res.ok) {
-    throw new Error(`Document API returned HTTP ${res.status}`);
+    // Same fix as sendPassportImage above — the route's real reason (e.g.
+    // a genuine Groq vision-API failure) was being discarded, leaving only
+    // an uninformative "Document API returned HTTP 500" for staff to act on.
+    const body = await res.json().catch(() => null);
+    const reason = body && typeof body === "object" && "error" in body ? String((body as { error: unknown }).error) : null;
+    throw new Error(`Document API returned HTTP ${res.status}${reason ? ` — ${reason}` : ""}`);
   }
   return (await res.json()) as DocumentResponse;
 }
