@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { ChangeEvent, KeyboardEvent } from "react";
+import type { ChangeEvent, JSX, KeyboardEvent } from "react";
 import { Icon } from "@/lib/icon-map";
 import FloatingChatShell from "./chat/FloatingChatShell";
 import { authHelper } from "@/lib/firebase";
@@ -122,6 +122,31 @@ function looksLikeBookingRequest(text: string): boolean {
 // hidden from them the way a stack trace would be from an end customer.
 function errorContactNote(reason: string): string {
   return ` Please tell Muhammed the reason for the error, and he'll fix it: "${reason}"`;
+}
+
+// Minimal markdown-link support — only handles [label](url), the one
+// pattern the assistant actually emits (see ConversationOrchestrator.ts's
+// crane-quote-link reply for Aero/Arik). Not a general markdown renderer;
+// everything else in a message stays exactly the plain text it always was.
+const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+
+function renderMessageText(text: string) {
+  const parts: (string | JSX.Element)[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  MARKDOWN_LINK_RE.lastIndex = 0;
+  while ((match = MARKDOWN_LINK_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    parts.push(
+      <a key={key++} href={match[2]} target="_blank" rel="noopener noreferrer" className="chat-bubble-inline-link">
+        {match[1]}
+      </a>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
 }
 
 function detectAttachmentKind(file: File): "excel" | "image" | "other" {
@@ -1114,7 +1139,7 @@ export default function ChatBubble() {
                   {m.showCards && m.legs ? (
                     <FlightCards legs={m.legs} />
                   ) : (
-                    <div className={`chat-bubble-msg ${m.role}`}>{m.text}</div>
+                    <div className={`chat-bubble-msg ${m.role}`}>{renderMessageText(m.text)}</div>
                   )}
                   {m.hasResults && (
                     <div className="chat-bubble-msg-actions">
