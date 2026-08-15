@@ -698,12 +698,53 @@ const NAME_LINE_STOPWORDS = new Set([
 const ROUTE_OR_DATE_WORD_PATTERN =
   /\b(?:to|today|tomorrow|tonight|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|mon|tue|wed|thu|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
 
-function looksLikeNameLine(line: string): boolean {
-  const trimmed = line.trim();
-  if (!trimmed || !NAME_LINE_PATTERN.test(trimmed)) return false;
-  const lower = trimmed.toLowerCase();
+// Trailing age annotation — the natural way a user indicates a child or
+// infant passenger, e.g. "Muhammed Wahab, 7 years" / ", age 7" / "(7 yrs)".
+// NAME_LINE_PATTERN is letters-only, so a line carrying one of these used
+// to fail the whole-line match and get silently DROPPED instead of
+// captured as an additional passenger — confirmed live: real BookingJob
+// rows show additionalPassengers: null for exactly this message shape
+// ("Mr John Doe" / "Muhammed wahab, 7 years" on consecutive lines), which
+// is also why plain multi-adult bookings failed whenever the user gave
+// every passenger's age out of habit, adult or not. Stripped BEFORE the
+// name pattern is tested, so the remaining name portion still has to look
+// like a real name.
+const TRAILING_AGE_PATTERN = /[\s,\-(]+(?:age[d]?\s*)?(\d{1,3})\s*(?:years?\s*old|yrs?|y\.?o\.?|years?)?\)?\s*$/i;
+
+function stripTrailingAge(line: string): { nameOnly: string; ageYears: number | null } {
+  const match = line.match(TRAILING_AGE_PATTERN);
+  if (!match || match.index === undefined) return { nameOnly: line, ageYears: null };
+  const age = parseInt(match[1], 10);
+  if (!Number.isFinite(age) || age < 0 || age > 120) return { nameOnly: line, ageYears: null };
+  return { nameOnly: line.slice(0, match.index).trim(), ageYears: age };
+}
+
+// Age bands match the ones the airlines' own portals use (e.g. Arik's
+// "ADULTS (12+)" / "CHILDREN (2-12)" / "INFANTS (0-2)").
+function classifyPassengerType(ageYears: number | null): "ADULT" | "CHILD" | "INFANT" {
+  if (ageYears == null) return "ADULT";
+  if (ageYears < 2) return "INFANT";
+  if (ageYears < 12) return "CHILD";
+  return "ADULT";
+}
+
+// The exact birthdate isn't knowable from a stated age alone — approximate
+// to today's month/day in the appropriate birth year, which is good enough
+// for an airline portal's DOB field (it only needs to resolve to the
+// stated age bracket, not be pixel-accurate).
+function approximateDateOfBirthFromAge(ageYears: number): string {
+  const now = new Date();
+  const year = now.getFullYear() - ageYears;
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function looksLikeNameLine(nameOnly: string): boolean {
+  if (!nameOnly || !NAME_LINE_PATTERN.test(nameOnly)) return false;
+  const lower = nameOnly.toLowerCase();
   if (NAME_LINE_STOPWORDS.has(lower)) return false;
-  if (ROUTE_OR_DATE_WORD_PATTERN.test(trimmed)) return false;
+  if (ROUTE_OR_DATE_WORD_PATTERN.test(nameOnly)) return false;
   // CORRECTED (2026-08-11, live): same gap as ROUTE_OR_DATE_WORD_PATTERN
   // above, different word category — "Book United for" (the message's own
   // airline-selection line) structurally matches NAME_LINE_PATTERN and
@@ -714,15 +755,16 @@ function looksLikeNameLine(line: string): boolean {
   // outright whenever the line contains a booking trigger verb anywhere
   // in it, not just as the whole line — a real name is never going to
   // contain "book"/"hold"/"reserve" as a standalone word.
-  if (BOOKING_VERB_PATTERN.test(trimmed)) return false;
+  if (BOOKING_VERB_PATTERN.test(nameOnly)) return false;
   if (Object.prototype.hasOwnProperty.call(AIRLINE_NAME_MATCHERS, lower)) return false;
-  if (EMAIL_SEARCH_RE.test(trimmed) || findPhoneInText(trimmed)) return false;
+  if (EMAIL_SEARCH_RE.test(nameOnly) || findPhoneInText(nameOnly)) return false;
   return true;
 }
 
 interface DeterministicPassenger {
   title: string | null;
   fullName: string;
+  ageYears: number | null;
 }
 
 // Strategy A: one passenger name per line — the WhatsApp format seen in
@@ -735,9 +777,10 @@ function extractPassengerLines(rawMessage: string): DeterministicPassenger[] {
     .filter(Boolean);
   const passengers: DeterministicPassenger[] = [];
   for (const line of lines) {
-    if (!looksLikeNameLine(line)) continue;
-    const extracted = extractLeadingTitle(line);
-    passengers.push({ title: extracted.title, fullName: extracted.rest });
+    const { nameOnly, ageYears } = stripTrailingAge(line);
+    if (!looksLikeNameLine(nameOnly)) continue;
+    const extracted = extractLeadingTitle(nameOnly);
+    passengers.push({ title: extracted.title, fullName: extracted.rest, ageYears });
   }
   return passengers;
 }
@@ -774,13 +817,22 @@ function extractPassengersAfterFor(rawMessage: string): DeterministicPassenger[]
 
   const passengers: DeterministicPassenger[] = [];
   for (const piece of pieces) {
-    if (!NAME_LINE_PATTERN.test(piece)) continue;
-    if (NAME_LINE_STOPWORDS.has(piece.toLowerCase())) continue;
-    // Same fix as looksLikeNameLine above, kept in sync — a piece
-    // containing a booking trigger verb is never a real passenger name.
-    if (BOOKING_VERB_PATTERN.test(piece)) continue;
-    const extracted = extractLeadingTitle(piece);
-    passengers.push({ title: extracted.title, fullName: extracted.rest });
+    // A comma-separated bare age ("Muhammed Wahab, 7 years and Jane Smith")
+    // splits into its own piece here, since this strategy's separator is
+    // the same comma a natural age annotation uses — if a piece is JUST an
+    // age with no name characters at all, attach it to the passenger just
+    // pushed instead of discarding it as an invalid name on its own.
+    const bareAgeMatch = piece.match(/^(?:age[d]?\s*)?(\d{1,3})\s*(?:years?\s*old|yrs?|y\.?o\.?|years?)?$/i);
+    if (bareAgeMatch) {
+      const age = parseInt(bareAgeMatch[1], 10);
+      const last = passengers[passengers.length - 1];
+      if (last && Number.isFinite(age) && age >= 0 && age <= 120) last.ageYears = age;
+      continue;
+    }
+    const { nameOnly, ageYears } = stripTrailingAge(piece);
+    if (!looksLikeNameLine(nameOnly)) continue;
+    const extracted = extractLeadingTitle(nameOnly);
+    passengers.push({ title: extracted.title, fullName: extracted.rest, ageYears });
   }
   return passengers;
 }
@@ -836,19 +888,22 @@ function tryDeterministicIntentDetection(rawMessage: string): AssistantTurn | nu
       entities.passengerFullName = lead.fullName;
       entities.passengerGenderGuess = lead.title ? null : guessGenderFromFirstName(lead.fullName);
       if (passengers.length > 1) {
-        entities.additionalPassengers = passengers.slice(1).map((p) => ({
-          fullName: p.fullName,
-          title: p.title,
-          genderGuess: p.title ? null : guessGenderFromFirstName(p.fullName),
-          // Deterministic path doesn't attempt child/infant/age detection
-          // from free text (genuinely hard without an LLM) — defaults to
-          // ADULT, the same safe default the app already falls back to
-          // when genuinely unclear; a wrong default here just means the
-          // portal's own passenger-type dropdown gets corrected manually,
-          // not a booking placed for the wrong person.
-          type: "ADULT" as const,
-          dateOfBirth: null,
-        }));
+        entities.additionalPassengers = passengers.slice(1).map((p) => {
+          const type = classifyPassengerType(p.ageYears);
+          return {
+            fullName: p.fullName,
+            title: p.title,
+            genderGuess: p.title ? null : guessGenderFromFirstName(p.fullName),
+            // A stated age (see stripTrailingAge) classifies CHILD/INFANT
+            // correctly instead of always defaulting to ADULT — an
+            // approximate DOB comes along with it so the portal's DOB
+            // field is filled immediately rather than needing a follow-up
+            // question. No age given still safely defaults to ADULT, same
+            // as before.
+            type,
+            dateOfBirth: type !== "ADULT" && p.ageYears != null ? approximateDateOfBirthFromAge(p.ageYears) : null,
+          };
+        });
       }
     }
 
