@@ -88,15 +88,20 @@ const NOT_AN_ID_DOCUMENT: IdDocumentParseResult = {
 export async function parseIdDocumentImage(buffer: Buffer, mimeType: string): Promise<IdDocumentParseResult> {
   const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
 
-  let raw: string;
-  try {
-    raw = await groqVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
-  } catch {
-    // A parse/API failure says nothing about whether this was actually an
-    // ID document — fail closed to isIdDocument:false rather than telling
-    // the user their (possibly unrelated) image needs a clearer photo.
-    return NOT_AN_ID_DOCUMENT;
-  }
+  // CORRECTED (2026-08-15, live): this used to swallow a genuine
+  // groqVisionJsonCompletion failure (Groq rate-limited/unreachable, not a
+  // judgment about the photo at all) into the same "fail closed to
+  // isIdDocument:false" path a malformed-JSON response gets below —
+  // confirmed live: a WhatsApp ID upload got NO reply at all, because
+  // imageHandler.ts stays silent on a "not an ID/not a ticket" result by
+  // design (never comments on unrelated photos), and this made a real
+  // service failure indistinguishable from that. A genuine API/network
+  // failure now propagates instead, so the caller's own catch block
+  // (imageHandler.ts) sends an honest "I couldn't read that photo just
+  // now" instead of silence. Only a response Groq actually returned but
+  // couldn't be parsed as JSON (below) still fails closed silently — that
+  // one genuinely says nothing about whether the photo was an ID.
+  const raw = await groqVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
 
   let parsed: VisionResult;
   try {
