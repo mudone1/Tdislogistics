@@ -61,6 +61,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         detail: job.errorMessage,
       },
     }),
+    // Best-effort user cancel — see BookingJobRepository.markCancelled vs.
+    // recordCancelledButCompleted. job.pnr is set ONLY in the rare edge
+    // case where the automation had already placed a real hold on the
+    // airline's own portal before the cancellation was noticed — surfaced
+    // here (never silently dropped) so staff can see it needs manual review.
+    ...(job.status === "CANCELLED" && {
+      cancelled: {
+        pnr: job.pnr,
+        needsManualReview: job.pnr != null,
+        detail: job.errorMessage,
+      },
+    }),
     createdAt: job.createdAt,
     finishedAt: job.finishedAt,
     durationMs: job.durationMs,

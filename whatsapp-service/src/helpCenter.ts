@@ -30,7 +30,10 @@ type HelpPage =
 
 const sessions = new Map<string, HelpPage>();
 
-const START_COMMAND = /^\/(inst|instr|instruction)$/i;
+// Live-verified (2026-08-11): a real user tried "/instructions" (plural)
+// in addition to the spec's own "/inst"/"/instr"/"/instruction" — added
+// here since it's an obvious, natural variant to type.
+const START_COMMAND = /^\/(inst|instr|instructions?)$/i;
 
 const FOOTER_BACK = "\nReply 0 to go back to the Help Center.\nReply # to exit Help.";
 const FOOTER_BOOKING_BACK = "\nReply 0 to go back.\nReply # to exit Help.";

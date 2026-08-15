@@ -102,7 +102,7 @@ export interface AdditionalPassenger {
 
 export interface BookingJobStatus {
   jobId: string;
-  status: "PENDING" | "RUNNING" | "SUCCESS" | "FAILED";
+  status: "PENDING" | "RUNNING" | "SUCCESS" | "FAILED" | "CANCELLED";
   airline: string;
   route: {
     origin: string;
@@ -131,6 +131,15 @@ export interface BookingJobStatus {
   };
   error?: {
     message: string;
+    detail: string | null;
+  };
+  // Best-effort user cancel — pnr is set only in the rare edge case where
+  // the automation had already placed a real hold on the airline's own
+  // portal before the cancellation was noticed (see
+  // BookingJobRepository.recordCancelledButCompleted).
+  cancelled?: {
+    pnr: string | null;
+    needsManualReview: boolean;
     detail: string | null;
   };
 }

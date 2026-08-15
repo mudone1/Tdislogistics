@@ -267,6 +267,12 @@ model ChatSession {
   isAuthenticated Boolean  @default(false)
   userId          String? // Firebase UID if authenticated
   slots           Json?
+  // Small deterministic command state machines OUTSIDE the booking-flow
+  // `slots` above — currently just an in-progress /settings account
+  // selection (see handleSettingsCommand.ts). Deliberately a separate
+  // column so a booking-flow reset never has to know about /settings
+  // state and vice versa; the CANCEL/RESET handler clears both explicitly.
+  pendingAction   Json?
   firstSeenAt     DateTime @default(now())
   lastSeenAt      DateTime @updatedAt
 
@@ -598,6 +604,12 @@ enum BookingJobStatus {
   RUNNING // connector-service is executing the automation
   SUCCESS // PNR generated (hold created, but not yet issued/paid)
   FAILED // see errorCategory/errorMessage
+  // Best-effort user-initiated CANCEL/RESET/ABORT/STOP while still PENDING
+  // (queued) or RUNNING. A job that had already placed a real hold on the
+  // airline's own portal by the time this was noticed is still marked
+  // CANCELLED (never silently reported as SUCCESS) but keeps its
+  // pnr/holdExpiresAt populated — see BookingJobRepository.recordCancelledButCompleted.
+  CANCELLED
 }
 
 // User-friendly buckets the automation maps raw failures into (so the chat
@@ -729,6 +741,10 @@ model BookingJob {
 // shares, so an atomic conditional UPDATE here (claimedByJobId IS NULL ->
 // this job's id) is the real lock; the in-memory pool just decides who's
 // waiting in line, not who's allowed to touch the account right now.
+// SUPERSEDED (2026-08-14) by AirlineWorkerSlot below — kept in the schema,
+// unused by any code path, purely as an instant rollback net (its rows were
+// copied, not moved, into airline_worker_slots by the accompanying data
+// migration). Do not write new code against this model.
 model EnuguWorkerSlot {
   id             String    @id @default(cuid())
   accountLabel   String    @unique
@@ -737,6 +753,42 @@ model EnuguWorkerSlot {
   updatedAt      DateTime  @updatedAt
 
   @@map("enugu_worker_slots")
+}
+
+// Generalizes EnuguWorkerSlot across every bookable airline — one row per
+// configured login (from <AIRLINE>_BOOKING_ACCOUNTS on Railway), claimed
+// atomically (a single conditional updateMany, not read-then-write) so two
+// connector-service processes — including the brief old/new overlap during
+// a Railway rolling deploy — can never both believe they hold the same
+// account. See connector-service/src/AirlineWorkerPool.ts.
+model AirlineWorkerSlot {
+  id             String     @id @default(cuid())
+  airline        AirlineKey
+  accountLabel   String
+  claimedByJobId String?
+  claimedAt      DateTime?
+  updatedAt      DateTime   @updatedAt
+
+  @@unique([airline, accountLabel])
+  @@map("airline_worker_slots")
+}
+
+// Per-WhatsApp-number (sessionKey), per-airline preferred login account —
+// set via /settings, read by connector-service's book-hold route before
+// submitting a job to AirlineWorkerPool. No row for a given
+// [sessionKey, airline] means "no preference saved" -> the pool falls back
+// to its own default (any free account for ENUGU, the first configured
+// account for every other airline — see AirlineWorkerPool.submit).
+model UserAirlineAccountPreference {
+  id           String     @id @default(cuid())
+  sessionKey   String
+  airline      AirlineKey
+  accountLabel String
+  updatedAt    DateTime   @updatedAt
+  createdAt    DateTime   @default(now())
+
+  @@unique([sessionKey, airline])
+  @@map("user_airline_account_preferences")
 }
 
 // ─── User Credentials & Booking History ───
