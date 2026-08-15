@@ -861,3 +861,50 @@ model PnrVerification {
   @@index([verifiedAt])
   @@map("pnr_verifications")
 }
+
+// WhatsApp airline-deposit tracking — manual-testing phase (see
+// AirlineDepositRepository.ts / whatsapp-service's depositTracking.ts).
+// Only ever holds CONFIRMED ("credited") deposits: a payment screenshot
+// gets a transient in-memory pending entry in whatsapp-service while
+// awaiting its credited/not-credited tag, and only becomes a row here once
+// tagged credited — an untagged or explicitly "not credited" payment is
+// never written at all. chatId scopes deposits to whichever WhatsApp group
+// they were recorded in (no single hardcoded deposit group — per product
+// direction, any group can track its own deposits), so a report only ever
+// covers the group `@TDISbot credit update` was run in.
+model AirlineDeposit {
+  id       String     @id @default(cuid())
+  chatId   String // WhatsApp group JID this was recorded in
+  airline  AirlineKey
+  amount   Decimal    @db.Decimal(14, 2)
+
+  // "YYYY-MM-DD" — the Africa/Lagos calendar day this deposit belongs to,
+  // computed once at ingestion (see lagosDate.ts) rather than derived from
+  // receivedAt/createdAt at report time, so a later change to how "today"
+  // vs "yesterday" gets computed (e.g. the eventual 1am/6am Phase 2
+  // scheduler) can never retroactively reclassify an already-recorded
+  // deposit into the wrong day.
+  depositDateLagos String
+
+  paymentTime         String? // raw time text off the receipt, if legible, e.g. "06:21"
+  referenceNumber     String?
+  narration           String? // raw description/narration text — also what airline-matching runs against
+  bankChannel         String? // e.g. "Zenith Bank", "PAYSTACK TITAN", "FirstBank"
+  screenshotMessageId String? // WhatsApp message ID of the original screenshot — de-dup key, see @@unique below
+  rawExtraction       Json? // full vision-extraction result, for audit/debugging — never invented, only what was actually read
+
+  receivedAt DateTime @default(now()) // when the bot actually recorded this (i.e. when it was tagged credited)
+  createdAt  DateTime @default(now())
+
+  // A screenshot tagged "credited" twice (re-discussed, re-replied-to,
+  // etc.) must not double-record — this is the hard backstop beyond
+  // whatsapp-service's own in-memory pending-cache bookkeeping, which
+  // doesn't survive a restart. Nullable screenshotMessageId is fine here:
+  // Postgres treats each NULL as distinct, so this constraint only ever
+  // actually de-dupes entries that DO carry a real message ID (the normal
+  // case) without blocking a rare fallback-path insert that has none.
+  @@unique([chatId, screenshotMessageId])
+  @@index([chatId, depositDateLagos])
+  @@index([airline, depositDateLagos])
+  @@map("airline_deposits")
+}

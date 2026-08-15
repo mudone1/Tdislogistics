@@ -205,3 +205,81 @@ export async function getBalanceUpdateStatus(triggeredAt: string): Promise<Balan
   }
   return (await res.json()) as BalanceUpdateStatus;
 }
+
+// --- Airline deposit tracking (manual-testing phase — see depositTracking.ts) ---
+
+export interface PaymentReceiptExtraction {
+  isPaymentReceipt: boolean;
+  readable: boolean;
+  amount: number | null;
+  paymentDate: string | null;
+  paymentTime: string | null;
+  referenceNumber: string | null;
+  narration: string | null;
+  bankChannel: string | null;
+}
+
+// Detection-only, no DB write — see /api/assistant/deposits/screenshot.
+// Same FormData/Blob pattern as sendPassportImage above.
+export async function checkPaymentScreenshot(buffer: Buffer, mimeType: string): Promise<PaymentReceiptExtraction> {
+  const form = new FormData();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- see sendPassportImage above
+  form.append("file", new Blob([buffer as any], { type: mimeType }), "receipt.jpg");
+
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/deposits/screenshot`, { method: "POST", body: form });
+  if (!res.ok) {
+    throw new Error(`Deposit screenshot API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as PaymentReceiptExtraction;
+}
+
+export interface DepositAirlineMenuOption {
+  num: number;
+  airline: string;
+  label: string;
+}
+
+export type TagDepositResponse =
+  | { status: "ignored" }
+  | { status: "unreadable"; message: string }
+  | { status: "needs_airline"; menu: DepositAirlineMenuOption[] }
+  | { status: "recorded"; airline: string; amount: number }
+  | { status: "duplicate"; airline: string };
+
+// Server holds no memory of pending payments — the whole extraction is
+// sent back on every call (whatsapp-service is the one holding the
+// pending-payment cache, keyed by WhatsApp message ID). See
+// /api/assistant/deposits/tag.
+export async function tagDeposit(
+  chatId: string,
+  screenshotMessageId: string | null,
+  decision: "CREDITED" | "NOT_CREDITED",
+  extraction: PaymentReceiptExtraction,
+  airlineOverride?: string
+): Promise<TagDepositResponse> {
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/deposits/tag`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chatId, screenshotMessageId, decision, extraction, airlineOverride }),
+  });
+  if (!res.ok) {
+    throw new Error(`Deposit tag API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as TagDepositResponse;
+}
+
+export interface DepositReportResponse {
+  date: string;
+  count: number;
+  report: string;
+}
+
+export async function getDepositReport(chatId: string, date?: string): Promise<DepositReportResponse> {
+  const params = new URLSearchParams({ chatId });
+  if (date) params.set("date", date);
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/deposits/report?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Deposit report API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as DepositReportResponse;
+}
