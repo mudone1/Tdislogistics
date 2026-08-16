@@ -1,4 +1,4 @@
-import { groqVisionJsonCompletion } from "../ai/groqClient";
+import { museVisionJsonCompletion } from "../ai/museClient";
 
 export interface PaymentReceiptParseResult {
   isPaymentReceipt: boolean;
@@ -89,7 +89,7 @@ export async function parsePaymentReceiptImage(buffer: Buffer, mimeType: string)
   // vision-API failure must propagate (not fail closed into "not a
   // receipt"), so a real service outage is diagnosable rather than
   // indistinguishable from "this photo genuinely isn't a receipt".
-  const raw = await groqVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
+  const raw = await museVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
 
   let parsed: VisionResult;
   try {

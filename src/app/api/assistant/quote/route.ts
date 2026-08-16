@@ -28,18 +28,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ reply: 'Send me a route and a date, e.g. "Enugu ABV-LOS today".' });
   }
 
-  // LLM-backed conversational path — used whenever GROQ_API_KEY is
-  // configured and the caller identifies its session. Falls through to the
-  // original deterministic parser below otherwise, so nothing breaks for
-  // callers that predate this or when the key isn't set. RESTORED
-  // (2026-08-10): reverted from OPENAI_API_KEY back to GROQ_API_KEY — the
-  // OpenAI account's $5 credit ran out, and EVERY request was silently
-  // falling into the catch block below, permanently losing Book-on-Hold
-  // for every airline (the legacy parser this falls back to can only ever
-  // run a plain search). Groq's free tier has its own known caveat (a
-  // per-model daily token cap — see groqClient.ts), but it resets every
-  // day automatically rather than requiring a manual top-up.
-  if (process.env.GROQ_API_KEY && body.sessionKey) {
+  // LLM-backed conversational path — used whenever MUSE_API_KEY or
+  // GROQ_API_KEY is configured (museClient.ts tries Muse first, falls back
+  // to Groq — see that file's trial-period-fallback comment) and the
+  // caller identifies its session. Falls through to the original
+  // deterministic parser below otherwise, so nothing breaks for callers
+  // that predate this or when neither key is set. CHANGED (2026-08-16):
+  // Muse (Meta's Model API) is now the primary provider, with Groq kept as
+  // an automatic fallback until Muse is confirmed reliable in production
+  // — so this gate only needs at least one of the two configured, not
+  // specifically Muse.
+  if ((process.env.MUSE_API_KEY || process.env.GROQ_API_KEY) && body.sessionKey) {
     try {
       const result = await handleAssistantMessage({
         sessionKey: body.sessionKey,
@@ -60,7 +59,7 @@ export async function POST(req: Request) {
       // silently. Surface the real failure instead, same "never silently
       // substitute wrong behavior for a real error" policy already applied
       // everywhere else in this codebase. The fallback below still exists
-      // for its original purpose — GROQ_API_KEY not configured, or no
+      // for its original purpose — MUSE_API_KEY not configured, or no
       // sessionKey — genuine config gaps, not mid-request exceptions.
       console.error("[assistant] orchestrator failed:", err);
       const reason = err instanceof Error ? err.message : String(err);

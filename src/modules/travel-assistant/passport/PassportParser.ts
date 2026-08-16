@@ -1,4 +1,4 @@
-import { groqVisionJsonCompletion } from "../ai/groqClient";
+import { museVisionJsonCompletion } from "../ai/museClient";
 
 export interface IdDocumentParseResult {
   isIdDocument: boolean;
@@ -89,7 +89,7 @@ export async function parseIdDocumentImage(buffer: Buffer, mimeType: string): Pr
   const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
 
   // CORRECTED (2026-08-15, live): this used to swallow a genuine
-  // groqVisionJsonCompletion failure (Groq rate-limited/unreachable, not a
+  // museVisionJsonCompletion failure (Groq rate-limited/unreachable, not a
   // judgment about the photo at all) into the same "fail closed to
   // isIdDocument:false" path a malformed-JSON response gets below —
   // confirmed live: a WhatsApp ID upload got NO reply at all, because
@@ -101,7 +101,7 @@ export async function parseIdDocumentImage(buffer: Buffer, mimeType: string): Pr
   // now" instead of silence. Only a response Groq actually returned but
   // couldn't be parsed as JSON (below) still fails closed silently — that
   // one genuinely says nothing about whether the photo was an ID.
-  const raw = await groqVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
+  const raw = await museVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
 
   let parsed: VisionResult;
   try {

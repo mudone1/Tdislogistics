@@ -1,5 +1,16 @@
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
+// KEPT AS FALLBACK (2026-08-16): the primary path moved to Meta's Model
+// API (see museClient.ts, which now wraps this file) while that migration
+// gets proven out in production. Per product direction: don't remove Groq
+// yet — if Muse has a rough day (auth hiccup, an outage, a surprise quota
+// on a brand-new account), every image-parsing and conversational path in
+// this app should still work by quietly falling back here, rather than
+// betting the whole app on an integration that's still being validated.
+// This file is intentionally no longer imported directly by any consumer
+// — museClient.ts is the only caller now. Once Muse is confirmed solid,
+// this whole file (and the fallback branch in museClient.ts) can come out.
+//
 // RESTORED (2026-08-10): this file existed before, was deleted in
 // 9d85d9e "Switch AI travel assistant from Groq to OpenAI (gpt-4o-mini)",
 // and is now back because the OpenAI account's $5 credit ran out —

@@ -1,4 +1,4 @@
-import { groqJsonCompletion, type GroqMessage } from "./groqClient";
+import { museJsonCompletion, type MuseMessage } from "./museClient";
 import { SYSTEM_PROMPT } from "./systemPrompt";
 import { STAFF_KNOWLEDGE } from "./staffProfiles";
 import { ChatMemoryRepository } from "../storage/ChatMemoryRepository";
@@ -946,12 +946,12 @@ async function runIntentDetection(
   slots: ConversationSlots,
   priorMessages: { role: string; text: string }[]
 ): Promise<AssistantTurn> {
-  const history: GroqMessage[] = priorMessages.map((m) => ({
+  const history: MuseMessage[] = priorMessages.map((m) => ({
     role: m.role === "USER" ? "user" : "assistant",
     content: m.text,
   }));
 
-  const messages: GroqMessage[] = [
+  const messages: MuseMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "system", content: STAFF_KNOWLEDGE },
     {
@@ -964,7 +964,7 @@ async function runIntentDetection(
     { role: "user", content: message },
   ];
 
-  const raw = await groqJsonCompletion(messages);
+  const raw = await museJsonCompletion(messages);
   const parsed = JSON.parse(raw) as Partial<AssistantTurn>;
 
   return {

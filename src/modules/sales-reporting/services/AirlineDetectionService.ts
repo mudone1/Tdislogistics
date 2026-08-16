@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { groqVisionJsonCompletion } from "../../travel-assistant/ai/groqClient";
+import { museVisionJsonCompletion } from "../../travel-assistant/ai/museClient";
 import { AIRLINE_RULE_KEYS, type AirlineRuleKey } from "../core/types";
 
 export type DetectionMethod = "MANUAL" | "CONTENT" | "METADATA" | "VISION" | "UNKNOWN";
@@ -97,7 +97,7 @@ async function detectByVision(buffer: Buffer, mimeType: string): Promise<Airline
 
   let raw: string;
   try {
-    raw = await groqVisionJsonCompletion(VISION_DETECTION_PROMPT, [dataUrl]);
+    raw = await museVisionJsonCompletion(VISION_DETECTION_PROMPT, [dataUrl]);
   } catch {
     return null; // vision unavailable/rate-limited — fall through to manual selection
   }

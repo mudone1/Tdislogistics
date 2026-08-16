@@ -1,4 +1,4 @@
-import { groqVisionJsonCompletion } from "../ai/groqClient";
+import { museVisionJsonCompletion } from "../ai/museClient";
 
 export interface TicketParseResult {
   isTicket: boolean;
@@ -111,7 +111,7 @@ export async function parseTicketImage(buffer: Buffer, mimeType: string): Promis
   const dataUrl = `data:${mimeType};base64,${buffer.toString("base64")}`;
 
   // CORRECTED (2026-08-15, live): same fix as PassportParser.ts's identical
-  // pattern — swallowing a genuine groqVisionJsonCompletion failure (Groq
+  // pattern — swallowing a genuine museVisionJsonCompletion failure (Groq
   // rate-limited/unreachable) into the same silent "not a ticket" path a
   // malformed-JSON response gets below made a real service outage
   // indistinguishable from "this just isn't a ticket," and DocumentParser.ts
@@ -119,7 +119,7 @@ export async function parseTicketImage(buffer: Buffer, mimeType: string): Promis
   // outage produced a WhatsApp ID/ticket upload with NO reply at all. A
   // genuine API/network failure now propagates instead, so the caller's own
   // catch block (imageHandler.ts) sends an honest error instead of silence.
-  const raw = await groqVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
+  const raw = await museVisionJsonCompletion(EXTRACTION_PROMPT, [dataUrl]);
 
   let parsed: VisionResult;
   try {
