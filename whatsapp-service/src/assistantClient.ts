@@ -217,6 +217,10 @@ export interface PaymentReceiptExtraction {
   referenceNumber: string | null;
   narration: string | null;
   bankChannel: string | null;
+  // Whether the narration alone was enough to identify the airline
+  // server-side (see depositAirlineAliases.ts). Drives whether
+  // handleDepositScreenshot needs to ask a follow-up question at all.
+  airlineMatched: boolean;
 }
 
 // Detection-only, no DB write — see /api/assistant/deposits/screenshot.

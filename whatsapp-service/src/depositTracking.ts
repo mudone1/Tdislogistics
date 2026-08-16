@@ -46,9 +46,18 @@ export function isPaymentTagReply(text: string): "CREDITED" | "NOT_CREDITED" | n
 /**
  * A group image that might be a payment receipt — runs the detection
  * vision call and, if confirmed, caches it as pending (no DB write yet).
- * Returns an acknowledgement to send, or null to stay silent (not a
- * receipt at all — same "don't comment on unrelated photos" principle
- * imageHandler.ts already applies to IDs/tickets).
+ * Returns an acknowledgement to send, or null to stay silent.
+ *
+ * Silent whenever possible — same "don't comment on unrelated photos"
+ * principle imageHandler.ts already applies to IDs/tickets. The screenshot
+ * is cached as pending either way, so a later "credited"/"not credited"
+ * reply still resolves it even when nothing was said here.
+ *
+ * The two cases where it DOES speak up:
+ * - the amount isn't readable (nothing useful could be recorded anyway,
+ *   so the sender needs to know)
+ * - the airline can't be told apart from the narration alone (a real
+ *   question that needs an answer before this can be recorded)
  */
 export async function handleDepositScreenshot(chatId: string, messageId: string, buffer: Buffer, mimeType: string): Promise<string | null> {
   const extraction = await checkPaymentScreenshot(buffer, mimeType);
@@ -59,7 +68,12 @@ export async function handleDepositScreenshot(chatId: string, messageId: string,
   if (!extraction.readable) {
     return "📥 Got a payment screenshot, but I couldn't clearly read the amount — could you send a clearer one? I'll still hold this one if you reply \"credited\" to it, but the amount may be missing.";
   }
-  return '📥 Payment screenshot received. Reply "credited" (or reply directly to this message) once it\'s confirmed credited, or "not credited" to ignore it.';
+
+  if (!extraction.airlineMatched) {
+    return '📥 Payment screenshot received. Reply "credited" (or reply directly to this message) once it\'s confirmed credited, or "not credited" to ignore it.';
+  }
+
+  return null; // airline is clear from the narration — nothing to ask, stay silent
 }
 
 async function resolveAndRecord(chatId: string, screenshot: PendingScreenshot, airlineOverride: string | undefined, sendReply: (text: string) => Promise<void>): Promise<void> {

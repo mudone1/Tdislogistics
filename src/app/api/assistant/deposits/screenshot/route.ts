@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { parsePaymentReceiptImage } from "@/modules/travel-assistant/deposits/PaymentReceiptParser";
+import { matchAirlineFromNarration } from "@/modules/travel-assistant/deposits/depositAirlineAliases";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -24,7 +25,12 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const mimeType = file.type || "image/jpeg";
     const result = await parsePaymentReceiptImage(buffer, mimeType);
-    return NextResponse.json(result);
+    // Whether the narration alone is enough to tell which airline this is
+    // for — the whatsapp-service uses this to decide whether it needs to
+    // say anything at all (see depositTracking.ts: it should only speak up
+    // when the airline is NOT identifiable from the narration).
+    const airlineMatched = result.isPaymentReceipt ? matchAirlineFromNarration(result.narration) !== null : false;
+    return NextResponse.json({ ...result, airlineMatched });
   } catch (err) {
     console.error("[assistant/deposits/screenshot] failed:", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
