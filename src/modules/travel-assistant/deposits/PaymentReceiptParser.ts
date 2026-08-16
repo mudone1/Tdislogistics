@@ -9,6 +9,12 @@ export interface PaymentReceiptParseResult {
   referenceNumber: string | null;
   narration: string | null;
   bankChannel: string | null;
+  // The receiving-account name/label, e.g. "Unitednigeria/logistics Tdis",
+  // "Paystack Checkout", "Arik Air Travels". Often the ONLY field that
+  // actually names the airline (narration is frequently just "TDIS
+  // DEPOSIT" or "Top up") — see matchAirlineFromReceipt, which checks
+  // this alongside narration.
+  beneficiary: string | null;
 }
 
 // One combined classify+extract vision call, same cost/latency reasoning
@@ -28,10 +34,11 @@ If it IS a payment receipt, extract using the receipt's own LABELED FIELDS — r
 - "paymentDate": the transaction date as "YYYY-MM-DD" if shown and legible (e.g. "13-08-2026" or "August 14, 2026" -> "2026-08-14"), else null.
 - "paymentTime": the transaction time exactly as printed (e.g. "06:21:55 AM"), else null.
 - "referenceNumber": the transaction reference, session ID, or reference ID if shown (e.g. "EXTTRF|1786771315484781" or a Session ID), else null.
-- "narration": the narration/description/remark field exactly as printed (e.g. "TRF TO FLYFORVALUE AVIATION LTD-COLLECTION ACCOUNT//TDIS DEPOSIT", "Top up", "TDIS"), else null. This is usually the most important field for figuring out which airline the payment is for, so copy it in full and exactly as shown, do not summarize or shorten it.
-- "bankChannel": the bank or payment channel name shown on the receipt (e.g. "Zenith Bank", "FirstBank", "PAYSTACK TITAN", "GTBank"), else null.
+- "narration": the narration/description/remark field exactly as printed (e.g. "TRF TO FLYFORVALUE AVIATION LTD-COLLECTION ACCOUNT//TDIS DEPOSIT", "Top up", "TDIS"), else null. Copy it in full and exactly as shown, do not summarize or shorten it.
+- "bankChannel": the bank or payment channel name shown on the receipt (e.g. "Zenith Bank", "FirstBank", "PAYSTACK TITAN", "GTBank", "PAYSTACK MFB"), else null.
+- "beneficiary": the beneficiary/credit-account/recipient NAME field exactly as printed (e.g. "Unitednigeria/logistics Tdis", "Paystack Checkout", "ARIK AIR TRAVEL"), else null. This is often the most reliable field for figuring out which airline the payment is for — copy it in full and exactly as shown, do not summarize or shorten it.
 
-Never invent or guess a value — if a field cannot be read, use null for it. Return ONLY a JSON object, e.g.: {"isPaymentReceipt": true, "readable": true, "amount": 2000000, "paymentDate": "2026-08-14", "paymentTime": "22:09:05", "referenceNumber": "0000162608142209060025423145I5", "narration": "Top up", "bankChannel": "FirstBank"}`;
+Never invent or guess a value — if a field cannot be read, use null for it. Return ONLY a JSON object, e.g.: {"isPaymentReceipt": true, "readable": true, "amount": 2000000, "paymentDate": "2026-08-14", "paymentTime": "22:09:05", "referenceNumber": "0000162608142209060025423145I5", "narration": "Top up", "bankChannel": "FirstBank", "beneficiary": "Paystack Checkout"}`;
 
 interface VisionResult {
   isPaymentReceipt?: unknown;
@@ -42,6 +49,7 @@ interface VisionResult {
   referenceNumber?: unknown;
   narration?: unknown;
   bankChannel?: unknown;
+  beneficiary?: unknown;
 }
 
 function str(v: unknown): string | null {
@@ -71,6 +79,7 @@ const NOT_A_RECEIPT: PaymentReceiptParseResult = {
   referenceNumber: null,
   narration: null,
   bankChannel: null,
+  beneficiary: null,
 };
 
 export async function parsePaymentReceiptImage(buffer: Buffer, mimeType: string): Promise<PaymentReceiptParseResult> {
@@ -108,5 +117,6 @@ export async function parsePaymentReceiptImage(buffer: Buffer, mimeType: string)
     referenceNumber: str(parsed.referenceNumber),
     narration: str(parsed.narration),
     bankChannel: str(parsed.bankChannel),
+    beneficiary: str(parsed.beneficiary),
   };
 }

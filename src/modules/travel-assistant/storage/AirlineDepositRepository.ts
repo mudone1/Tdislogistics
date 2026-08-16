@@ -9,6 +9,7 @@ export interface RecordDepositInput {
   amount: number;
   screenshotMessageId: string | null;
   extraction: PaymentReceiptParseResult;
+  isPaystack: boolean;
 }
 
 export type RecordDepositOutcome = { status: "recorded" } | { status: "duplicate" };
@@ -41,6 +42,7 @@ export const AirlineDepositRepository = {
           referenceNumber: input.extraction.referenceNumber,
           narration: input.extraction.narration,
           bankChannel: input.extraction.bankChannel,
+          isPaystack: input.isPaystack,
           screenshotMessageId: input.screenshotMessageId,
           rawExtraction: input.extraction as unknown as Prisma.InputJsonValue,
         },

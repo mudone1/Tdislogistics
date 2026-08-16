@@ -22,6 +22,11 @@ const REPORT_AIRLINE_ORDER: { airline: AirlineKey; label: string }[] = [
   { airline: "AIRPEACE", label: "AIR PEACE" },
   { airline: "XEJET", label: "XEJET" },
   { airline: "RANO", label: "RANO" },
+  // Not in the spec's own example (only 8 airlines existed at the time),
+  // appended so a credited ARIK/NG Eagle deposit doesn't silently vanish
+  // from the report just because it's missing from this hardcoded order.
+  { airline: "ARIK", label: "ARIK" },
+  { airline: "NGEAGLE", label: "NG EAGLE" },
 ];
 
 function formatNaira(amount: number): string {

@@ -217,10 +217,7 @@ export interface PaymentReceiptExtraction {
   referenceNumber: string | null;
   narration: string | null;
   bankChannel: string | null;
-  // Whether the narration alone was enough to identify the airline
-  // server-side (see depositAirlineAliases.ts). Drives whether
-  // handleDepositScreenshot needs to ask a follow-up question at all.
-  airlineMatched: boolean;
+  beneficiary: string | null;
 }
 
 // Detection-only, no DB write — see /api/assistant/deposits/screenshot.
@@ -246,8 +243,8 @@ export interface DepositAirlineMenuOption {
 export type TagDepositResponse =
   | { status: "ignored" }
   | { status: "unreadable"; message: string }
-  | { status: "needs_airline"; menu: DepositAirlineMenuOption[] }
-  | { status: "recorded"; airline: string; amount: number }
+  | { status: "needs_airline"; menu: DepositAirlineMenuOption[]; isPaystack: boolean }
+  | { status: "recorded"; airline: string; amount: number; isPaystack: boolean }
   | { status: "duplicate"; airline: string };
 
 // Server holds no memory of pending payments — the whole extraction is
