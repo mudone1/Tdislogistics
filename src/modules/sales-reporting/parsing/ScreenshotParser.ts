@@ -1,4 +1,4 @@
-import { groqVisionJsonCompletion } from "../../travel-assistant/ai/groqClient";
+import { museVisionJsonCompletion } from "../../travel-assistant/ai/museClient";
 import { normalizeKind, toNumber, extractDate } from "./ExcelParser";
 import type { DrCr, RawTransactionRow } from "../core/types";
 
@@ -56,7 +56,7 @@ export async function parseScreenshotBuffers(
 ): Promise<ParsedScreenshotResult> {
   const dataUrls = images.map((img) => `data:${img.mimeType};base64,${img.buffer.toString("base64")}`);
 
-  const raw = await groqVisionJsonCompletion(EXTRACTION_PROMPT, dataUrls);
+  const raw = await museVisionJsonCompletion(EXTRACTION_PROMPT, dataUrls);
 
   let parsed: { rows?: VisionRow[] };
   try {

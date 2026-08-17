@@ -890,6 +890,12 @@ model AirlineDeposit {
   referenceNumber     String?
   narration           String? // raw description/narration text — also what airline-matching runs against
   bankChannel         String? // e.g. "Zenith Bank", "PAYSTACK TITAN", "FirstBank"
+  // True when the receipt itself paid into Paystack (beneficiary/bank
+  // channel contains "paystack") rather than directly into an airline's
+  // own account — the airline for these is always asked about
+  // separately, never inferred from the receipt (see depositAirlineAliases.ts
+  // isPaystackReceipt / the /api/assistant/deposits/tag route).
+  isPaystack          Boolean @default(false)
   screenshotMessageId String? // WhatsApp message ID of the original screenshot — de-dup key, see @@unique below
   rawExtraction       Json? // full vision-extraction result, for audit/debugging — never invented, only what was actually read
 

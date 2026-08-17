@@ -46,26 +46,32 @@ export function isPaymentTagReply(text: string): "CREDITED" | "NOT_CREDITED" | n
 /**
  * A group image that might be a payment receipt — runs the detection
  * vision call and, if confirmed, caches it as pending (no DB write yet).
- * Returns an acknowledgement to send, or null to stay silent (not a
- * receipt at all — same "don't comment on unrelated photos" principle
- * imageHandler.ts already applies to IDs/tickets).
+ * Always returns null: per the "SILENT PAYMENT PROCESSING RULE" spec,
+ * the bot must never speak at screenshot-receipt time, not even to
+ * acknowledge it or flag an unreadable amount — analysis happens now,
+ * but every visible response (or lack of one) is decided only once a
+ * "credited"/"not credited" tag arrives, see resolveAndRecord below.
  */
 export async function handleDepositScreenshot(chatId: string, messageId: string, buffer: Buffer, mimeType: string): Promise<string | null> {
   const extraction = await checkPaymentScreenshot(buffer, mimeType);
-  if (!extraction.isPaymentReceipt) return null;
+  if (!extraction.isPaymentReceipt) return null; // not a payment screenshot at all — ignore completely, not even cached
 
   recordPendingScreenshot(chatId, messageId, extraction);
-
-  if (!extraction.readable) {
-    return "📥 Got a payment screenshot, but I couldn't clearly read the amount — could you send a clearer one? I'll still hold this one if you reply \"credited\" to it, but the amount may be missing.";
-  }
-  return '📥 Payment screenshot received. Reply "credited" (or reply directly to this message) once it\'s confirmed credited, or "not credited" to ignore it.';
+  return null;
 }
 
+// Default = silent. The only messages this ever sends are the two the
+// spec explicitly requires: the fixed airline-selection question (worded
+// differently for a Paystack payment vs an ambiguous direct-airline
+// payment), and the literal word "Copy" once an airline-direct payment is
+// actually recorded. Everything else — duplicates, a Paystack payment's
+// airline finally being resolved, internal failures aside — stays quiet.
 async function resolveAndRecord(chatId: string, screenshot: PendingScreenshot, airlineOverride: string | undefined, sendReply: (text: string) => Promise<void>): Promise<void> {
   const result = await tagDeposit(chatId, screenshot.messageId, "CREDITED", screenshot.extraction, airlineOverride);
 
   if (result.status === "unreadable") {
+    // The one genuinely-required clarification: nothing can be recorded
+    // at all without an amount, so the sender needs to know.
     clearPendingScreenshot(chatId, screenshot.messageId);
     await sendReply(result.message);
     return;
@@ -74,9 +80,8 @@ async function resolveAndRecord(chatId: string, screenshot: PendingScreenshot, a
   if (result.status === "needs_airline") {
     setPendingAirlineSelection(chatId, screenshot, result.menu);
     const menuText = result.menu.map((o) => `${o.num}. ${o.label}`).join("\n");
-    await sendReply(
-      `Which airline is this payment for? Reply with @TDISbot followed by the number:\n\n${menuText}\n\nExample: If this payment is for ValueJet, reply with @TDISbot 1.`
-    );
+    const intro = result.isPaystack ? "Which airline is this credit for?" : "Which airline is this payment for?";
+    await sendReply(`${intro} Reply with @TDISbot followed by the number:\n\n${menuText}\n\nExample: If this payment is for ValueJet, reply with @TDISbot 1.`);
     return;
   }
 
@@ -84,21 +89,29 @@ async function resolveAndRecord(chatId: string, screenshot: PendingScreenshot, a
   clearPendingAirlineSelection(chatId);
 
   if (result.status === "duplicate") {
-    await sendReply(`That payment is already recorded for ${result.airline} — not adding it again.`);
+    // Already recorded — per spec, do not create another record AND do
+    // not send another unnecessary response. Silent.
     return;
   }
 
   if (result.status === "ignored") {
     // Shouldn't happen — this path always sends decision "CREDITED" — but
     // the type includes it (tagDeposit's response covers both decisions),
-    // so guard it rather than assuming "recorded" below.
+    // so guard it rather than assuming "recorded" below. A real failure,
+    // not a normal silent-success path, so this one does speak up.
     await sendReply("Something went wrong recording that payment — please try again.");
     return;
   }
 
   // status === "recorded"
-  const amountText = result.amount.toLocaleString("en-NG");
-  await sendReply(`✅ Recorded: ${result.airline} — ₦${amountText}`);
+  if (result.isPaystack) {
+    // The airline was just attached to an already-silently-recorded
+    // Paystack payment — per spec, don't repeat the amount/details, and
+    // there's no "Copy" for this path either (that's reserved for a
+    // direct airline payment, per the spec's own worked example).
+    return;
+  }
+  await sendReply("Copy");
 }
 
 /** Called BEFORE the group mention gate — see module doc comment above. */

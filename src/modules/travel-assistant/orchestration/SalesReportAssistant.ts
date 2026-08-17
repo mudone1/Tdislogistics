@@ -1,4 +1,4 @@
-import { groqJsonCompletion, type GroqMessage } from "../ai/groqClient";
+import { museJsonCompletion, type MuseMessage } from "../ai/museClient";
 import { AirlineAIService } from "../../airline-connectors/services/AirlineAIService";
 import * as AnalyticsService from "../../sales-reporting/services/AnalyticsService";
 import { AIRLINE_RULE_KEYS, type AirlineRuleKey } from "../../sales-reporting/core/types";
@@ -66,12 +66,12 @@ Intent guide:
 Only fill "dateFrom"/"dateTo" when the user gave an explicit date or range. Prefer "timeExpression" for relative phrases like "today"/"this week" — the caller resolves those to actual dates.`;
 
 export async function extractIntent(message: string, sessionContext?: SessionContext): Promise<SalesReportIntentResult> {
-  const messages: GroqMessage[] = [
+  const messages: MuseMessage[] = [
     { role: "system", content: INTENT_SYSTEM_PROMPT },
     { role: "user", content: message },
   ];
 
-  const raw = await groqJsonCompletion(messages);
+  const raw = await museJsonCompletion(messages);
   const parsed = JSON.parse(raw) as Partial<SalesReportIntentResult> & { parameters?: Partial<SalesReportIntentParameters> };
 
   const rawAirline = parsed.parameters?.airline;
