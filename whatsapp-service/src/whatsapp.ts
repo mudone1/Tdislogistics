@@ -10,6 +10,7 @@ import { handleIncomingMessage, type IncomingMessage } from "./messageHandler";
 import { handleIncomingImage, isExtractCommand } from "./imageHandler";
 import { getLastImage } from "./lastImageCache";
 import { isPaymentTagReply, handlePaymentTagReply } from "./depositTracking";
+import { isBalanceUpdateMessage, handleBalanceUpdateMessage } from "./balanceUpdateTracking";
 
 // Persisted WhatsApp session credentials — see README for why this must
 // survive restarts. Configurable so a Railway (or similar) deployment can
@@ -162,6 +163,18 @@ export async function connectWhatsApp(): Promise<void> {
         await handlePaymentTagReply(chatId, quotedMessageId, depositDecision, (replyText) => sender.sendText(chatId, replyText)).catch(
           (err) => console.error(`[whatsapp] deposit tag reply failed for chat ${chatId}:`, err)
         );
+        continue;
+      }
+
+      // Nightly "Balance Update" post — same bypass-the-mention-gate
+      // reasoning as the deposit tag check above: a human dropping the
+      // team's overnight balances into the group shouldn't need to
+      // @-mention the bot for it to notice. Always silent (see
+      // balanceUpdateTracking.ts) — a failure here is only ever logged,
+      // never surfaced as a reply, since this is passive background
+      // accounting nobody's waiting on a response to.
+      if (isBalanceUpdateMessage(text)) {
+        await handleBalanceUpdateMessage(chatId, text).catch((err) => console.error(`[whatsapp] balance update forward failed for chat ${chatId}:`, err));
         continue;
       }
 

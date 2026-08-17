@@ -60,6 +60,48 @@ enum SyncTrigger {
   SCHEDULED
 }
 
+// Where a given day's opening-balance figure came from — see
+// AirlineOpeningBalanceRepository.ts. MANUAL is a human-posted nightly
+// "Balance Update" WhatsApp message (parsed by balanceUpdateParser.ts);
+// SYNC is derived at read-time from AirlineBalanceHistory (the existing
+// automated portal-sync system) for whichever airlines that already
+// covers — so SYNC rows are never actually written to this table, only
+// ever reported as the source of a value computed on the fly. Kept as an
+// enum anyway (not just a boolean) so a MANUAL entry always makes its
+// provenance explicit in rawText/recordedAt for audit, the same
+// "never invented, only what was actually read" principle as
+// PaymentReceiptParseResult.
+enum OpeningBalanceSource {
+  MANUAL
+  SYNC
+}
+
+// One row per (chat, airline, day) — the opening balance to show in that
+// day's credit-update report. Only ever written for MANUAL entries (a
+// human posted a "Balance Update" message overnight); SYNC-sourced values
+// are computed at report-generation time straight from
+// AirlineBalanceHistory and never duplicated in here — see
+// AirlineOpeningBalanceRepository.getOpeningBalances.
+model AirlineOpeningBalance {
+  id        String               @id @default(cuid())
+  chatId    String
+  airline   AirlineKey
+  balance   Decimal              @db.Decimal(14, 2)
+  dateLagos String // "YYYY-MM-DD" — which day's report this OB is for, same boundary as AirlineDeposit.depositDateLagos
+  source    OpeningBalanceSource @default(MANUAL)
+  rawText   String? // the raw "Balance Update" message text this was parsed from — audit trail, same reasoning as AirlineDeposit.rawExtraction
+
+  recordedAt DateTime @default(now())
+
+  // A same-day repost overwrites, not duplicates — matches the real
+  // workflow (a corrected Balance Update message reposted before the
+  // credit-update report is pulled should replace, not stack with, the
+  // earlier one for that day).
+  @@unique([chatId, airline, dateLagos])
+  @@index([chatId, dateLagos])
+  @@map("airline_opening_balances")
+}
+
 enum ErrorCategory {
   AUTH
   NETWORK

@@ -284,3 +284,24 @@ export async function getDepositReport(chatId: string, date?: string): Promise<D
   }
   return (await res.json()) as DepositReportResponse;
 }
+
+export interface OpeningBalanceResponse {
+  recorded: number;
+  airlines: string[];
+}
+
+// Fire-and-forget from balanceUpdateTracking.ts whenever a message looks
+// like the nightly "Balance Update" post — the real classification and
+// parsing happens server-side (see /api/assistant/deposits/opening-balance),
+// this just forwards the raw text.
+export async function reportBalanceUpdateMessage(chatId: string, text: string): Promise<OpeningBalanceResponse> {
+  const res = await fetch(`${MAIN_APP_URL}/api/assistant/deposits/opening-balance`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chatId, text }),
+  });
+  if (!res.ok) {
+    throw new Error(`Opening balance API returned HTTP ${res.status}`);
+  }
+  return (await res.json()) as OpeningBalanceResponse;
+}

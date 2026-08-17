@@ -8,11 +8,8 @@ export interface DepositReportRow {
 
 // Report-specific display names/order — deliberately separate from
 // depositAirlineAliases.ts's DEPOSIT_AIRLINE_MENU (which is Title Case,
-// numbered-selection order per spec section 2). This is UPPERCASE and in
-// the order the report's own example (spec section 6) uses, which differs
-// from the selection-menu order — both are literal per their own section
-// of the spec, so this isn't "fixing" an inconsistency, just following
-// each example where it actually appears.
+// numbered-selection order). This is UPPERCASE and in the order the
+// report's own real examples use.
 const REPORT_AIRLINE_ORDER: { airline: AirlineKey; label: string }[] = [
   { airline: "UNITED", label: "UNITED" },
   { airline: "VALUEJET", label: "VALUE JET" },
@@ -22,9 +19,10 @@ const REPORT_AIRLINE_ORDER: { airline: AirlineKey; label: string }[] = [
   { airline: "AIRPEACE", label: "AIR PEACE" },
   { airline: "XEJET", label: "XEJET" },
   { airline: "RANO", label: "RANO" },
-  // Not in the spec's own example (only 8 airlines existed at the time),
-  // appended so a credited ARIK/NG Eagle deposit doesn't silently vanish
-  // from the report just because it's missing from this hardcoded order.
+  // Not in the earliest examples this format was built from (only 8
+  // airlines existed at the time) — appended so a credited ARIK/NG Eagle
+  // deposit doesn't silently vanish from the report just because it's
+  // missing from this hardcoded order.
   { airline: "ARIK", label: "ARIK" },
   { airline: "NGEAGLE", label: "NG EAGLE" },
 ];
@@ -34,32 +32,46 @@ function formatNaira(amount: number): string {
 }
 
 /**
- * Builds the exact report text format from spec section 6, minus the
- * Opening Balance (OB) lines — explicitly left out for this testing phase
- * per product direction; the OB line for an airline reappears automatically
- * once that's wired back in, since this only ever renders what it's given.
+ * Builds the "credit update" report text, one line per airline that had at
+ * least one credited deposit this day:
+ *
+ *   {LABEL} CREDIT :{amt1} +{amt2} +...={total}
+ *
+ * — or, when this airline's opening balance for the day is known (see
+ * openingBalances, sourced from AirlineOpeningBalanceRepository):
+ *
+ *   {LABEL}  OB :{ob} DEPOSIT :{amt1} +{amt2} +...={total}
+ *
+ * An airline with zero deposits this day is omitted entirely, regardless
+ * of whether its OB is known — nothing to report if nothing was credited.
  * Every total here is computed from the actual rows, never copied/assumed.
  */
-export function formatDepositReport(dateIso: string, rows: DepositReportRow[]): string {
+export function formatDepositReport(dateIso: string, rows: DepositReportRow[], openingBalances: Map<AirlineKey, number> = new Map()): string {
   const byAirline = new Map<AirlineKey, number[]>();
   for (const row of rows) {
     if (!byAirline.has(row.airline)) byAirline.set(row.airline, []);
     byAirline.get(row.airline)!.push(row.amount);
   }
 
-  const header = `${toDisplayDate(dateIso)} AIRLINES DEPOSIT REPORT`;
+  const header = `${toDisplayDate(dateIso)} AIRLINES CREDIT REPORT`;
 
   const airlineTotals: number[] = [];
   const lines: string[] = [header, ""];
 
   for (const { airline, label } of REPORT_AIRLINE_ORDER) {
     const amounts = byAirline.get(airline);
-    if (!amounts || amounts.length === 0) continue; // no deposits this day — omit the airline entirely, matching "organize BY airline" (nothing to organize if there's nothing recorded)
+    if (!amounts || amounts.length === 0) continue; // no deposits this day — omit the airline entirely
 
     const total = amounts.reduce((sum, a) => sum + a, 0);
     airlineTotals.push(total);
-    lines.push(label);
-    lines.push(`DEPOSIT :${amounts.map(formatNaira).join(" +")}=${formatNaira(total)}`);
+    const depositList = amounts.map(formatNaira).join(" +");
+
+    const ob = openingBalances.get(airline);
+    if (ob !== undefined) {
+      lines.push(`${label}  OB :${formatNaira(ob)} DEPOSIT :${depositList}=${formatNaira(total)}`);
+    } else {
+      lines.push(`${label} CREDIT :${depositList}=${formatNaira(total)}`);
+    }
     lines.push("");
   }
 
@@ -68,8 +80,8 @@ export function formatDepositReport(dateIso: string, rows: DepositReportRow[]): 
   }
 
   const grandTotal = airlineTotals.reduce((sum, t) => sum + t, 0);
-  lines.push("SUM TOTAL OF ALL DEPOSIT");
-  lines.push(`${airlineTotals.map(formatNaira).join(" + ")} = ${formatNaira(grandTotal)}`);
+  lines.push("SUM TOTAL OF ALL CREDIT");
+  lines.push(`${airlineTotals.map(formatNaira).join("+ ")} =${formatNaira(grandTotal)}`);
 
   return lines.join("\n");
 }

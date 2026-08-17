@@ -46,3 +46,17 @@ export function toDisplayDate(isoDate: string): string {
   const [y, m, d] = isoDate.split("-");
   return `${d}/${m}/${y}`;
 }
+
+/**
+ * The instant midnight Lagos time began for a given "YYYY-MM-DD" Lagos
+ * calendar day, as a UTC Date — for querying a UTC-timestamped table
+ * (AirlineBalanceHistory.retrievedAt) for "the most recent sync BEFORE
+ * this day's opening balance was set". Safe to build the ISO string with
+ * a fixed "+01:00" offset directly (rather than round-tripping through
+ * Intl again) for the same reason the rest of this file doesn't do manual
+ * UTC+1 math elsewhere: Lagos has no DST, so this offset never changes —
+ * documented here once rather than assumed silently at every call site.
+ */
+export function lagosDayStartUtc(isoDate: string): Date {
+  return new Date(`${isoDate}T00:00:00+01:00`);
+}
