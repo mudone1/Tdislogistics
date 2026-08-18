@@ -3,16 +3,19 @@
 # app's existing HTTP API), so the whole image is self-contained to this
 # directory.
 #
-#   docker build -f whatsapp-service/Dockerfile -t tdis-whatsapp-service whatsapp-service
-#   docker run --env-file whatsapp-service/.env -p 4200:4200 -v whatsapp_auth:/app/auth_info tdis-whatsapp-service
+# When building from repo root (as Railway does):
+#   docker build -f whatsapp-service/Dockerfile -t tdis-whatsapp-service .
+# When building locally from whatsapp-service directory:
+#   docker build -f Dockerfile -t tdis-whatsapp-service .
+#   docker run --env-file .env -p 4200:4200 -v whatsapp_auth:/app/auth_info tdis-whatsapp-service
 
 FROM node:24-slim AS base
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+COPY whatsapp-service/package.json whatsapp-service/package-lock.json* ./
 RUN npm install
 
-COPY . .
+COPY whatsapp-service ./
 RUN npm run build
 
 EXPOSE 4200

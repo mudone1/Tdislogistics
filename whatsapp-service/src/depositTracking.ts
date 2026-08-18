@@ -1,4 +1,5 @@
 import { checkPaymentScreenshot, tagDeposit, getDepositReport } from "./assistantClient";
+import { matchAirlineFromReceipt } from "../../src/modules/travel-assistant/deposits/depositAirlineAliases";
 import {
   recordPendingScreenshot,
   getPendingScreenshot,
@@ -34,13 +35,28 @@ const CREDITED_PATTERN = /\bcredited\b/i;
 const CREDIT_UPDATE_COMMAND = /^credit\s*update$/i;
 const BARE_NUMBER = /^\d+$/;
 
-export function isPaymentTagReply(text: string): "CREDITED" | "NOT_CREDITED" | null {
+export function parsePaymentTagReply(text: string): { decision: "CREDITED" | "NOT_CREDITED"; airlineOverride?: string } | null {
   const trimmed = text.trim();
-  // Checked first — "not credited" also contains the word "credited",
-  // so the negative match must win before the bare positive pattern runs.
-  if (NOT_CREDITED_PATTERN.test(trimmed)) return "NOT_CREDITED";
-  if (CREDITED_PATTERN.test(trimmed)) return "CREDITED";
-  return null;
+  if (!trimmed) return null;
+
+  if (NOT_CREDITED_PATTERN.test(trimmed)) {
+    return { decision: "NOT_CREDITED" };
+  }
+
+  if (!CREDITED_PATTERN.test(trimmed)) {
+    return null;
+  }
+
+  const airlineOverride = matchAirlineFromReceipt(trimmed, null);
+  return {
+    decision: "CREDITED",
+    ...(airlineOverride ? { airlineOverride } : {}),
+  };
+}
+
+export function isPaymentTagReply(text: string): "CREDITED" | "NOT_CREDITED" | null {
+  const parsed = parsePaymentTagReply(text);
+  return parsed ? parsed.decision : null;
 }
 
 /**
@@ -119,6 +135,7 @@ export async function handlePaymentTagReply(
   chatId: string,
   quotedMessageId: string | null,
   decision: "CREDITED" | "NOT_CREDITED",
+  text: string,
   sendReply: (text: string) => Promise<void>
 ): Promise<void> {
   const screenshot = (quotedMessageId ? getPendingScreenshot(chatId, quotedMessageId) : null) ?? getSolePendingScreenshot(chatId);
@@ -130,7 +147,9 @@ export async function handlePaymentTagReply(
     return; // explicitly silent — "completely ignore it for the deposit record" per spec, no reply needed
   }
 
-  await resolveAndRecord(chatId, screenshot, undefined, sendReply);
+  const parsed = parsePaymentTagReply(text);
+  const airlineOverride = parsed?.airlineOverride;
+  await resolveAndRecord(chatId, screenshot, airlineOverride, sendReply);
 }
 
 /**

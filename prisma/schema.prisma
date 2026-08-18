@@ -956,3 +956,186 @@ model AirlineDeposit {
   @@index([airline, depositDateLagos])
   @@map("airline_deposits")
 }
+
+// ─── Airline Email Management System ───
+// Manages airline email requests: refunds, voids, reschedules, and open tickets.
+
+enum EmailCaseStatus {
+  DRAFT
+  AWAITING_APPROVAL
+  SENT
+  AWAITING_AIRLINE_RESPONSE
+  COMPLETED
+  ADDITIONAL_INFO_REQUESTED
+  REJECTED
+  CLOSED
+}
+
+enum EmailRequestType {
+  OPEN
+  REFUND
+  VOID
+  RESCHEDULE
+  REFUND_DISRUPTION
+  RESCHEDULE_DISRUPTION
+}
+
+// Airline master data for email recipients
+model EmailAirline {
+  id              String    @id @default(cuid())
+  code            String    @unique  // IBOM AIR, AIR PEACE, XEJET, etc.
+  name            String
+  isActive        Boolean   @default(true)
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  recipients      EmailRecipient[]
+  emailCases      EmailCase[]
+
+  @@map("email_airlines")
+}
+
+// Email recipient addresses (To, CC) for each airline
+model EmailRecipient {
+  id              String    @id @default(cuid())
+  airlineId       String
+  airline         EmailAirline @relation(fields: [airlineId], references: [id], onDelete: Cascade)
+  email           String
+  recipientType   String    // "TO" or "CC"
+  isPrimary       Boolean   @default(false)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([airlineId, email])
+  @@index([airlineId])
+  @@map("email_recipients")
+}
+
+// Email templates with placeholder variables
+model EmailTemplate {
+  id              String    @id @default(cuid())
+  name            String    @unique  // "REFUND", "VOID", "RESCHEDULE", "OPEN", etc.
+  requestType     EmailRequestType
+  subject         String    // e.g., "URGENT REQUEST TO REFUND A TICKET"
+  bodyTemplate    String    // Template with {PNR}, {PASSENGER_NAME}, {ROUTE}, etc.
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  emailCases      EmailCase[]
+
+  @@map("email_templates")
+}
+
+// Main email case tracking record
+model EmailCase {
+  id              String    @id @default(cuid())
+  caseNumber      String    @unique  // AUTO-GENERATED: CASE-2026-08-18-001
+  
+  // Ticket Information
+  airline         EmailAirline @relation(fields: [airlineId], references: [id])
+  airlineId       String
+  pnr             String
+  passengerNames  String[]  // Array of passenger names
+  requestType     EmailRequestType
+  
+  // Travel Details (for reschedule)
+  route           String?   // LOS-ABV
+  newTravelDate   DateTime?
+  departureTime   String?   // HH:MM format
+  
+  // Email Details
+  template        EmailTemplate @relation(fields: [templateId], references: [id])
+  templateId      String
+  subject         String
+  emailBody       String    // Final rendered body
+  toRecipient     String    // Primary To: address
+  ccRecipients    String[]  // Array of CC emails
+  
+  // Status Tracking
+  status          EmailCaseStatus @default(DRAFT)
+  
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  dateApproved    DateTime?
+  dateSent        DateTime?
+  dateLastResponse DateTime?
+  
+  // WhatsApp Context (for responding to user)
+  whatsappChatId  String?
+  whatsappMessageId String?
+  
+  // Audit
+  createdByUser   String?   // User ID
+  approvedByUser  String?
+  
+  // Relations
+  replies         EmailReply[]
+  auditTrail      EmailAuditLog[]
+
+  @@index([status])
+  @@index([airlineId])
+  @@index([pnr])
+  @@index([dateSent])
+  @@index([whatsappChatId])
+  @@map("email_cases")
+}
+
+// Airline responses/replies to sent emails
+model EmailReply {
+  id              String    @id @default(cuid())
+  emailCase       EmailCase @relation(fields: [emailCaseId], references: [id], onDelete: Cascade)
+  emailCaseId     String
+  
+  fromEmail       String    // Airline sender email
+  subject         String
+  body            String
+  replyDate       DateTime
+  statusUpdate    String?   // "REFUND_APPROVED", "MORE_INFO_NEEDED", etc.
+  
+  createdAt       DateTime  @default(now())
+  
+  @@index([emailCaseId])
+  @@map("email_replies")
+}
+
+// Audit trail for all email actions
+model EmailAuditLog {
+  id              String    @id @default(cuid())
+  emailCase       EmailCase @relation(fields: [emailCaseId], references: [id], onDelete: Cascade)
+  emailCaseId     String
+  
+  action          String    // "DRAFT_CREATED", "APPROVED", "SENT", "REPLY_RECEIVED", "EDITED"
+  details         String?   // JSON with additional details
+  userId          String?   // User ID who performed action
+  timestamp       DateTime  @default(now())
+  
+  @@index([emailCaseId])
+  @@index([timestamp])
+  @@map("email_audit_logs")
+}
+
+// Daily email reports
+model EmailDailyReport {
+  id              String    @id @default(cuid())
+  reportDate      DateTime  // Date of report
+  reportType      String    // "SUMMARY" (6 PM) or "EOD" (11 PM)
+  
+  emailsSent      Int
+  repliesReceived Int
+  pendingCases    Int
+  approvedRefunds Int
+  completedVoids  Int
+  completedReschedules Int
+  needsMoreInfo   Int
+  
+  casesSummary    String    // JSON array of case summaries
+  
+  createdAt       DateTime  @default(now())
+  
+  @@index([reportDate])
+  @@map("email_daily_reports")
+}

@@ -10,6 +10,16 @@
       "env": {
         "NEXT_DIST_DIR": ".next-session2"
       }
+    },
+    {
+      "name": "scratch-video-viewer",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m", "http.server", "8932",
+        "--directory", "C:/Users/USER/AppData/Local/Temp/claude/C--Users-USER-Desktop-TDIS/1c5a834a-3a03-41bc-a2cc-cd916b5abc45/scratchpad",
+        "--bind", "127.0.0.1"
+      ],
+      "port": 8932
     }
   ]
 }

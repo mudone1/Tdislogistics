@@ -14,6 +14,15 @@ interface TagRequestBody {
   airlineOverride?: AirlineKey;
 }
 
+export function resolveAirlineForTag(
+  extraction: PaymentReceiptParseResult,
+  airlineOverride?: AirlineKey,
+  isPaystack: boolean = isPaystackReceipt(extraction.narration, extraction.beneficiary, extraction.bankChannel)
+): AirlineKey | null {
+  if (isPaystack) return null;
+  return airlineOverride ?? matchAirlineFromReceipt(extraction.narration, extraction.beneficiary);
+}
+
 // Stateless by design — whatsapp-service holds the pending-payment cache
 // (chatId + message ID -> extracted fields, in memory) and sends the whole
 // extraction back here on every tag/airline-selection reply. This route
@@ -48,10 +57,11 @@ export async function POST(req: Request) {
   // Paystack payments never self-identify the destination airline (the
   // beneficiary is always Paystack itself) — so a Paystack receipt always
   // needs the airline asked about, regardless of what the narration says.
-  // A direct airline payment tries to match first, and only falls back to
-  // asking when the narration/beneficiary genuinely doesn't say.
+  // The user's inline airline tag (for example "Arik credited") is a hint
+  // for a direct airline payment, but it must not short-circuit the extra
+  // follow-up we need for Paystack receipts.
   const isPaystack = isPaystackReceipt(extraction.narration, extraction.beneficiary, extraction.bankChannel);
-  const airline = body.airlineOverride ?? (isPaystack ? null : matchAirlineFromReceipt(extraction.narration, extraction.beneficiary));
+  const airline = resolveAirlineForTag(extraction, body.airlineOverride, isPaystack);
 
   if (!airline) {
     return NextResponse.json({

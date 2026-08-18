@@ -160,7 +160,7 @@ export async function connectWhatsApp(): Promise<void> {
       const depositDecision = isPaymentTagReply(text);
       if (depositDecision) {
         const quotedMessageId = m.message.extendedTextMessage?.contextInfo?.stanzaId ?? null;
-        await handlePaymentTagReply(chatId, quotedMessageId, depositDecision, (replyText) => sender.sendText(chatId, replyText)).catch(
+        await handlePaymentTagReply(chatId, quotedMessageId, depositDecision, text, (replyText) => sender.sendText(chatId, replyText)).catch(
           (err) => console.error(`[whatsapp] deposit tag reply failed for chat ${chatId}:`, err)
         );
         continue;
