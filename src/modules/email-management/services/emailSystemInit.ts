@@ -9,7 +9,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { AIRLINE_EMAIL_CONFIG } from "../config/airlineEmailConfig";
-import { EMAIL_TEMPLATES } from "./config/emailTemplates";
+import { EMAIL_TEMPLATES } from "../config/emailTemplates";
 
 export async function initializeEmailManagementSystem(): Promise<{
   success: boolean;
