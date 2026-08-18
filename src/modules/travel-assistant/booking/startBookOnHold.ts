@@ -85,7 +85,8 @@ export async function startBookOnHold(input: StartBookOnHoldInput): Promise<Star
   try {
     const { ok, status, body } = await connectorServiceClient.bookHold(job.id);
     if (!ok) {
-      const reason = (body as { error?: string })?.error || `connector-service returned ${status}`;
+      const bodyText = body && typeof body === "object" ? JSON.stringify(body) : String(body || "");
+      const reason = (body as { error?: string })?.error || `connector-service returned ${status}${bodyText ? `: ${bodyText}` : ""}`;
       await BookingJobRepository.markFailed(job.id, "UNKNOWN", reason, 0);
       return { jobId: job.id, status: "FAILED", error: reason };
     }
