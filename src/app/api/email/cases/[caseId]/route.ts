@@ -71,7 +71,7 @@ export async function GET(
       approvedByUser: emailCase.approvedByUser || undefined,
       
       // Include replies if available
-      replies: emailCase.emailReplies?.map((reply: any) => ({
+      replies: emailCase.replies?.map((reply: any) => ({
         id: reply.id,
         fromEmail: reply.fromEmail,
         subject: reply.subject,
@@ -81,7 +81,7 @@ export async function GET(
       })),
 
       // Include audit trail if available
-      auditTrail: emailCase.auditLogs?.map((log: any) => ({
+      auditTrail: emailCase.auditTrail?.map((log: any) => ({
         id: log.id,
         action: log.action,
         userId: log.userId,
