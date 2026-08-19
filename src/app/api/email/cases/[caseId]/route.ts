@@ -54,7 +54,7 @@ export async function GET(
       requestType: emailCase.requestType,
       route: emailCase.route || undefined,
       newTravelDate: emailCase.newTravelDate?.toISOString() || undefined,
-      departureTime: emailCase.departureTime?.toISOString() || undefined,
+      departureTime: emailCase.departureTime || undefined,
       subject: emailCase.subject,
       emailBody: emailCase.emailBody,
       toRecipient: emailCase.toRecipient,
