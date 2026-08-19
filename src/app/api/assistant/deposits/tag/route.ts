@@ -3,6 +3,7 @@ import type { AirlineKey } from "@prisma/client";
 import { AirlineDepositRepository } from "@/modules/travel-assistant/storage/AirlineDepositRepository";
 import { matchAirlineFromReceipt, isPaystackReceipt, DEPOSIT_AIRLINE_MENU } from "@/modules/travel-assistant/deposits/depositAirlineAliases";
 import type { PaymentReceiptParseResult } from "@/modules/travel-assistant/deposits/PaymentReceiptParser";
+import { resolveAirlineForTag } from "@/modules/travel-assistant/deposits/resolveAirlineForTag";
 
 export const runtime = "nodejs";
 
@@ -12,15 +13,6 @@ interface TagRequestBody {
   decision: "CREDITED" | "NOT_CREDITED";
   extraction: PaymentReceiptParseResult;
   airlineOverride?: AirlineKey;
-}
-
-export function resolveAirlineForTag(
-  extraction: PaymentReceiptParseResult,
-  airlineOverride?: AirlineKey,
-  isPaystack: boolean = isPaystackReceipt(extraction.narration, extraction.beneficiary, extraction.bankChannel)
-): AirlineKey | null {
-  if (isPaystack) return null;
-  return airlineOverride ?? matchAirlineFromReceipt(extraction.narration, extraction.beneficiary);
 }
 
 // Stateless by design — whatsapp-service holds the pending-payment cache
