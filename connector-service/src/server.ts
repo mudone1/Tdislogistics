@@ -11,6 +11,7 @@ import { searchUnitedNigeriaFlights } from "../../src/modules/travel-assistant/s
 import { searchXeJetFlights } from "../../src/modules/travel-assistant/search/xejet/XeJetSearch";
 import { searchRanoAirFlights } from "../../src/modules/travel-assistant/search/rano/RanoAirSearch";
 import { searchValueJetFlights } from "../../src/modules/travel-assistant/search/valuejet/ValueJetSearch";
+import { searchTravelportForAssistant } from "./travelport/travelportAdapter";
 import { bookEnuguAirOnHold } from "../../src/modules/travel-assistant/booking/enugu/EnuguBookOnHold";
 import { bookUnitedNigeriaOnHold } from "../../src/modules/travel-assistant/booking/united/UnitedBookOnHold";
 import { bookRanoAirOnHold } from "../../src/modules/travel-assistant/booking/rano/RanoBookOnHold";
@@ -33,6 +34,7 @@ const TRAVEL_ASSISTANT_SEARCHERS: Record<string, (query: FlightSearchQuery) => P
   XEJET: searchXeJetFlights,
   RANO: searchRanoAirFlights,
   VALUEJET: searchValueJetFlights,
+  TRAVELPORT: searchTravelportForAssistant,
 };
 
 // Short-lived, in-memory, single-process cache — fine for this workload
