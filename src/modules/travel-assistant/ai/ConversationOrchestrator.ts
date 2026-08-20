@@ -147,17 +147,45 @@ function matchUnsupportedSearchAirline(rawMessage: string): string | null {
 // If the user named a specific airline, narrow to just that one instead of
 // querying every implemented carrier. Unrecognized names fall back to
 // searching every carrier rather than silently dropping the request.
+// Nigerian domestic airport codes the existing 5 connectors actually fly —
+// used only to decide whether Travelport (GDS, international content)
+// should be added to an unnamed-airline search. Deliberately NOT
+// exhaustive of every Nigerian airport in existence; false positives here
+// just mean Travelport gets skipped for an obscure domestic route (no
+// harm — the 5 domestic connectors still run), and false negatives just
+// mean Travelport runs an extra, harmless ~2-3s search that returns
+// nothing for a route it doesn't cover. Low-stakes either way.
+const NIGERIAN_DOMESTIC_AIRPORT_CODES = new Set([
+  "LOS", "ABV", "PHC", "KAN", "ENU", "CBQ", "ILR", "JOS", "MIU", "QOW",
+  "SKO", "MDI", "BNI", "AKR", "YOL", "ABB", "ZAR", "KAD", "GMO", "IBA",
+]);
+
+function looksInternational(origin: string | null, destination: string | null): boolean {
+  const isDomestic = (code: string | null) =>
+    !!code && NIGERIAN_DOMESTIC_AIRPORT_CODES.has(code.toUpperCase());
+  // International if either end isn't a recognized Nigerian airport —
+  // covers both "flying out of Nigeria" and "flying into Nigeria from
+  // abroad" cases.
+  return !isDomestic(origin) || !isDomestic(destination);
+}
+
 // Round-trip and one-way both search the same full set now — searches run
 // fully concurrently (see searchAllAirlines below), so even a round-trip's
 // 8 simultaneous Playwright runs (4 airlines x 2 legs) complete in ~25-31s,
 // well under the 60s timeout that made this a real concern before.
-function airlinesToQuery(preference: string | null): readonly string[] {
-  if (!preference) return ALL_AIRLINES;
+function airlinesToQuery(
+  preference: string | null,
+  origin: string | null = null,
+  destination: string | null = null
+): readonly string[] {
+  if (!preference) {
+    return looksInternational(origin, destination) ? [...ALL_AIRLINES, "TRAVELPORT"] : ALL_AIRLINES;
+  }
   const p = preference.toLowerCase();
   for (const [name, key] of Object.entries(AIRLINE_NAME_MATCHERS)) {
     if (p.includes(name)) return [key];
   }
-  return ALL_AIRLINES;
+  return looksInternational(origin, destination) ? [...ALL_AIRLINES, "TRAVELPORT"] : ALL_AIRLINES;
 }
 
 const REFERENCE_ID_PATTERN = /^TDIS-\d{8}-\d{3}$/i;
@@ -485,7 +513,7 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     return { reply };
   }
 
-  const airlines = airlinesToQuery(slots.airline);
+  const airlines = airlinesToQuery(slots.airline, slots.origin, slots.destination);
   const searchStartedAt = Date.now();
 
   try {

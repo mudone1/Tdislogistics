@@ -16,6 +16,21 @@ export const AIRLINE_NAME_MATCHERS: Record<string, string> = {
   valuejet: "VALUEJET",
   "value jet": "VALUEJET",
   vk: "VALUEJET", // ValueJet's actual IATA code — flight numbers read "VK201" etc.
+  // International carriers — routed to Travelport (GDS), not a domestic
+  // Playwright connector. Content-access-dependent per route/carrier; see
+  // travelport/travelportSearch.ts project notes.
+  "qatar airways": "TRAVELPORT",
+  qatar: "TRAVELPORT",
+  emirates: "TRAVELPORT",
+  "turkish airlines": "TRAVELPORT",
+  turkish: "TRAVELPORT",
+  "egypt air": "TRAVELPORT",
+  egyptair: "TRAVELPORT",
+  "ethiopian airlines": "TRAVELPORT",
+  ethiopian: "TRAVELPORT",
+  "kenya airways": "TRAVELPORT",
+  "saudia": "TRAVELPORT",
+  "air india": "TRAVELPORT",
 };
 
 // Airlines the Book-on-Hold flow can actually place a hold with — kept in
@@ -37,6 +52,7 @@ export const AIRLINE_KEY_TO_DISPLAY_NAME: Record<string, string> = {
   UNITED: "United Nigeria",
   XEJET: "XeJet",
   RANO: "Rano Air",
+  TRAVELPORT: "International Flight",
 };
 
 // Resolve a named carrier to its key, or null if the user didn't name a known
