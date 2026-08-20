@@ -1,4 +1,10 @@
 import "dotenv/config";
+console.log("[startup-diagnostic] TRAVELPORT_AUTH_URL set:", !!process.env.TRAVELPORT_AUTH_URL);
+console.log("[startup-diagnostic] TRAVELPORT_USERNAME set:", !!process.env.TRAVELPORT_USERNAME);
+console.log("[startup-diagnostic] TRAVELPORT_PASSWORD set:", !!process.env.TRAVELPORT_PASSWORD);
+console.log("[startup-diagnostic] TRAVELPORT_CLIENT_ID set:", !!process.env.TRAVELPORT_CLIENT_ID);
+console.log("[startup-diagnostic] TRAVELPORT_CLIENT_SECRET set:", !!process.env.TRAVELPORT_CLIENT_SECRET);
+console.log("[startup-diagnostic] CONNECTOR_SERVICE_API_KEY set:", !!process.env.CONNECTOR_SERVICE_API_KEY);
 import express from "express";
 import { requireInternalApiKey } from "./auth";
 import { startScheduler } from "./scheduler";
