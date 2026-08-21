@@ -539,7 +539,7 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
       }
 
       if (outbound.options.length === 0 && back.options.length === 0) {
-        const reply = describeAllFailed([...outbound.failedAirlines, ...back.failedAirlines]);
+        const reply = describeAllFailed([...outbound.failedAirlines, ...back.failedAirlines], airlines);
         await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
         return { reply };
       }
@@ -578,7 +578,7 @@ export async function handleAssistantMessage(input: OrchestratorInput): Promise<
     }
 
     if (data.options.length === 0) {
-      const reply = describeAllFailed(data.failedAirlines);
+      const reply = describeAllFailed(data.failedAirlines, airlines);
       await ChatMemoryRepository.appendMessage(session.id, "ASSISTANT", reply);
       return { reply };
     }
@@ -613,9 +613,22 @@ interface FailedAirline {
   error: string;
 }
 
-function describeAllFailed(failedAirlines: FailedAirline[]): string {
+function describeAllFailed(failedAirlines: FailedAirline[], queriedAirlines: readonly string[] = []): string {
+  // Travelport (international/GDS) doesn't "fail" the way a domestic
+  // connector does when a route isn't covered — it just returns zero
+  // offers cleanly (see travelportSearch.ts). That means a genuinely
+  // successful-but-empty Travelport check never appears in failedAirlines
+  // at all, so callers naming only the failed domestic airlines would
+  // silently omit it. Surface that it was checked too, so staff don't
+  // assume international search wasn't attempted.
+  const travelportQueried = queriedAirlines.includes("TRAVELPORT");
+  const travelportFailed = failedAirlines.some((f) => f.airline === "TRAVELPORT");
+  const travelportNote =
+    travelportQueried && !travelportFailed
+      ? " I also checked international flights via Travelport but didn't find anything for that route/date."
+      : "";
   if (failedAirlines.length === 0) {
-    return "I couldn't find any flights for that search — try a different date or route?";
+    return `I couldn't find any flights for that search — try a different date or route?${travelportNote}`;
   }
 
   // "doesn't fly from/to X" is a permanent routing fact, not a transient
@@ -625,7 +638,7 @@ function describeAllFailed(failedAirlines: FailedAirline[]): string {
   const routeIssues = failedAirlines.filter((f) => /doesn'?t fly/i.test(f.error));
   if (routeIssues.length === failedAirlines.length) {
     const names = failedAirlines.map((f) => f.airline).join(", ");
-    return `${names} ${failedAirlines.length === 1 ? "doesn't" : "don't"} fly that route — want me to try a different airline or route?`;
+    return `${names} ${failedAirlines.length === 1 ? "doesn't" : "don't"} fly that route — want me to try a different airline or route?${travelportNote}`;
   }
 
   const names = failedAirlines.map((f) => f.airline).join(", ");
